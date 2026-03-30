@@ -7,7 +7,6 @@
         "noEmit": true,
         "types": []
     },
-    "include": ["./release", "point_script.d.ts"],
-    //"include": ["./src/main.js", "point_script.d.ts"],
+    "include": ["./src/main.js", "point_script.d.ts"],
     "exclude": ["node_modules"]
 }

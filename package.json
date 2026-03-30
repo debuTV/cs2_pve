@@ -3,12 +3,14 @@
   "scripts": {
     "build": "rollup --config",
     "copy": "copy \"output\\main.js\" \"D:\\SteamLibrary\\steamapps\\common\\Counter-Strike Global Offensive\\content\\csgo_addons\\minidemo\\scripts\\output\\main.js\"",
-    "release": "yarn build && yarn copy"
+    "release": "yarn build && yarn copy",
+    "typedoc": "npx typedoc --options .\\typedoc.json"
   },
   "devDependencies": {
     "@types/node": "^25.4.0",
     "rollup": "^4.52.4",
-    "typedoc": "^0.28.17",
+    "typedoc": "^0.28.18",
+    "typedoc-plugin-navigation-hooks": "^1.1.2",
     "typedoc-plugin-navigation-title": "^1.2.3"
   }
 }

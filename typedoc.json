@@ -1,0 +1,14 @@
+{
+    "$schema": "https://typedoc.org/schema.json",
+    "name": "Minidemo Scripts API",
+    "readme": "README.md",
+    "entryPointStrategy": "expand",
+    "entryPoints": ["./src"],
+    "includeVersion": true,
+    "tsconfig": "tsconfig.json",
+    "out": "../pve-docs/docs",
+    "plugin" : [ 
+        "typedoc-plugin-navigation-hooks", 
+        "typedoc-plugin-navigation-title"
+    ],
+}

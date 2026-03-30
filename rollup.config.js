@@ -1,7 +1,6 @@
 export default [
   {
     input: 'src/main.js',
-    //input: 'src/main.js',
     output: {
       dir: 'output/',
       format: 'es',
