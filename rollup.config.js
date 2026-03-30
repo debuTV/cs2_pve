@@ -1,9 +1,9 @@
 export default [
   {
-    input: 'release/main.js',
+    input: 'src/main.js',
     //input: 'src/main.js',
     output: {
-      dir: '../output/',
+      dir: 'output/',
       format: 'es',
       entryFileNames: '[name].js'
     },

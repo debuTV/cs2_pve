@@ -1,0 +1,21647 @@
+import { Instance, CSPlayerPawn, PointTemplate, BaseModelEntity, CSInputs, CSPlayerController } from 'cs_script/point_script';
+
+/**
+ * @module 游戏系统/游戏配置
+ */
+
+/**
+ * 游戏状态枚举。
+ *
+ * - `WAITING`  – 等待玩家加入。
+ * - `PREPARE`  – 准备阶段，等待所有玩家 ready。
+ * - `PLAYING`  – 游戏进行中。
+ * - `WON`      – 所有波次通关，游戏胜利。
+ * - `LOST`     – 所有玩家阵亡，游戏失败。
+ *
+ * @enum {string}
+ * @navigationTitle 游戏状态枚举
+ */
+const GameState = {
+    WAITING: 'WAITING',
+    PREPARE: 'PREPARE',
+    PLAYING: 'PLAYING',
+    WON: 'WON',
+    LOST: 'LOST'
+};
+
+/**
+ * @module 游戏系统/游戏管理器
+ */
+
+
+/**
+ * 游戏管理器，维护游戏生命周期状态机（WAITING → PREPARE → PLAYING → WON/LOST）。
+ *
+ * 不直接持有 WaveManager、PlayerManager、MonsterManager 等实例，
+ * 只负责游戏状态流转，通过回调通知上层 main.js 驱动其他模块。
+ *
+ * @navigationTitle 游戏管理器
+ */
+class GameManager {
+    /**
+     * @param {import("../util/definition").Adapter} adapter
+     */
+    constructor(adapter) {
+        /** 
+         * 当前游戏状态
+         * @type {string}
+         */
+        this.gameState = GameState.WAITING;
+
+        /**
+         * 外部适配器实例，提供日志和广播接口
+         * @type {import("../util/definition").Adapter}
+         */
+        this._adapter = adapter;
+
+        // ——— 回调钩子 ———
+        /**
+         * 游戏准备回调，由 {@link enterPreparePhase} 触发，无参数。
+         * @type {(() => void)|null}
+         */
+        this._onGamePrepare = null;
+        /**
+         * 游戏开始回调，由 {@link startGame} 触发，无参数。
+         * @type {(() => void)|null}
+         */
+        this._onGameStart = null;
+        /**
+         * 游戏胜利回调，由 {@link gameWon} 触发，无参数。
+         * @type {(() => void)|null}
+         */
+        this._onGameWin = null;
+        /**
+         * 游戏失败回调，由 {@link gameLost} 触发，无参数。
+         * @type {(() => void)|null}
+         */
+        this._onGameLost = null;
+        /**
+         * 游戏重置回调，由 {@link resetGame} 触发，无参数。
+         * @type {(() => void)|null}
+         */
+        this._onResetGame = null;
+        this.init();
+    }
+
+    /**
+     * 启用实体监听，强制切换
+     * - startGame: 启动游戏（必须先进入准备阶段），切换到 PLAYING 状态
+     * - enterPreparePhase: 进入准备阶段，广播等待消息
+     * - resetGame: 重置游戏状态
+     * - gameWon: 触发游戏胜利
+     * - gameLost: 触发游戏失败
+     */
+    init() {
+        //游戏开始
+        Instance.OnScriptInput("startGame", () => {
+            this.startGame();
+        });
+        //进入准备阶段
+        Instance.OnScriptInput("enterPreparePhase", () => {
+            this.enterPreparePhase();
+        });
+        //重置游戏
+        Instance.OnScriptInput("resetGame", () => {
+            this.resetGame();
+        });
+        //强制胜利
+        Instance.OnScriptInput("gameWon", () => {
+            this.gameWon();
+        });
+        //强制失败
+        Instance.OnScriptInput("gameLost", () => {
+            this.gameLost();
+        });
+    }
+
+    // ═══════════════════════════════════════════════
+    // 外部事件输入（由 main.js 编排器调用）
+    // ═══════════════════════════════════════════════
+
+    /**
+     * 玩家加入。
+     */
+    onPlayerJoin() {
+        if (this.gameState === GameState.WAITING) {
+            this.enterPreparePhase();
+        }
+    }
+
+    /**
+     * 玩家离开。返回是否正在游戏
+     * @param {number} slot
+     */
+    onPlayerLeave(slot) {
+        return this.checkGameState();
+    }
+
+    /**
+     * 玩家重生。
+     */
+    onPlayerRespawn() {
+        if (this.gameState === GameState.WAITING) {
+            this.enterPreparePhase();
+        }
+    }
+
+    /**
+     * 玩家死亡。返回是否正在游戏
+     */
+    onPlayerDeath() {
+        return this.checkGameState();
+    }
+
+    // ═══════════════════════════════════════════════
+    // 游戏状态流转
+    // ═══════════════════════════════════════════════
+
+    /**
+     * 进入准备阶段。广播等待消息。
+     */
+    enterPreparePhase() {
+        this.gameState = GameState.PREPARE;
+        this._adapter.broadcast("=== 准备阶段开始 ===");
+        this._onGamePrepare?.();
+    }
+
+    /**
+     * 启动游戏。仅在 PREPARE 状态下生效，切换到 PLAYING 并触发 onGameStart 回调。
+     */
+    startGame() {
+        if (this.gameState !== GameState.PREPARE) return;
+        this.gameState = GameState.PLAYING;
+        this._adapter.broadcast("=== 游戏开始 ===");
+        this._onGameStart?.();
+    }
+
+    /**
+     * 触发游戏失败。将状态切换为 LOST 并广播失败消息。
+     */
+    gameLost() {
+        this.gameState = GameState.LOST;
+        this._adapter.broadcast("=== 游戏失败 ===");
+        this._onGameLost?.();
+    }
+
+    /**
+     * 触发游戏胜利。将状态切换为 WON 并广播胜利消息。
+     */
+    gameWon() {
+        this.gameState = GameState.WON;
+        this._adapter.broadcast("=== 游戏胜利 ===");
+        this._onGameWin?.();
+    }
+
+    /**
+     * 重置游戏状态，触发 onResetGame 回调通知其他模块。
+     */
+    resetGame() {
+        this.gameState = GameState.WAITING;
+        this._adapter.broadcast("重置游戏...");
+        this._onResetGame?.();
+    }
+    /**
+     * 检查游戏状态。是否正在游戏
+     */
+    checkGameState() {
+        return this.gameState == GameState.PLAYING;
+    }
+
+    // ═══════════════════════════════════════════════
+    // 回调设置
+    // ═══════════════════════════════════════════════
+
+    /** 设置游戏开始回调。 @param {() => void} callback */
+    setOnGameStart(callback) { this._onGameStart = callback; }
+    /** 设置游戏胜利回调。 @param {() => void} callback */
+    setOnGameWin(callback) { this._onGameWin = callback; }
+    /** 设置游戏失败回调。 @param {() => void} callback */
+    setOnGameLost(callback) { this._onGameLost = callback; }
+    /** 设置游戏准备回调。 @param {() => void} callback */
+    setOnGamePrepare(callback) { this._onGamePrepare = callback; }
+    /** 设置游戏重置回调。 @param {() => void} callback */
+    setOnResetGame(callback) { this._onResetGame = callback; }
+}
+
+/**
+ * @module 怪物系统/脚本全局配置
+ */
+
+//===================游戏参数========================
+/**
+ * 游戏模式开关。
+ * - `true`：线性游戏——`!r` 准备后第一波结束自动开启第二波，直到最后。
+ * - `false`：观赏模式（ZE 模式）——无准备选项，关闭脚本玩家管理器，由外部 `OnScriptInput` 触发 / 结束指定波次，波次结束后不会自动触发下一波。
+ */
+//export const linearGame=true;
+/** 怪物选取目标的阵营范围。`2` = T，`3` = CT，`5` = T + CT。 */
+const targetTeam=5;
+/** 观赏模式下，玩家是否受到怪物基础伤害（直接造成原始伤害，不进行修改）。 */
+//export const playerDamage=true;
+/** 是否在新回合开始或结束时重置脚本。观赏模式（ZE 模式）推荐开启。 */
+//export const clearbyRound=true;
+/** 怪物生成点到最近玩家的距离阈值，大于此值则关闭该生成点。`-1` 表示不检测。 */
+const spawnPointsDistance=-1;
+/** 怪物死亡后是否留下尸体。开启后尸体将永远不会被脚本删除。 */
+const monstercorpse=true;
+//==================怪物移动相关设置================
+/** 世界重力加速度（单位/秒²）。 */
+const gravity$1=800;
+/** 地面摩擦力系数，影响怪物减速效果。 */
+//export const friction=6;
+/** 怪物可攀爬的最大台阶高度（单位），建议与 NavMesh 设置保持一致。 */
+//export const stepHeight=13;
+/** 路径节点切换距离——怪物距下一个导航点小于此值时切换到再下一个点。 */
+//export const goalTolerance=8;
+/** 到达最后一个导航点后的停止距离——距目标小于此值后怪物不再前进。 */
+//export const arriveDistance=1;
+/** 移动判定阈值——单帧位移小于此值时视为怪物未移动。 */
+//export const moveEpsilon=0.5;
+/** 卡死判定时间（秒）——连续无移动超过此时长视为怪物卡死。 */
+//export const timeThreshold=2;
+
+/** 怪物移动碰撞盒最小角（负半尺寸）。盒子过大容易过不去门，过小则怪物看起来会穿墙。 */
+//export const Tracemins={x:-4,y:-4,z:1};
+/** 怪物移动碰撞盒最大角（正半尺寸）。 */
+//export const Tracemaxs={x:4,y:4,z:4};
+/** 地面检测射线向下延伸的距离（单位）。 */
+//export const groundCheckDist=8;
+/** 每次移动后与碰撞面保持的安全距离（单位）。 */
+//export const surfaceEpsilon=4;
+
+/**
+ * 怪物配置
+ * @type {{ [key: string]: import("../util/definition").monsterTypes }} 
+ */
+const monster={
+    "Zombie":{            
+            template_name:"headcrab_classic_template",
+            model_name:"headcrab_classic_model",//模型本体，animations播放的是这个模型的动画
+            name: "Zombie",
+            baseHealth: 100,
+            baseDamage: 10,
+            speed: 150,
+            reward: 100,
+            attackdist:80,
+            attackCooldown:0.1,
+            movementmode:"walk",
+            skill_pool:[
+                //// 示例：同类型技能重复（分别叠加不同属性）
+                //{
+                //    id:"corestats",
+                //    chance: 1,
+                //    params:{ health_value:200 }          // 实例 id=0
+                //},
+                //{
+                //    id:"corestats",
+                //    chance: 1,
+                //    params:{ speed_mult:1.5 }            // 实例 id=1，两个 corestats 独立生效
+                //},
+                //// 示例：单个技能绑定多个触发事件
+                //{
+                //    id:"spawn",
+                //    chance: 1,
+                //    params:{ events:["OnSpawn","OnTakeDamage"], count:1, typeName:"Zombie", maxSummons:3 }
+                //},
+                //// 示例：有动画的 pounce
+                //{
+                //    id:"pounce",
+                //    chance: 1,
+                //    params:{ cooldown:5, distance:250, animation:"pounce" }
+                //},
+                //// 示例：无动画的 pounce（在 canTrigger 内直接执行）
+                //{
+                //    id:"pounce",
+                //    chance: 1,
+                //    params:{ cooldown:10, distance:400 }  // 无 animation → 无动画直触发
+                //},
+                //// 示例：护盾
+                //{
+                //    id: "shield",
+                //    chance: 1,
+                //    params: { cooldown:15, runtime:-1, value:50 }
+                //},
+                //// 示例：急速（5秒内速度×1.8，冷却10秒，可选发光）
+                //{
+                //    id: "speedboost",
+                //    chance: 1,
+                //    params: { cooldown:10, runtime:5, speed_mult:1.8, glow:{r:255,g:128,b:0} }
+                //},
+                //// 示例：投掷石头（trigger 待实现）
+                //{
+                //    id: "throwstone",
+                //    chance: 1,
+                //    params: { cooldown:6, distanceMin:100, distanceMax:500, damage:15, projectileSpeed:600 }
+                //},
+                //// 示例：持续激光（trigger 待实现，2秒持续，每0.25秒结算一次）
+                //{
+                //    id: "laserbeam",
+                //    chance: 1,
+                //    params: { cooldown:8, distance:400, duration:2, damagePerSecond:30, tickInterval:0.25 }
+                //},
+                //// 示例：死亡时产卵
+                //{
+                //    id: "spawn",
+                //    chance: 1,
+                //    params: { count:1, typeName:"Zombie", maxSummons:3, radiusMin:24, radiusMax:96, tries:6 }
+                //}
+            ],
+            animations:{
+                "idle":[
+                    "headcrab_classic_idle",
+                    "headcrab_classic_idle_b",
+                    "headcrab_classic_idle_c"
+                ],
+                "walk":[
+                    "headcrab_classic_walk",
+                    "headcrab_classic_run"
+                ],
+                "attack":[
+                    "headcrab_classic_attack_antic_02",
+                    "headcrab_classic_attack_antic_03",
+                    "headcrab_classic_attack_antic_04"
+                ],
+                "skill":[
+                    "headcrab_classic_attack_antic_02",
+                    "headcrab_classic_attack_antic_03",
+                    "headcrab_classic_attack_antic_04"
+                ],
+                "pounce":[
+                    "headcrab_classic_jumpattack"
+                ]
+            }
+        }
+};
+
+/**
+ * @module 波次系统/波次配置
+ */
+
+
+/**
+ * 波次状态枚举。
+ *
+ * - `IDLE`  – 等待波次开始。
+ * - `PREPARING`  – 波次准备阶段。
+ * - `ACTIVE`  – 波次进行中。
+ * - `COMPLETED` – 当前波次通关。
+ *
+
+ * @enum {string}
+ * @navigationTitle 波次状态枚举
+ */
+const WaveState = {
+    IDLE: 'IDLE',
+    PREPARING: 'PREPARING',
+    ACTIVE: 'ACTIVE',
+    COMPLETED: 'COMPLETED'
+};
+
+/**
+ * 内置的默认波次配置列表，包含三波递增难度的演示数据。
+ * 实际使用时由 main.js 传入真实配置。
+ * @type {import("../util/definition").waveConfig[]}
+ * @navigationTitle 默认波次配置
+ */
+const wavesConfig=[
+        { 
+            name: "训练波", 
+            totalMonsters: 1000, 
+            reward: 500, 
+            spawnInterval: 0.1, 
+            preparationTime: 0, //波次开始到第一个怪物出现时间，这段时间可以用来发消息
+            aliveMonster:150, //同时存在的怪物数量
+            monster_spawn_points_name:["monster_spawnpoint"],//这一波生成点
+            monster_breakablemins:{x:-30,y:-30,z:0},//最大怪物的breakable的mins
+            monster_breakablemaxs:{x:30,y:30,z:75},//最大怪物的breakable的maxs
+            broadcastmessage:[{message:"",delay:1}],
+            monsterTypes:[
+                monster["Zombie"]
+            ]
+        },
+    ];
+
+/**
+ * @module 波次系统/波次管理器
+ */
+
+
+/**
+ * 独立版波次管理器，维护波次推进状态机（IDLE → PREPARING → ACTIVE → COMPLETED）。
+ *
+ * 支持预热阶段定时广播、波次开始/完成回调、逐波推进和重置。
+ *
+ * @navigationTitle 波次管理器
+ */
+class WaveManager {
+    /**
+     * @param {import("../util/definition").Adapter} adapter - 外部适配器（日志/广播/时钟）
+     */
+    constructor(adapter) {
+        /** 
+         * 当前波次号，从 1 开始计数，0 表示未开始任何波次
+         * @type {number} 
+         */
+        this.currentWave = 0;
+        /** 
+         * 当前波次状态
+         * @type {WaveState} 
+         */
+        this.waveState = WaveState.IDLE;
+        /** 
+         * 波次配置列表
+         * @type {import("../util/definition").waveConfig[]} 
+         */
+        this.waves = wavesConfig;
+        /**
+         * 外部适配器实例，提供日志、广播和游戏时间接口
+         * @type {import("../util/definition").Adapter} 
+         */
+        this._adapter = adapter;
+
+        // ——— 回调钩子 ———
+        /** 
+         * 波次开始回调，由 {@link startWave} 触发，参数为当前波次号和配置。
+         * @type {((waveNumber: number, waveConfig: import("../util/definition").waveConfig) => void) | null} 
+         */
+        this.onWaveStart = null;
+        /**
+         *  波次完成回调，由 {@link completeWave} 触发，参数为当前波次号和配置。
+         *  @type {((waveNumber: number) => void) | null} 
+         */
+        this.onWaveComplete = null;
+
+        // ——— 预热阶段内部状态 ———
+        /**
+         * 预热阶段上下文。
+         * @type {{ startTime: number, duration: number, broadcastIndex: number, messages: { message: string, delay: number }[] }}
+         */
+        this._prepareContext = this._createPrepareContext();
+        this.init();
+    }
+    /**
+     * 启用实体监听
+     * - endWave: 强制结束当前波次
+     * - startWave: 开始指定波次，参数格式 "startWave_1"
+     */
+    init() {
+        //强制结束当前波次
+        Instance.OnScriptInput("endWave", () => {
+            this.completeWave();
+        });
+        //开启波次
+        Instance.OnScriptInput("startWave", (e) => {
+            if (!e.caller) return;
+            const parts = e.caller.GetEntityName().split('_');
+            //脚本输入 startWave 的 parseInt 可能返回 NaN，需要验证
+            const waveNumber = parseInt(parts[parts.length - 1], 10);
+            if (!isNaN(waveNumber)) {
+                this.startWave(waveNumber);
+            }
+        });
+    }
+
+    /**
+     * 创建预热阶段上下文。
+     * @returns {{ startTime: number, duration: number, broadcastIndex: number, messages: { message: string, delay: number }[] }}
+     */
+    _createPrepareContext() {
+        return {
+            startTime: -1,
+            duration: 0,
+            broadcastIndex: 0,
+            messages: []
+        };
+    }
+
+    /**
+     * 重置预热阶段临时状态。
+     */
+    _resetPrepareState() {
+        this._prepareContext = this._createPrepareContext();
+    }
+
+    /**
+     * 进入预热阶段。
+     * @param {number} waveNumber
+     * @param {import("../util/definition").waveConfig} wave
+     */
+    _enterPreparingState(waveNumber, wave) {
+        this.currentWave = waveNumber;
+        this.waveState = WaveState.PREPARING;
+        this._prepareContext = {
+            startTime: this._adapter.getGameTime(),
+            duration: wave.preparationTime,
+            broadcastIndex: 0,
+            messages: wave.broadcastmessage
+        };
+    }
+
+    /**
+     * 结束预热并进入激活阶段。
+     * @param {import("../util/definition").waveConfig} wave
+     */
+    _activateCurrentWave(wave) {
+        this.waveState = WaveState.ACTIVE;
+        this._resetPrepareState();
+        this._adapter.log(`=== 第 ${this.currentWave} 波开始 ===`);
+        this.onWaveStart?.(this.currentWave, wave);
+    }
+
+    // ═══════════════════════════════════════════════
+    // 波次操作
+    // ═══════════════════════════════════════════════
+
+    /**
+     * 开始指定波次。
+     * - 若当前波次正在进行中（ACTIVE 或 PREPARING），则拒绝开始新波次。
+     * - 参数 waveNumber 从 1 开始计数，必须在配置范围内。
+     * @param {number} waveNumber 
+     * @returns {boolean}
+     */
+    startWave(waveNumber) {
+        if (this.waveState === WaveState.ACTIVE || this.waveState === WaveState.PREPARING) {
+            this._adapter.log(`无法开始波次 ${waveNumber}，当前波次进行中 (state=${this.waveState})`);
+            return false;
+        }
+
+        if (waveNumber < 1 || waveNumber > this.waves.length) {
+            this._adapter.log(`波次 ${waveNumber} 超出范围 (1-${this.waves.length})`);
+            return false;
+        }
+
+        const wave = this.getWaveConfig(waveNumber);
+
+        // 广播波次信息
+        const message =
+            `=== 第 ${waveNumber} 波: ${wave.name ?? "?"} ===\n` +
+            `怪物总数: ${wave.totalMonsters ?? "?"}\n` +
+            `奖励: $${wave.reward ?? "?"}\n` +
+            `准备时间: ${wave.preparationTime} 秒`;
+        this._adapter.broadcast(message);
+
+        // 进入预热阶段
+        this._enterPreparingState(waveNumber, wave);
+
+        return true;
+    }
+
+    /**
+     * 波次完成（由外部或调试命令调用）。
+     * @returns {boolean}
+     */
+    completeWave() {
+        if (this.waveState !== WaveState.ACTIVE) return false;
+
+        this.waveState = WaveState.COMPLETED;
+        this._resetPrepareState();
+        const wave = this.getWaveConfig(this.currentWave);
+
+        let message =
+            `=== 第 ${this.currentWave} 波完成 ===\n` +
+            `奖励: $${wave?.reward ?? "?"}`;
+        if (!this.hasNextWave()) {
+            message += "\n=== 所有波次完成 ===";
+        }
+        this._adapter.broadcast(message);
+
+        this.onWaveComplete?.(this.currentWave);
+        return true;
+    }
+
+    /**
+     * 开始下一波。
+     * @returns {boolean}
+     */
+    nextWave() {
+        if (!this.hasNextWave()) {
+            this._adapter.log("所有波次已完成！");
+            return false;
+        }
+        return this.startWave(this.currentWave + 1);
+    }
+
+    /**
+     * 重置波次状态。重启游戏或重新进入地图时调用，回到初始状态（currentWave=0, state=IDLE）。
+     */
+    resetGame() {
+        this.currentWave = 0;
+        this.waveState = WaveState.IDLE;
+        this._resetPrepareState();
+        this._adapter.log("波次已重置");
+    }
+
+    // ═══════════════════════════════════════════════
+    // 查询
+    // ═══════════════════════════════════════════════
+
+    /**
+     * 获取指定波次的配置对象。
+     * @param {number} waveNumber
+     * @returns {import("../util/definition").waveConfig}
+     */
+    getWaveConfig(waveNumber) {
+        return this.waves[waveNumber - 1];
+    }
+    /**
+     * 判断是否还有后续波次。
+     * @returns {boolean}
+     */
+    hasNextWave() {
+        return this.currentWave < this.waves.length;
+    }
+
+    /**
+     * 获取配置的波次总数。
+     * @returns {number}
+     */
+    getTotalWaves() {
+        return this.waves.length;
+    }
+
+    /**
+     * 获取当前波次进度快照，包含当前波次号、总波次数、状态和波次配置。
+     * @returns {{ current: number, total: number, state: string, wave: import("../util/definition").waveConfig|undefined }}
+     */
+    getProgress() {
+        return {
+            current: this.currentWave,
+            total: this.waves.length,
+            state: this.waveState,
+            wave: this.getWaveConfig(this.currentWave)
+        };
+    }
+
+    // ═══════════════════════════════════════════════
+    // Tick（由外部驱动）
+    // ═══════════════════════════════════════════════
+
+    /**
+     * 每帧由外部驱动调用，处理预热阶段的广播消息播放和倒计时推进。
+     * 预热结束后自动切换至 ACTIVE 状态并触发 {@link onWaveStart} 回调。
+     */
+    tick() {
+        if (this.waveState !== WaveState.PREPARING) return;
+
+        const elapsed = this._adapter.getGameTime() - this._prepareContext.startTime;
+        const wave = this.getWaveConfig(this.currentWave);
+        const messages = this._prepareContext.messages;
+        if (!wave) return;
+        
+        // 播放预热阶段的广播消息
+        while (
+            this._prepareContext.broadcastIndex < messages.length &&
+            elapsed >= messages[this._prepareContext.broadcastIndex].delay
+        ) {
+            this._adapter.broadcast(messages[this._prepareContext.broadcastIndex].message);
+            this._prepareContext.broadcastIndex++;
+        }
+
+        // 预热结束 → 进入 ACTIVE
+        if (elapsed >= this._prepareContext.duration) {
+            this._activateCurrentWave(wave);
+        }
+    }
+    // ═══════════════════════════════════════════════
+    // 回调设置
+    // ═══════════════════════════════════════════════
+
+    /**
+     * 绑定波次开始回调，当波次从 PREPARING 进入 ACTIVE 时触发。
+     * @param {(waveNumber: number, waveConfig: import("../util/definition").waveConfig) => void} callback
+     */
+    setOnWaveStart(callback) {this.onWaveStart = callback;}
+    /**
+     * 绑定波次完成回调，当 {@link completeWave} 被外部调用时触发。
+     * @param {(waveNumber: number) => void} callback
+     */
+    setOnWaveComplete(callback) {this.onWaveComplete = callback;}
+}
+
+/**
+ * @module 玩家系统/玩家/组件/实体桥接
+ */
+
+/**
+ * Player 脚本层与 Source 2 引擎实体之间的桥接组件。
+ *
+ * Source 2 中每个真人玩家对应两个引擎实体：
+ * - **CSPlayerController** — 持久存在于整个连接期间，不随死亡销毁。
+ * - **CSPlayerPawn** — 可操控的物理身体，死亡/换队/重生时可能被销毁重建。
+ *
+ * 本组件负责：
+ * 1. 绑定 Controller（首次连接）和 Pawn（每次激活/重生）。
+ * 2. Pawn 切换时自动清理旧引用并建立新连接。
+ * 3. 提供便捷方法同步血量/护甲、发放装备、Join Team、判定 Pawn 有效性。
+ *
+ * @navigationTitle 玩家实体桥接
+ */
+class PlayerEntityBridge {
+    /**
+     * @param {import("../player.js").Player} player 所属玩家实例
+     */
+    constructor(player) {
+        this.player = player;
+        /** @type {CSPlayerController | null} */
+        this.controller = null;
+        /** @type {CSPlayerPawn | null} */
+        this.pawn = null;
+    }
+
+    /**
+     * 绑定 controller（首次连接时）
+     * @param {CSPlayerController} controller
+     */
+    bindController(controller) {
+        this.controller = controller;
+    }
+
+    /**
+     * 绑定 pawn（激活/重生时）
+     * @param {CSPlayerPawn} pawn
+     */
+    bindPawn(pawn) {
+        // 清理旧 pawn（如果有）
+        if (this.pawn && this.pawn !== pawn) {
+            this._cleanupPawn();
+        }
+        this.pawn = pawn;
+    }
+
+    /**
+     * 重绑 pawn（OnPlayerReset 时调用）
+     * 会先清理旧 pawn，再绑定新 pawn
+     * @param {CSPlayerPawn} newPawn
+     */
+    rebindPawn(newPawn) {
+        this.bindPawn(newPawn);
+    }
+
+    /**
+     * 断开连接时清理
+     */
+    disconnect() {
+        this._cleanupPawn();
+        this.controller = null;
+        this.pawn = null;
+    }
+
+    // ——— 实体操作便捷方法 ———
+
+    /** Pawn 是否有效。 @returns {boolean} */
+    isPawnValid() {
+        return !!this.pawn && this.pawn.IsValid();
+    }
+
+    /** Controller 是否有效。 @returns {boolean} */
+    isControllerValid() {
+        return !!this.controller && this.controller.IsValid();
+    }
+
+    /** 获取玩家名称。 @returns {string} */
+    getPlayerName() {
+        return this.controller?.GetPlayerName() ?? "Unknown";
+    }
+
+    /** 获取玩家槽位。 @returns {number} */
+    getSlot() {
+        return this.controller?.GetPlayerSlot() ?? -1;
+    }
+
+    /**
+     * 同步生命值到引擎实体
+     * @param {number} health
+     */
+    syncHealth(health) {
+        if (this.pawn && this.pawn.IsValid()) {
+            this.pawn.SetHealth(health);
+        }
+    }
+
+    /**
+     * 同步最大生命值
+     * @param {number} maxHealth
+     */
+    syncMaxHealth(maxHealth) {
+        if (this.pawn && this.pawn.IsValid()) {
+            this.pawn.SetMaxHealth(maxHealth);
+        }
+    }
+
+    /**
+     * 同步护甲到引擎实体
+     * @param {number} armor
+     */
+    syncArmor(armor) {
+        if (this.pawn && this.pawn.IsValid()) {
+            this.pawn.SetArmor(armor);
+        }
+    }
+
+    /**
+     * 从引擎实体读取当前生命值
+     * @returns {number}
+     */
+    readHealth() {
+        return (this.pawn && this.pawn.IsValid()) ? this.pawn.GetHealth() : 0;
+    }
+
+    /**
+     * 从引擎实体读取护甲
+     * @returns {number}
+     */
+    readArmor() {
+        return (this.pawn && this.pawn.IsValid()) ? this.pawn.GetArmor() : 0;
+    }
+
+    /**
+     * 切换队伍
+     * @param {number} team
+     */
+    joinTeam(team) {
+        if (this.controller && this.controller.IsValid()) {
+            this.controller.JoinTeam(team);
+        }
+    }
+
+    /**
+     * 给予物品。
+     * @param {string} itemName 物品名称
+     * @param {boolean} [forceCreate] 是否强制创建
+     */
+    giveItem(itemName, forceCreate = true) {
+        if (this.pawn && this.pawn.IsValid()) {
+            this.pawn.GiveNamedItem(itemName, forceCreate);
+        }
+    }
+
+    /** 清除所有武器 */
+    destroyWeapons() {
+        if (this.pawn && this.pawn.IsValid()) {
+            this.pawn.DestroyWeapons();
+        }
+    }
+
+    /** @returns {boolean} pawn 是否存活 */
+    isPawnAlive() {
+        return !!(this.pawn && this.pawn.IsValid() && this.pawn.IsAlive());
+    }
+
+    // ——— 内部 ———
+
+    /**
+     * 清理旧 Pawn 引用。
+     */
+    _cleanupPawn() {
+        // 旧 pawn 的 output 监听在 CS2 脚本 API 中无法手动解绑，
+        // 但通过替换 pawn 引用可以防止旧回调继续影响逻辑。
+        this.pawn = null;
+    }
+}
+
+/**
+ * @module 玩家系统/玩家常量配置
+ */
+/**
+ * 玩家等级成长配置。
+ *
+ * 采用"公式默认值 + 等级数组覆盖"的双层结构：
+ * - 公式参数可自动生成所有等级的默认配置。
+ * - 显式等级数组优先级更高，可覆盖公式生成的值。
+ * - 未显式给出的等级由公式自动补全。
+ *
+ * 经验语义：每升一级扣除当前等级所需经验，剩余经验继续向下一等级积累。
+ * 倍率语义：基础值 × 全局倍率，非逐级连乘。
+ */
+/**
+ * 升级回血策略枚举。
+ * @enum {string}
+ */
+const LevelUpHealPolicy = {
+    PRESERVE_RATIO: "preserve_ratio",
+    FULL: "full",
+};
+/**
+ * 玩家状态枚举。
+ *
+ * 定义了玩家在整个游戏生命周期中可能处于的所有状态。
+ * Player 的 `applyStateTransition()` 方法会根据这些值驱动状态机，
+ * 同时通知 Buff 系统和事件总线。
+ *
+ * 状态流转典型路径：
+ * `DISCONNECTED → CONNECTED → PREPARING → READY → ALIVE → DEAD → RESPAWNING → ALIVE`
+ *
+ * - `DISCONNECTED` (0)：玩家不在线，Player 实例即将或已被清理。
+ * - `CONNECTED` (1)：玩家已连接但尚未进入游戏（Controller 已绑定，Pawn 未就绪）。
+ * - `PREPARING` (2)：等待玩家点击准备。
+ * - `READY` (3)：玩家已准备，等待所有人就绪后开波。
+ * - `ALIVE` (4)：正常游戏中，可接收伤害和操作。
+ * - `DEAD` (5)：已死亡，等待重生或回合结束。
+ * - `RESPAWNING` (6)：正在执行重生流程。
+ * - `SHOPPING` (7)：打开商店界面（预留，当前未完全实现）。
+ *
+ * @navigationTitle 玩家状态枚举
+ */
+const PlayerState = {
+    /** 离线状态 */
+    DISCONNECTED: 0,
+    /** 在线并已连接 */
+    CONNECTED:    1,
+    /** 等待准备 */
+    PREPARING:    2,
+    /** 已准备就绪 */
+    READY:        3,
+    /** 游戏中存活 */
+    ALIVE:        4,
+    /** 已死亡 */
+    DEAD:         5,
+    /** 重生中 */
+    RESPAWNING:   6};
+
+/**
+ * 单个等级的配置。
+ *
+ * @typedef {object} LevelConfig
+ * @property {number} level
+ * @property {number} expRequired
+ * @property {number} maxHealthMultiplier
+ * @property {number} attackMultiplier
+ * @property {string} [healOnLevelUp]
+ */
+
+/**
+ * 公式参数配置。
+ *
+ * @typedef {object} FormulaParams
+ * @property {number} baseExp
+ * @property {number} expPerLevel
+ * @property {number} healthGrowth
+ * @property {number} attackGrowth
+ * @property {number} critChanceGrowth
+ * @property {number} critMultiplierGrowth
+ */
+
+/**
+ * 对实体伤害计算参数。
+ *
+ * @typedef {object} PlayerDamageOptions
+ * @property {number} [flatBonus]
+ * @property {number} [multiplier]
+ * @property {number} [critChanceBonus]
+ * @property {number} [critMultiplierBonus]
+ * @property {boolean} [allowCrit]
+ */
+
+/**
+ * 单次伤害结算结果。
+ *
+ * @typedef {object} PlayerDamageRoll
+ * @property {number} damage
+ * @property {number} baseDamage
+ * @property {number} critChance
+ * @property {number} critMultiplier
+ * @property {boolean} isCritical
+ */
+
+const MAX_LEVEL = 5;
+const BASE_MAX_HEALTH = 100;
+const BASE_ATTACK = 10;
+const BASE_CRIT_CHANCE = 0.1;
+const BASE_CRIT_MULTIPLIER = 1.5;
+const DEFAULT_LEVEL_UP_HEAL_POLICY = LevelUpHealPolicy.FULL;
+
+/** @type {FormulaParams} */
+const FORMULA_PARAMS = {
+    baseExp: 100,
+    expPerLevel: 50,
+    healthGrowth: 0.1,
+    attackGrowth: 0.08,
+    critChanceGrowth: 0.005,
+    critMultiplierGrowth: 0.02,
+};
+
+/** @type {LevelConfig[]} */
+const LEVEL_OVERRIDES = [];
+
+/**
+ * @param {number} level
+ * @returns {LevelConfig}
+ */
+function buildFormulaConfig(level) {
+    const p = FORMULA_PARAMS;
+    return {
+        level,
+        expRequired: level >= MAX_LEVEL ? 0 : p.baseExp + (level - 1) * p.expPerLevel,
+        maxHealthMultiplier: 1 + (level - 1) * p.healthGrowth,
+        attackMultiplier: 1 + (level - 1) * p.attackGrowth,
+    };
+}
+
+/**
+ * @returns {LevelConfig[]}
+ */
+function buildLevelConfigs() {
+    /** @type {LevelConfig[]} */
+    const configs = [];
+    for (let lv = 1; lv <= MAX_LEVEL; lv++) {
+        configs.push(buildFormulaConfig(lv));
+    }
+    for (const override of LEVEL_OVERRIDES) {
+        const idx = override.level - 1;
+        if (idx >= 0 && idx < configs.length) {
+            configs[idx] = { ...configs[idx], ...override };
+        }
+    }
+    return configs;
+}
+
+const _levelConfigs = buildLevelConfigs();
+
+/**
+ * @param {number} level
+ * @returns {LevelConfig}
+ */
+function getLevelConfig(level) {
+    const clamped = Math.max(1, Math.min(level, MAX_LEVEL));
+    return _levelConfigs[clamped - 1];
+}
+
+/**
+ * @param {number} level
+ * @returns {number}
+ */
+function getExpRequired(level) {
+    if (level >= MAX_LEVEL) return 0;
+    return getLevelConfig(level).expRequired;
+}
+
+/**
+ * @param {number} level
+ * @returns {number}
+ */
+function getMaxHealthForLevel(level) {
+    return Math.round(BASE_MAX_HEALTH * getLevelConfig(Math.max(1, level)).maxHealthMultiplier);
+}
+
+/**
+ * @param {number} level
+ * @returns {number}
+ */
+function getAttackForLevel(level) {
+    return Math.round(BASE_ATTACK * getLevelConfig(Math.max(1, level)).attackMultiplier);
+}
+
+/**
+ * @param {number} level
+ * @returns {number}
+ */
+function getCritChanceForLevel(level) {
+    const p = FORMULA_PARAMS;
+    return Math.max(0, Math.min(BASE_CRIT_CHANCE + (Math.max(1, level) - 1) * p.critChanceGrowth, 1));
+}
+
+/**
+ * @param {number} level
+ * @returns {number}
+ */
+function getCritMultiplierForLevel(level) {
+    const p = FORMULA_PARAMS;
+    return Math.max(1, BASE_CRIT_MULTIPLIER + (Math.max(1, level) - 1) * p.critMultiplierGrowth);
+}
+
+/**
+ * @param {number} level
+ * @returns {string}
+ */
+function getHealPolicyForLevel(level) {
+    const config = getLevelConfig(Math.max(1, level));
+    return config.healOnLevelUp ?? DEFAULT_LEVEL_UP_HEAL_POLICY;
+}
+
+/**
+ * @param {number} baseDamage
+ * @param {number} level
+ * @returns {number}
+ */
+function scaleOutgoingDamage(baseDamage, level) {
+    const config = getLevelConfig(Math.max(1, level));
+    return Math.round(baseDamage * config.attackMultiplier);
+}
+
+/**
+ * @param {number} level
+ * @param {PlayerDamageOptions} [options]
+ * @returns {PlayerDamageRoll}
+ */
+function rollDamageForLevel(level, options) {
+    const baseAttack = getAttackForLevel(level);
+    const flatBonus = options?.flatBonus ?? 0;
+    const multiplier = options?.multiplier ?? 1;
+    const allowCrit = options?.allowCrit ?? true;
+    const critChance = Math.max(0, Math.min(getCritChanceForLevel(level) + (options?.critChanceBonus ?? 0), 1));
+    const critMultiplier = Math.max(1, getCritMultiplierForLevel(level) + (options?.critMultiplierBonus ?? 0));
+
+    let damage = Math.max(0, (baseAttack + flatBonus) * multiplier);
+    let isCritical = false;
+    if (allowCrit && Math.random() < critChance) {
+        damage *= critMultiplier;
+        isCritical = true;
+    }
+
+    return {
+        damage: Math.max(0, Math.round(damage)),
+        baseDamage: baseAttack,
+        critChance,
+        critMultiplier,
+        isCritical,
+    };
+}
+
+/**
+ * @module 玩家系统/玩家/组件/玩家数值
+ */
+
+function scalePositiveAmount(amount, multiplier) {
+    return amount > 0 ? amount * multiplier : amount;
+}
+
+class PlayerStats {
+    constructor(player) {
+        this.player = player;
+
+        this.baseMaxHealth = getMaxHealthForLevel(1);
+        this.maxHealth = this.baseMaxHealth;
+        this.health = this.maxHealth;
+        this.armor = 0;
+
+        this.baseAttack = getAttackForLevel(1);
+        this.attack = this.baseAttack;
+        this.critChance = getCritChanceForLevel(1);
+        this.critMultiplier = getCritMultiplierForLevel(1);
+
+        this.baseMoneyGain = 1;
+        this.moneyGain = 1;
+        this.baseExpGain = 1;
+        this.expGain = 1;
+
+        this.money = 0;
+        this.exp = 0;
+        this.level = 1;
+
+        this.score = 0;
+        this.kills = 0;
+        this.damageDealt = 0;
+        this.headshots = 0;
+        this.waveProgress = 0;
+    }
+
+    addMoney(amount, reason) {
+        return this.applyMoneyDelta(amount, reason, true);
+    }
+
+    applyMoneyDelta(amount, reason, applyGain = true) {
+        const scaledAmount = scalePositiveAmount(amount, applyGain ? this.moneyGain : 1);
+        return this.applyRawMoneyDelta(scaledAmount, reason);
+    }
+
+    applyRawMoneyDelta(amount, reason) {
+        if (!amount) return 0;
+
+        const old = this.money;
+        const next = Math.max(0, Math.round(old + amount));
+        const actual = next - old;
+        if (!actual) return 0;
+
+        this.money = next;
+        this.player.events.OnMoneyChanged?.(old, this.money, actual, reason);
+        return actual;
+    }
+
+    deductMoney(amount) {
+        if (this.money < amount) return false;
+        this.applyRawMoneyDelta(-amount);
+        return true;
+    }
+
+    addExp(amount, reason) {
+        return this.applyExpDelta(amount, reason, true);
+    }
+
+    applyExpDelta(amount, reason, applyGain = true) {
+        const scaledAmount = scalePositiveAmount(amount, applyGain ? this.expGain : 1);
+        return this.applyRawExpDelta(scaledAmount, reason);
+    }
+
+    applyRawExpDelta(amount, reason) {
+        if (!amount) return 0;
+        if (this.level >= MAX_LEVEL) return 0;
+
+        const oldExp = this.exp;
+        const next = Math.max(0, Math.round(oldExp + amount));
+        const actual = next - oldExp;
+        if (!actual) return 0;
+
+        this.exp = next;
+        this.player.events.OnExpChanged?.(this.exp, actual, reason);
+
+        if (actual > 0) {
+            while (this._checkLevelUp()) { /* keep going */ }
+        }
+
+        return actual;
+    }
+
+    getExpNeeded() {
+        return getExpRequired(this.level);
+    }
+
+    _checkLevelUp() {
+        if (this.level >= MAX_LEVEL) {
+            this.exp = 0;
+            return false;
+        }
+
+        const needed = this.getExpNeeded();
+        if (needed <= 0 || this.exp < needed) return false;
+
+        const oldLevel = this.level;
+        this.level++;
+        this.exp -= needed;
+
+        this._applyLevelDerivedStats();
+
+        this.player.events.OnLevelUp?.(oldLevel, this.level);
+        return true;
+    }
+
+    _applyLevelDerivedStats() {
+        const oldMaxHealth = this.maxHealth;
+        const healthRatio = oldMaxHealth > 0 ? this.health / oldMaxHealth : 1;
+
+        this._updateLevelBaseStats();
+        this._recomputeBuffDerivedStats();
+
+        const policy = getHealPolicyForLevel(this.level);
+        switch (policy) {
+            case LevelUpHealPolicy.FULL:
+                this.health = this.maxHealth;
+                break;
+            case LevelUpHealPolicy.PRESERVE_RATIO:
+                this.health = Math.round(healthRatio * this.maxHealth);
+                break;
+        }
+
+        this.health = Math.max(0, Math.min(this.health, this.maxHealth));
+        this.player.entityBridge.syncMaxHealth(this.maxHealth);
+        this.player.entityBridge.syncHealth(this.health);
+    }
+
+    refreshLevelStats() {
+        this._updateLevelBaseStats();
+        this._recomputeBuffDerivedStats();
+    }
+
+    resetGameProgress() {
+        this.money = 0;
+        this.exp = 0;
+        this.level = 1;
+        this.score = 0;
+        this.kills = 0;
+        this.damageDealt = 0;
+        this.headshots = 0;
+        this.waveProgress = 0;
+        this.moneyGain = this.baseMoneyGain;
+        this.expGain = this.baseExpGain;
+        this.refreshLevelStats();
+        this.resetCombatResources(this.maxHealth, 0);
+    }
+
+    setHealth(value) {
+        this.health = Math.max(0, Math.min(Math.round(value), Math.round(this.maxHealth)));
+    }
+
+    setMaxHealth(value) {
+        this.maxHealth = Math.max(1, Math.round(value));
+        this.setHealth(this.health);
+    }
+
+    setArmor(value) {
+        this.armor = Math.max(0, Math.min(Math.round(value), 100));
+    }
+
+    resetCombatResources(health, armor) {
+        this.setHealth(health ?? this.maxHealth);
+        this.setArmor(armor ?? 0);
+    }
+
+    getAttackRatio() {
+        if (this.baseAttack <= 0) return 1;
+        return this.attack / this.baseAttack;
+    }
+
+    getAttackDamage(baseDamage) {
+        const levelScaled = scaleOutgoingDamage(baseDamage, this.level);
+        return Math.max(0, Math.round(levelScaled * this.getAttackRatio()));
+    }
+
+    rollDamageAgainstEntity(options) {
+        const result = rollDamageForLevel(this.level, options);
+        const ratio = this.getAttackRatio();
+        return {
+            ...result,
+            damage: Math.max(0, Math.round(result.damage * ratio)),
+            baseDamage: Math.max(0, Math.round(result.baseDamage * ratio)),
+        };
+    }
+
+    getSummary() {
+        return {
+            id: this.player.id,
+            name: this.player.entityBridge.getPlayerName(),
+            slot: this.player.slot,
+            level: this.level,
+            money: this.money,
+            health: this.health,
+            maxHealth: this.maxHealth,
+            armor: this.armor,
+            attack: this.attack,
+            critChance: this.critChance,
+            critMultiplier: this.critMultiplier,
+            kills: this.kills,
+            score: this.score,
+            exp: this.exp,
+            expNeeded: this.getExpNeeded(),
+        };
+    }
+
+    _updateLevelBaseStats() {
+        this.baseMaxHealth = getMaxHealthForLevel(this.level);
+        this.baseAttack = getAttackForLevel(this.level);
+        this.critChance = getCritChanceForLevel(this.level);
+        this.critMultiplier = getCritMultiplierForLevel(this.level);
+    }
+
+    _recomputeBuffDerivedStats() {
+        if (this.player.buffManager?.recomputeModifiers) {
+            this.player.buffManager.recomputeModifiers();
+            return;
+        }
+
+        this.maxHealth = this.baseMaxHealth;
+        this.attack = this.baseAttack;
+        this.moneyGain = this.baseMoneyGain;
+        this.expGain = this.baseExpGain;
+        this.health = Math.max(0, Math.min(this.health, this.maxHealth));
+    }
+}
+
+/**
+ * @module 玩家系统/玩家/组件/战斗组件
+ */
+
+/**
+ * 玩家战斗组件 — 受伤、治疗与死亡判定。
+ *
+ * 所有对玩家的伤害都应通过 `takeDamage(damage, attacker)` 进入本组件。
+ * 内部流程：
+ * 1. 从引擎 Pawn 同步当前血量/护甲。
+ * 2. 将伤害送入 PlayerBuffManager 的修饰器链（Buff 可减伤/增伤）。
+ * 3. 优先扣护甲，再扣血量。
+ * 4. 写回引擎并发布事件（DAMAGE_TAKEN / DEATH）。
+ *
+ * `heal(amount)` 提供治疗入口，受 maxHealth 上限限制。
+ *
+ * 死亡时：切换状态为 DEAD → 通知 Buff 层 → 切换至旁观者队伍。
+ *
+ * @navigationTitle 玩家战斗组件
+ */
+class PlayerHealthCombat {
+    /**
+     * @param {import("../player.js").Player} player 所属玩家实例
+     */
+    constructor(player) {
+        this.player = player;
+    }
+
+    /**
+     * 玩家受到伤害（统一入口）
+     * @param {number} damage
+     * @param {import("cs_script/point_script").Entity|null} [attacker]
+     * @returns {boolean} 是否死亡
+     */
+    takeDamage(damage, attacker) {
+        if (this.player.state === PlayerState.DEAD) return true;
+        if (!this.player.entityBridge.isPawnValid()) return false;
+
+        // 从引擎同步当前值
+        this._syncFromEngine();
+
+        // buff 修饰器链
+        const ctx = { damage, attacker };
+        // 触发前置事件，允许 buff 修改伤害,例如减伤、增伤、护甲一类的效果
+        this.player.buffManager.onBeforeDamageTaken(ctx);
+        damage = ctx.damage;
+
+        if (damage <= 0) {
+            this.player.buffManager.onAfterDamageTaken({ damage: 0, attacker });
+            this.player.events.OnAfterDamageTaken?.(0, attacker);
+            return false;
+        }
+
+        // 扣血后同步
+        this.player.stats.setHealth(this.player.stats.health - damage);
+        this.player.entityBridge.syncHealth(this.player.stats.health);
+
+        this.player.buffManager.onAfterDamageTaken({ damage, attacker });
+
+        this.player.events.OnAfterDamageTaken?.(damage, attacker);
+
+        Instance.Msg(`玩家 ${this.player.entityBridge.getPlayerName()} 受到 ${damage} 伤害 (生命: ${this.player.stats.health}, 护甲: ${this.player.stats.armor})`);
+
+        if (this.player.stats.health <= 0) {
+            this.die(attacker);
+            return true;
+        }
+        return false;
+    }
+
+    /**
+     * 引擎伤害事件同步（OnPlayerDamage 回调时调用）
+     * 此时引擎已经扣过血，只需同步脚本侧记录并检测死亡。
+     * @param {number} damage
+     * @param {import("cs_script/point_script").Entity|null} [attacker]
+     * @param {import("cs_script/point_script").Entity|null} [inflictor]
+     * @returns {boolean} 是否死亡
+     */
+    syncDamageFromEngine(damage, attacker, inflictor) {
+        if (this.player.state === PlayerState.DEAD) return true;
+
+        this._syncFromEngine();
+
+        this.player.buffManager.onAfterDamageTaken({
+            damage,
+            attacker,
+            inflictor,
+        });
+
+        this.player.events.OnAfterDamageTaken?.(damage, attacker, inflictor);
+
+        Instance.Msg(`玩家 ${this.player.entityBridge.getPlayerName()} 受到 ${damage} 伤害 (生命: ${this.player.stats.health}, 护甲: ${this.player.stats.armor})`);
+
+        if (this.player.stats.health <= 0) {
+            this.die(attacker);
+            return true;
+        }
+        return false;
+    }
+
+    /**
+     * 治疗
+     * @param {number} amount
+     * @returns {boolean}
+     */
+    heal(amount) {
+        if (this.player.state === PlayerState.DEAD) return false;
+        if (!this.player.entityBridge.isPawnValid()) return false;
+
+        const stats = this.player.stats;
+        const newHealth = Math.min(stats.health + amount, stats.maxHealth);
+        const actualHeal = newHealth - stats.health;
+        if (actualHeal <= 0) return false;
+
+        stats.setHealth(newHealth);
+        this.player.entityBridge.syncHealth(stats.health);
+
+        this.player.events.OnHeal?.(actualHeal);
+        return true;
+    }
+
+    /**
+     * 给予护甲
+     * @param {number} amount
+     * @returns {boolean}
+     */
+    giveArmor(amount) {
+        if (this.player.state === PlayerState.DEAD) return false;
+        if (!this.player.entityBridge.isPawnValid()) return false;
+
+        const stats = this.player.stats;
+        const newArmor = Math.min(stats.armor + amount, 100);
+        const actual = newArmor - stats.armor;
+        if (actual <= 0) return false;
+
+        stats.setArmor(newArmor);
+        this.player.entityBridge.syncArmor(stats.armor);
+        return true;
+    }
+
+    /**
+     * 死亡流程
+     * @param {import("cs_script/point_script").Entity|null} [killer]
+     */
+    die(killer) {
+        if (this.player.state === PlayerState.DEAD) return;
+
+        this.player.applyStateTransition(PlayerState.DEAD);
+
+        // 清理临时战斗 buff
+        this.player.buffManager.clearCombatTemporary();
+
+        // 切换到观察者
+        this.player.entityBridge.joinTeam(1);
+
+        this.player.events.OnDeath?.(this.player, killer);
+
+        Instance.Msg(`玩家 ${this.player.entityBridge.getPlayerName()} 死亡`);
+    }
+
+    // ——— 内部 ———
+
+    /** 从引擎读取 health/armor 到脚本 */
+    _syncFromEngine() {
+        const bridge = this.player.entityBridge;
+        if (!bridge.isPawnValid()) return;
+        this.player.stats.health = bridge.readHealth();
+        this.player.stats.armor  = bridge.readArmor();
+    }
+}
+
+const BuffPolarity = {
+    BUFF: "buff",
+    DEBUFF: "debuff",
+};
+
+const BuffStackMode = {
+    REJECT: "reject",
+    REFRESH: "refresh",
+    INDEPENDENT: "independent",
+    STACK: "stack",
+    REPLACE_WEAKER: "replace_weaker",
+};
+
+const BuffPersistPolicy = {
+    COMBAT_TEMPORARY: "combat-temporary"};
+
+const BuffTargetType = {
+    PLAYER: "player",
+    MONSTER: "monster",
+};
+
+const BuffEffectType = {
+    INSTANT_RESOURCE: "instant_resource",
+    PERIODIC_RESOURCE: "periodic_resource",
+    STAT_MODIFIER: "stat_modifier",
+    GAIN_MODIFIER: "gain_modifier",
+};
+
+function toFiniteNumber(value, fallback = 0) {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+function resolveEffectValue(buff, effect, field, fallback = 0) {
+    const resolver = effect?.[`${field}Resolver`];
+    if (typeof resolver === "function") {
+        return toFiniteNumber(resolver(buff, effect, buff.adapter), fallback);
+    }
+
+    const paramKey = effect?.[`${field}From`];
+    if (typeof paramKey === "string" && buff.params && buff.params[paramKey] !== undefined) {
+        return toFiniteNumber(buff.params[paramKey], fallback);
+    }
+
+    const raw = effect?.[field];
+    if (typeof raw === "function") {
+        return toFiniteNumber(raw(buff, effect, buff.adapter), fallback);
+    }
+    if (raw !== undefined) {
+        return toFiniteNumber(raw, fallback);
+    }
+    return fallback;
+}
+
+function getScaledValue(buff, effect, value) {
+    if (!effect?.scaleWithStacks || buff.stacks <= 1) return value;
+    if (effect.op === "mul") return Math.pow(value, buff.stacks);
+    return value * buff.stacks;
+}
+
+function applyInstantEffects(buff, phase) {
+    for (let i = 0; i < buff.effects.length; i++) {
+        const effect = buff.effects[i];
+        if (effect?.type !== BuffEffectType.INSTANT_RESOURCE) continue;
+        if (!buff.adapter.supportsEffect(effect)) continue;
+
+        const applyOn = effect.applyOn ?? "add";
+        if (applyOn !== phase) continue;
+
+        const rawValue = resolveEffectValue(buff, effect, "value", 0);
+        const delta = getScaledValue(buff, effect, rawValue);
+        if (!delta) continue;
+
+        buff.adapter.addResource(effect.key, delta, {
+            buff,
+            phase,
+            reason: `buff:${buff.typeId}:${phase}`,
+            source: buff.source,
+        });
+    }
+}
+
+function tickPeriodicEffects(buff, dt) {
+    for (let i = 0; i < buff.effects.length; i++) {
+        const effect = buff.effects[i];
+        if (effect?.type !== BuffEffectType.PERIODIC_RESOURCE) continue;
+        if (!buff.adapter.supportsEffect(effect)) continue;
+
+        const key = effect.id ?? `${effect.type}:${effect.key}:${i}`;
+        const interval = Math.max(0, resolveEffectValue(buff, effect, "interval", 0));
+        const baseValue = resolveEffectValue(buff, effect, "value", 0);
+        const scaledValue = getScaledValue(buff, effect, baseValue);
+
+        if (!scaledValue) continue;
+
+        if (interval <= 0) {
+            const delta = effect.perSecond ? scaledValue * dt : scaledValue;
+            if (!delta) continue;
+            buff.adapter.addResource(effect.key, delta, {
+                buff,
+                phase: "tick",
+                reason: `buff:${buff.typeId}:tick`,
+                source: buff.source,
+            });
+            continue;
+        }
+
+        const previous = buff._periodicAccums.get(key) ?? 0;
+        let accum = previous + dt;
+        while (accum >= interval) {
+            accum -= interval;
+            const delta = effect.perSecond ? scaledValue * interval : scaledValue;
+            if (delta) {
+                buff.adapter.addResource(effect.key, delta, {
+                    buff,
+                    phase: "interval",
+                    reason: `buff:${buff.typeId}:interval`,
+                    source: buff.source,
+                });
+            }
+        }
+        buff._periodicAccums.set(key, accum);
+    }
+}
+
+function recomputePassiveEffects(adapter, buffs, previousStatKeys = new Set(), previousGainKeys = new Set()) {
+    const statAggregates = new Map();
+    const gainAggregates = new Map();
+
+    for (const buff of buffs) {
+        for (const effect of buff.effects) {
+            if (!adapter.supportsEffect(effect)) continue;
+
+            if (effect.type === BuffEffectType.STAT_MODIFIER) {
+                const aggregate = statAggregates.get(effect.key) ?? { add: 0, mul: 1 };
+                const resolved = resolveEffectValue(buff, effect, "value", effect.op === "mul" ? 1 : 0);
+                const scaled = getScaledValue(buff, effect, resolved);
+                if (effect.op === "mul") aggregate.mul *= scaled;
+                else aggregate.add += scaled;
+                statAggregates.set(effect.key, aggregate);
+                continue;
+            }
+
+            if (effect.type === BuffEffectType.GAIN_MODIFIER) {
+                const aggregate = gainAggregates.get(effect.key) ?? { add: 0, mul: 1 };
+                const resolved = resolveEffectValue(buff, effect, "value", effect.op === "mul" ? 1 : 0);
+                const scaled = getScaledValue(buff, effect, resolved);
+                if (effect.op === "mul") aggregate.mul *= scaled;
+                else aggregate.add += scaled;
+                gainAggregates.set(effect.key, aggregate);
+            }
+        }
+    }
+
+    const statKeys = new Set([...previousStatKeys, ...statAggregates.keys()]);
+    for (const key of statKeys) {
+        const base = toFiniteNumber(adapter.getBaseStat(key), 0);
+        const aggregate = statAggregates.get(key) ?? { add: 0, mul: 1 };
+        adapter.setDerivedStat(key, (base + aggregate.add) * aggregate.mul);
+    }
+    adapter.recomputeDerivedStats();
+
+    const gainKeys = new Set([...previousGainKeys, ...gainAggregates.keys()]);
+    for (const key of gainKeys) {
+        const base = Math.max(0, toFiniteNumber(adapter.getBaseGainModifier(key), 1));
+        const aggregate = gainAggregates.get(key) ?? { add: 0, mul: 1 };
+        adapter.setGainModifier(key, Math.max(0, (base + aggregate.add) * aggregate.mul));
+    }
+    adapter.recomputeGainModifiers();
+
+    return { statKeys, gainKeys };
+}
+
+function registerBuiltinBuffs(registry) {
+    const playerOnly = [BuffTargetType.PLAYER];
+    const monsterOnly = [BuffTargetType.MONSTER];
+    const playerAndMonster = [BuffTargetType.PLAYER, BuffTargetType.MONSTER];
+
+    registry.register("attack_up", {
+        targetTypes: playerAndMonster,
+        polarity: BuffPolarity.BUFF,
+        stackMode: BuffStackMode.REFRESH,
+        persistPolicy: BuffPersistPolicy.COMBAT_TEMPORARY,
+        duration: 8,
+        tags: ["attack", "positive"],
+        effects: [
+            { type: BuffEffectType.STAT_MODIFIER, key: "attack", op: "mul", value: 1.25, valueFrom: "multiplier" },
+            { type: BuffEffectType.STAT_MODIFIER, key: "attack", op: "add", value: 0, valueFrom: "flatBonus" },
+        ],
+    });
+
+    registry.register("attack_down", {
+        targetTypes: playerAndMonster,
+        polarity: BuffPolarity.DEBUFF,
+        stackMode: BuffStackMode.REFRESH,
+        persistPolicy: BuffPersistPolicy.COMBAT_TEMPORARY,
+        duration: 8,
+        tags: ["attack", "negative", "debuff"],
+        effects: [
+            { type: BuffEffectType.STAT_MODIFIER, key: "attack", op: "mul", value: 0.75, valueFrom: "multiplier" },
+            { type: BuffEffectType.STAT_MODIFIER, key: "attack", op: "add", value: 0, valueFrom: "flatBonus" },
+        ],
+    });
+
+    registry.register("max_health_up", {
+        targetTypes: playerAndMonster,
+        polarity: BuffPolarity.BUFF,
+        stackMode: BuffStackMode.REFRESH,
+        persistPolicy: BuffPersistPolicy.COMBAT_TEMPORARY,
+        duration: 12,
+        tags: ["health", "positive"],
+        effects: [
+            { type: BuffEffectType.STAT_MODIFIER, key: "maxHealth", op: "mul", value: 1.25, valueFrom: "multiplier" },
+            { type: BuffEffectType.STAT_MODIFIER, key: "maxHealth", op: "add", value: 0, valueFrom: "flatBonus" },
+        ],
+    });
+
+    registry.register("max_health_down", {
+        targetTypes: playerAndMonster,
+        polarity: BuffPolarity.DEBUFF,
+        stackMode: BuffStackMode.REFRESH,
+        persistPolicy: BuffPersistPolicy.COMBAT_TEMPORARY,
+        duration: 12,
+        tags: ["health", "negative", "debuff"],
+        effects: [
+            { type: BuffEffectType.STAT_MODIFIER, key: "maxHealth", op: "mul", value: 0.75, valueFrom: "multiplier" },
+            { type: BuffEffectType.STAT_MODIFIER, key: "maxHealth", op: "add", value: 0, valueFrom: "flatBonus" },
+        ],
+    });
+
+    registry.register("poison", {
+        targetTypes: playerAndMonster,
+        polarity: BuffPolarity.DEBUFF,
+        stackMode: BuffStackMode.REFRESH,
+        persistPolicy: BuffPersistPolicy.COMBAT_TEMPORARY,
+        duration: 4,
+        tags: ["health", "dot", "poison", "debuff"],
+        effects: [
+            {
+                type: BuffEffectType.PERIODIC_RESOURCE,
+                key: "health",
+                value: -5,
+                valueFrom: "dps",
+                perSecond: true,
+                interval: 1,
+                intervalFrom: "tickInterval",
+            },
+        ],
+    });
+
+    registry.register("regen", {
+        targetTypes: playerAndMonster,
+        polarity: BuffPolarity.BUFF,
+        stackMode: BuffStackMode.REFRESH,
+        persistPolicy: BuffPersistPolicy.COMBAT_TEMPORARY,
+        duration: 4,
+        tags: ["health", "hot", "positive"],
+        effects: [
+            {
+                type: BuffEffectType.PERIODIC_RESOURCE,
+                key: "health",
+                value: 5,
+                valueFrom: "hps",
+                perSecond: true,
+                interval: 1,
+                intervalFrom: "tickInterval",
+            },
+        ],
+    });
+
+    registry.register("armor_up", {
+        targetTypes: playerOnly,
+        polarity: BuffPolarity.BUFF,
+        stackMode: BuffStackMode.INDEPENDENT,
+        persistPolicy: BuffPersistPolicy.COMBAT_TEMPORARY,
+        duration: 0,
+        expireAfterApply: true,
+        tags: ["armor", "positive"],
+        effects: [
+            { type: BuffEffectType.INSTANT_RESOURCE, key: "armor", value: 25, valueFrom: "amount", applyOn: "add" },
+        ],
+    });
+
+    registry.register("armor_down", {
+        targetTypes: playerOnly,
+        polarity: BuffPolarity.DEBUFF,
+        stackMode: BuffStackMode.INDEPENDENT,
+        persistPolicy: BuffPersistPolicy.COMBAT_TEMPORARY,
+        duration: 0,
+        expireAfterApply: true,
+        tags: ["armor", "negative", "debuff"],
+        effects: [
+            { type: BuffEffectType.INSTANT_RESOURCE, key: "armor", value: -25, valueFrom: "amount", applyOn: "add" },
+        ],
+    });
+
+    registry.register("money_gain_up", {
+        targetTypes: playerOnly,
+        polarity: BuffPolarity.BUFF,
+        stackMode: BuffStackMode.REFRESH,
+        persistPolicy: BuffPersistPolicy.COMBAT_TEMPORARY,
+        duration: 12,
+        tags: ["money", "positive"],
+        effects: [
+            { type: BuffEffectType.GAIN_MODIFIER, key: "moneyGain", op: "mul", value: 1.5, valueFrom: "multiplier" },
+        ],
+    });
+
+    registry.register("money_gain_down", {
+        targetTypes: playerOnly,
+        polarity: BuffPolarity.DEBUFF,
+        stackMode: BuffStackMode.REFRESH,
+        persistPolicy: BuffPersistPolicy.COMBAT_TEMPORARY,
+        duration: 12,
+        tags: ["money", "negative", "debuff"],
+        effects: [
+            { type: BuffEffectType.GAIN_MODIFIER, key: "moneyGain", op: "mul", value: 0.5, valueFrom: "multiplier" },
+        ],
+    });
+
+    registry.register("exp_gain_up", {
+        targetTypes: playerOnly,
+        polarity: BuffPolarity.BUFF,
+        stackMode: BuffStackMode.REFRESH,
+        persistPolicy: BuffPersistPolicy.COMBAT_TEMPORARY,
+        duration: 12,
+        tags: ["exp", "positive"],
+        effects: [
+            { type: BuffEffectType.GAIN_MODIFIER, key: "expGain", op: "mul", value: 1.5, valueFrom: "multiplier" },
+        ],
+    });
+
+    registry.register("exp_gain_down", {
+        targetTypes: playerOnly,
+        polarity: BuffPolarity.DEBUFF,
+        stackMode: BuffStackMode.REFRESH,
+        persistPolicy: BuffPersistPolicy.COMBAT_TEMPORARY,
+        duration: 12,
+        tags: ["exp", "negative", "debuff"],
+        effects: [
+            { type: BuffEffectType.GAIN_MODIFIER, key: "expGain", op: "mul", value: 0.5, valueFrom: "multiplier" },
+        ],
+    });
+
+    registry.register("money_over_time", {
+        targetTypes: playerOnly,
+        polarity: BuffPolarity.BUFF,
+        stackMode: BuffStackMode.REFRESH,
+        persistPolicy: BuffPersistPolicy.COMBAT_TEMPORARY,
+        duration: 8,
+        tags: ["money", "positive"],
+        effects: [
+            {
+                type: BuffEffectType.PERIODIC_RESOURCE,
+                key: "money",
+                value: 25,
+                valueFrom: "amount",
+                interval: 1,
+                intervalFrom: "tickInterval",
+            },
+        ],
+    });
+
+    registry.register("money_burn", {
+        targetTypes: playerOnly,
+        polarity: BuffPolarity.DEBUFF,
+        stackMode: BuffStackMode.REFRESH,
+        persistPolicy: BuffPersistPolicy.COMBAT_TEMPORARY,
+        duration: 8,
+        tags: ["money", "negative", "debuff"],
+        effects: [
+            {
+                type: BuffEffectType.PERIODIC_RESOURCE,
+                key: "money",
+                value: -25,
+                valueFrom: "amount",
+                interval: 1,
+                intervalFrom: "tickInterval",
+            },
+        ],
+    });
+
+    registry.register("exp_over_time", {
+        targetTypes: playerOnly,
+        polarity: BuffPolarity.BUFF,
+        stackMode: BuffStackMode.REFRESH,
+        persistPolicy: BuffPersistPolicy.COMBAT_TEMPORARY,
+        duration: 8,
+        tags: ["exp", "positive"],
+        effects: [
+            {
+                type: BuffEffectType.PERIODIC_RESOURCE,
+                key: "exp",
+                value: 15,
+                valueFrom: "amount",
+                interval: 1,
+                intervalFrom: "tickInterval",
+            },
+        ],
+    });
+
+    registry.register("exp_burn", {
+        targetTypes: playerOnly,
+        polarity: BuffPolarity.DEBUFF,
+        stackMode: BuffStackMode.REFRESH,
+        persistPolicy: BuffPersistPolicy.COMBAT_TEMPORARY,
+        duration: 8,
+        tags: ["exp", "negative", "debuff"],
+        effects: [
+            {
+                type: BuffEffectType.PERIODIC_RESOURCE,
+                key: "exp",
+                value: -15,
+                valueFrom: "amount",
+                interval: 1,
+                intervalFrom: "tickInterval",
+            },
+        ],
+    });
+
+    registry.register("speed_up", {
+        targetTypes: monsterOnly,
+        polarity: BuffPolarity.BUFF,
+        stackMode: BuffStackMode.REFRESH,
+        persistPolicy: BuffPersistPolicy.COMBAT_TEMPORARY,
+        duration: 5,
+        tags: ["speed", "positive"],
+        effects: [
+            { type: BuffEffectType.STAT_MODIFIER, key: "speed", op: "mul", value: 1.35, valueFrom: "multiplier" },
+            { type: BuffEffectType.STAT_MODIFIER, key: "speed", op: "add", value: 0, valueFrom: "flatBonus" },
+        ],
+    });
+
+    registry.register("speed_down", {
+        targetTypes: monsterOnly,
+        polarity: BuffPolarity.DEBUFF,
+        stackMode: BuffStackMode.REFRESH,
+        persistPolicy: BuffPersistPolicy.COMBAT_TEMPORARY,
+        duration: 5,
+        tags: ["speed", "negative", "debuff"],
+        effects: [
+            { type: BuffEffectType.STAT_MODIFIER, key: "speed", op: "mul", value: 0.7, valueFrom: "multiplier" },
+            { type: BuffEffectType.STAT_MODIFIER, key: "speed", op: "add", value: 0, valueFrom: "flatBonus" },
+        ],
+    });
+
+    registry.register("knockup", {
+        targetTypes: playerOnly,
+        polarity: BuffPolarity.DEBUFF,
+        stackMode: BuffStackMode.REJECT,
+        persistPolicy: BuffPersistPolicy.COMBAT_TEMPORARY,
+        duration: 0.6,
+        tags: ["cc", "knockup", "debuff", "compat"],
+        hooks: {
+            onAdd(buff) {
+                const pawn = buff.adapter.getPawn?.();
+                if (!pawn || !pawn.IsValid?.()) return;
+
+                const direction = buff.params?.direction ?? null;
+                const impulse = toFiniteNumber(buff.params?.impulse, 300);
+                const verticalBoost = toFiniteNumber(buff.params?.verticalBoost, 400);
+                const vx = direction ? toFiniteNumber(direction.x, 0) * impulse : 0;
+                const vy = direction ? toFiniteNumber(direction.y, 0) * impulse : 0;
+                pawn.Teleport(null, null, { x: vx, y: vy, z: verticalBoost });
+            },
+        },
+    });
+}
+
+function normalizeArray(value, fallback = []) {
+    return Array.isArray(value) ? [...value] : [...fallback];
+}
+
+function normalizeDefinition(typeId, definition) {
+    return {
+        typeId,
+        groupKey: definition.groupKey ?? typeId,
+        targetTypes: normalizeArray(definition.targetTypes, [BuffTargetType.PLAYER, BuffTargetType.MONSTER]),
+        polarity: definition.polarity ?? BuffPolarity.BUFF,
+        stackMode: definition.stackMode ?? BuffStackMode.REFRESH,
+        persistPolicy: definition.persistPolicy ?? BuffPersistPolicy.COMBAT_TEMPORARY,
+        duration: Number(definition.duration ?? 0),
+        maxStacks: Math.max(1, Number(definition.maxStacks ?? 1)),
+        priority: Number(definition.priority ?? 0),
+        expireAfterApply: definition.expireAfterApply === true,
+        tags: normalizeArray(definition.tags),
+        effects: normalizeArray(definition.effects),
+        hooks: definition.hooks ?? {},
+    };
+}
+
+class BuffRegistry {
+    static _registry = new Map();
+
+    static register(typeId, definition) {
+        if (!typeId || !definition) return;
+        BuffRegistry._registry.set(typeId, normalizeDefinition(typeId, definition));
+    }
+
+    static has(typeId) {
+        return BuffRegistry._registry.has(typeId);
+    }
+
+    static get(typeId) {
+        const definition = BuffRegistry._registry.get(typeId);
+        if (!definition) return null;
+        return {
+            ...definition,
+            targetTypes: [...definition.targetTypes],
+            tags: [...definition.tags],
+            effects: [...definition.effects],
+            hooks: definition.hooks ? { ...definition.hooks } : {},
+        };
+    }
+
+    static getAll() {
+        return Array.from(BuffRegistry._registry.values()).map((definition) => BuffRegistry.get(definition.typeId));
+    }
+}
+
+registerBuiltinBuffs(BuffRegistry);
+
+class BuffTemplate {
+    constructor(manager, definition, params = {}, source = null) {
+        this.manager = manager;
+        this.adapter = manager.adapter;
+        this.definition = definition;
+        this.params = { ...params };
+
+        this.id = -1;
+        this.typeId = definition.typeId;
+        this.groupKey = params.groupKey ?? definition.groupKey ?? definition.typeId;
+        this.duration = Number(params.duration ?? definition.duration ?? 0);
+        this.remainingTime = this.duration;
+        this.maxStacks = Math.max(1, Number(params.maxStacks ?? definition.maxStacks ?? 1));
+        this.stacks = 1;
+        this.stackMode = params.stackMode ?? definition.stackMode;
+        this.persistPolicy = params.persistPolicy ?? definition.persistPolicy;
+        this.polarity = params.polarity ?? definition.polarity;
+        this.priority = Number(params.priority ?? definition.priority ?? 0);
+        this.tags = Array.isArray(params.tags) ? [...params.tags] : [...(definition.tags ?? [])];
+        this.effects = Array.isArray(params.effects) ? [...params.effects] : [...(definition.effects ?? [])];
+        this.hooks = definition.hooks ?? {};
+        this.source = source ?? params.source ?? null;
+        this.expireAfterApply = params.expireAfterApply === true || definition.expireAfterApply === true;
+
+        this.expired = false;
+        this._periodicAccums = new Map();
+    }
+
+    onAdd() {
+        applyInstantEffects(this, "add");
+        this.hooks.onAdd?.(this);
+        if (this.expireAfterApply) {
+            this.expired = true;
+        }
+    }
+
+    onRefresh(newBuff) {
+        this.remainingTime = newBuff.duration;
+        this.priority = Math.max(this.priority, newBuff.priority);
+        this.params = { ...this.params, ...newBuff.params };
+        this.source = newBuff.source ?? this.source;
+        this.hooks.onRefresh?.(this, newBuff);
+    }
+
+    onStack(newBuff) {
+        this.stacks = Math.min(this.stacks + 1, this.maxStacks);
+        this.remainingTime = newBuff.duration;
+        this.params = { ...this.params, ...newBuff.params };
+        this.priority = Math.max(this.priority, newBuff.priority);
+        this.source = newBuff.source ?? this.source;
+        this.hooks.onStack?.(this, newBuff);
+    }
+
+    onTick(dt) {
+        if (this.duration > 0) {
+            this.remainingTime -= dt;
+            if (this.remainingTime <= 0) {
+                this.expired = true;
+            }
+        }
+        tickPeriodicEffects(this, dt);
+        this.hooks.onTick?.(this, dt);
+    }
+
+    onIntervalTick(dt) {
+        this.hooks.onIntervalTick?.(this, dt);
+    }
+
+    onBeforeDamageTaken(ctx) {
+        this.hooks.onBeforeDamageTaken?.(this, ctx);
+    }
+
+    onAfterDamageTaken(ctx) {
+        this.hooks.onAfterDamageTaken?.(this, ctx);
+    }
+
+    onStateChange(oldState, newState) {
+        this.hooks.onStateChange?.(this, oldState, newState);
+    }
+
+    onRespawn() {
+        this.hooks.onRespawn?.(this);
+    }
+
+    onRemove() {
+        applyInstantEffects(this, "remove");
+        this.hooks.onRemove?.(this);
+    }
+
+    hasTag(tag) {
+        return this.tags.includes(tag);
+    }
+
+    getRemainingTime() {
+        return this.duration <= 0 ? Infinity : Math.max(0, this.remainingTime);
+    }
+}
+
+function matchesFilter(buff, filter) {
+    if (!filter) return true;
+    if (filter.typeId && buff.typeId !== filter.typeId) return false;
+    if (filter.polarity && buff.polarity !== filter.polarity) return false;
+    if (filter.persistPolicy && buff.persistPolicy !== filter.persistPolicy) return false;
+
+    if (Array.isArray(filter.tagsAny) && filter.tagsAny.length > 0) {
+        if (!filter.tagsAny.some((tag) => buff.hasTag(tag))) return false;
+    }
+
+    if (Array.isArray(filter.tagsAll) && filter.tagsAll.length > 0) {
+        if (!filter.tagsAll.every((tag) => buff.hasTag(tag))) return false;
+    }
+
+    if (filter.sourceType && buff.source?.sourceType !== filter.sourceType) return false;
+    if (filter.sourceId !== undefined && buff.source?.sourceId !== filter.sourceId) return false;
+    return true;
+}
+
+class GenericBuffManager {
+    constructor(adapter) {
+        this.adapter = adapter;
+        this._buffs = [];
+        this._nextId = 1;
+        this._previousStatKeys = new Set();
+        this._previousGainKeys = new Set();
+    }
+
+    addBuff(typeId, params = {}, source = null) {
+        const definition = BuffRegistry.get(typeId);
+        if (!definition) {
+            Instance.Msg(`[Buff] unknown buff type "${typeId}"`);
+            return null;
+        }
+        if (!definition.targetTypes.includes(this.adapter.hostType)) {
+            Instance.Msg(`[Buff] "${typeId}" does not support target "${this.adapter.hostType}"`);
+            return null;
+        }
+
+        const newBuff = new BuffTemplate(this, definition, params, source);
+        const existing = this._findByGroupKey(newBuff.groupKey);
+        if (existing) {
+            switch (newBuff.stackMode) {
+                case BuffStackMode.REJECT:
+                    return null;
+                case BuffStackMode.REFRESH:
+                    existing.onRefresh(newBuff);
+                    this.recomputeModifiers();
+                    this.adapter.emitBuffEvent("refreshed", existing);
+                    return existing;
+                case BuffStackMode.STACK:
+                    if (existing.stacks < existing.maxStacks) {
+                        existing.onStack(newBuff);
+                        this.recomputeModifiers();
+                        this.adapter.emitBuffEvent("refreshed", existing);
+                    }
+                    return existing;
+                case BuffStackMode.REPLACE_WEAKER:
+                    if (newBuff.priority > existing.priority) {
+                        this._removeInstance(existing);
+                        return this._addInstance(newBuff);
+                    }
+                    return null;
+            }
+        }
+
+        return this._addInstance(newBuff);
+    }
+
+    removeBuff(typeId) {
+        const buff = this.getBuff(typeId);
+        if (!buff) return false;
+        this._removeInstance(buff);
+        return true;
+    }
+
+    removeById(id) {
+        const buff = this._buffs.find((entry) => entry.id === id);
+        if (!buff) return false;
+        this._removeInstance(buff);
+        return true;
+    }
+
+    removeByTag(tag) {
+        return this.removeByFilter({ tagsAny: [tag] });
+    }
+
+    removeByFilter(filter) {
+        const matched = this._buffs.filter((buff) => matchesFilter(buff, filter));
+        for (const buff of matched) {
+            this._removeInstance(buff);
+        }
+        return matched.length;
+    }
+
+    clearAll() {
+        const snapshot = [...this._buffs];
+        for (const buff of snapshot) {
+            this._removeInstance(buff);
+        }
+    }
+
+    clearCombatTemporary() {
+        this.removeByFilter({ persistPolicy: BuffPersistPolicy.COMBAT_TEMPORARY });
+    }
+
+    hasBuff(typeId) {
+        return !!this.getBuff(typeId);
+    }
+
+    getBuff(typeId) {
+        return this._buffs.find((buff) => buff.typeId === typeId);
+    }
+
+    getAllBuffs() {
+        return [...this._buffs];
+    }
+
+    tick(dt) {
+        for (const buff of [...this._buffs]) {
+            buff.onTick(dt);
+        }
+
+        const expired = this._buffs.filter((buff) => buff.expired);
+        for (const buff of expired) {
+            this._removeInstance(buff);
+        }
+    }
+
+    onStateChange(oldState, newState) {
+        for (const buff of [...this._buffs]) {
+            buff.onStateChange(oldState, newState);
+        }
+    }
+
+    onRespawn() {
+        for (const buff of [...this._buffs]) {
+            buff.onRespawn();
+        }
+    }
+
+    onBeforeDamageTaken(ctx) {
+        for (const buff of [...this._buffs]) {
+            buff.onBeforeDamageTaken(ctx);
+            if (ctx.damage <= 0) break;
+        }
+    }
+
+    onAfterDamageTaken(ctx) {
+        for (const buff of [...this._buffs]) {
+            buff.onAfterDamageTaken(ctx);
+        }
+    }
+
+    recomputeModifiers() {
+        const result = recomputePassiveEffects(
+            this.adapter,
+            this._buffs,
+            this._previousStatKeys,
+            this._previousGainKeys
+        );
+        this._previousStatKeys = result.statKeys;
+        this._previousGainKeys = result.gainKeys;
+    }
+
+    _findByGroupKey(groupKey) {
+        return this._buffs.find((buff) => buff.groupKey === groupKey);
+    }
+
+    _addInstance(buff) {
+        buff.id = this._nextId++;
+        this._buffs.push(buff);
+        buff.onAdd();
+        this.recomputeModifiers();
+        this.adapter.emitBuffEvent("added", buff);
+        if (buff.expired) {
+            this._removeInstance(buff);
+        }
+        return buff;
+    }
+
+    _removeInstance(buff) {
+        const index = this._buffs.indexOf(buff);
+        if (index === -1) return;
+        this._buffs.splice(index, 1);
+        buff.onRemove();
+        this.recomputeModifiers();
+        this.adapter.emitBuffEvent("removed", buff);
+    }
+}
+
+const TEMP_DISABLE = Object.freeze({
+    monsterSkills: true,
+    monsterBuffs: true,
+    playerBuffs: true,
+});
+
+function getActiveTempDisableKeys() {
+    return Object.entries(TEMP_DISABLE)
+        .filter(([, enabled]) => enabled)
+        .map(([key]) => key);
+}
+
+class BuffHostAdapter {
+    constructor() {
+        this.hostType = "unknown";
+        this.hostId = -1;
+    }
+
+    getNow() {
+        return 0;
+    }
+
+    isAlive() {
+        return true;
+    }
+
+    getState() {
+        return null;
+    }
+
+    getResource(key) {
+        return 0;
+    }
+
+    setResource(key, value) {
+    }
+
+    addResource(key, delta, meta) {
+        return 0;
+    }
+
+    clampResource(key, value) {
+        return value;
+    }
+
+    getBaseStat(key) {
+        return 0;
+    }
+
+    setDerivedStat(key, value) {
+    }
+
+    recomputeDerivedStats() {}
+
+    getGainModifier(key) {
+        return 1;
+    }
+
+    getBaseGainModifier(key) {
+        return this.getGainModifier(key);
+    }
+
+    setGainModifier(key, value) {
+    }
+
+    recomputeGainModifiers() {}
+
+    emitBuffEvent(eventType, payload) {
+    }
+
+    supportsEffect(effect) {
+        return false;
+    }
+}
+
+const PLAYER_RESOURCE_KEYS = new Set(["health", "armor", "money", "exp"]);
+const PLAYER_STAT_KEYS = new Set(["maxHealth", "attack"]);
+const PLAYER_GAIN_KEYS = new Set(["moneyGain", "expGain"]);
+
+class PlayerBuffHostAdapter extends BuffHostAdapter {
+    constructor(player) {
+        super();
+        this.player = player;
+        this.hostType = BuffTargetType.PLAYER;
+        this.hostId = player.id;
+    }
+
+    getNow() {
+        return Instance.GetGameTime();
+    }
+
+    isAlive() {
+        return this.player.isAlive;
+    }
+
+    getState() {
+        return this.player.state;
+    }
+
+    getPawn() {
+        return this.player.entityBridge.pawn;
+    }
+
+    getResource(key) {
+        const stats = this.player.stats;
+        switch (key) {
+            case "health":
+                return stats.health;
+            case "armor":
+                return stats.armor;
+            case "money":
+                return stats.money;
+            case "exp":
+                return stats.exp;
+            default:
+                return 0;
+        }
+    }
+
+    setResource(key, value) {
+        return this.addResource(key, value - this.getResource(key), {
+            reason: `buff:set:${key}`,
+        });
+    }
+
+    addResource(key, delta, meta = null) {
+        switch (key) {
+            case "health":
+                return this._addHealth(delta, meta);
+            case "armor":
+                return this._addArmor(delta);
+            case "money":
+                return this.player.stats.applyRawMoneyDelta(delta, meta?.reason);
+            case "exp":
+                return this.player.stats.applyRawExpDelta(delta, meta?.reason);
+            default:
+                return 0;
+        }
+    }
+
+    clampResource(key, value) {
+        switch (key) {
+            case "health":
+                return Math.max(0, Math.min(Math.round(value), Math.round(this.player.stats.maxHealth)));
+            case "armor":
+                return Math.max(0, Math.min(Math.round(value), 100));
+            case "money":
+            case "exp":
+                return Math.max(0, Math.round(value));
+            default:
+                return value;
+        }
+    }
+
+    getBaseStat(key) {
+        const stats = this.player.stats;
+        switch (key) {
+            case "maxHealth":
+                return stats.baseMaxHealth;
+            case "attack":
+                return stats.baseAttack;
+            default:
+                return 0;
+        }
+    }
+
+    setDerivedStat(key, value) {
+        const stats = this.player.stats;
+        switch (key) {
+            case "maxHealth":
+                stats.maxHealth = Math.max(1, Math.round(value));
+                break;
+            case "attack":
+                stats.attack = Math.max(0, value);
+                break;
+        }
+    }
+
+    recomputeDerivedStats() {
+        const stats = this.player.stats;
+        stats.maxHealth = Math.max(1, Math.round(stats.maxHealth));
+        stats.attack = Math.max(0, stats.attack);
+        stats.health = this.clampResource("health", stats.health);
+
+        this.player.entityBridge.syncMaxHealth(stats.maxHealth);
+        this.player.entityBridge.syncHealth(stats.health);
+    }
+
+    getGainModifier(key) {
+        const stats = this.player.stats;
+        switch (key) {
+            case "moneyGain":
+                return stats.moneyGain;
+            case "expGain":
+                return stats.expGain;
+            default:
+                return 1;
+        }
+    }
+
+    getBaseGainModifier(key) {
+        const stats = this.player.stats;
+        switch (key) {
+            case "moneyGain":
+                return stats.baseMoneyGain;
+            case "expGain":
+                return stats.baseExpGain;
+            default:
+                return 1;
+        }
+    }
+
+    setGainModifier(key, value) {
+        const nextValue = Math.max(0, value);
+        switch (key) {
+            case "moneyGain":
+                this.player.stats.moneyGain = nextValue;
+                break;
+            case "expGain":
+                this.player.stats.expGain = nextValue;
+                break;
+        }
+    }
+
+    recomputeGainModifiers() {
+        this.player.stats.moneyGain = Math.max(0, this.player.stats.moneyGain);
+        this.player.stats.expGain = Math.max(0, this.player.stats.expGain);
+    }
+
+    emitBuffEvent(eventType, payload) {
+        switch (eventType) {
+            case "added":
+                this.player.events.OnBuffAdded?.(payload);
+                break;
+            case "removed":
+                this.player.events.OnBuffRemoved?.(payload);
+                break;
+            case "refreshed":
+                this.player.events.OnBuffRefreshed?.(payload);
+                break;
+        }
+    }
+
+    supportsEffect(effect) {
+        if (!effect) return false;
+
+        switch (effect.type) {
+            case BuffEffectType.INSTANT_RESOURCE:
+            case BuffEffectType.PERIODIC_RESOURCE:
+                return PLAYER_RESOURCE_KEYS.has(effect.key);
+            case BuffEffectType.STAT_MODIFIER:
+                return PLAYER_STAT_KEYS.has(effect.key);
+            case BuffEffectType.GAIN_MODIFIER:
+                return PLAYER_GAIN_KEYS.has(effect.key);
+            default:
+                return false;
+        }
+    }
+
+    _addHealth(delta, meta) {
+        if (!delta) return 0;
+
+        const stats = this.player.stats;
+        const oldHealth = stats.health;
+        const nextHealth = this.clampResource("health", oldHealth + delta);
+        const actual = nextHealth - oldHealth;
+        if (!actual) return 0;
+
+        stats.setHealth(nextHealth);
+        this.player.entityBridge.syncHealth(stats.health);
+
+        if (actual > 0) {
+            this.player.events.OnHeal?.(actual);
+            return actual;
+        }
+
+        const damage = -actual;
+        const ctx = {
+            damage,
+            attacker: null,
+            source: meta?.source ?? null,
+            reason: meta?.reason,
+        };
+
+        this.player.buffManager.onAfterDamageTaken(ctx);
+        this.player.events.OnAfterDamageTaken?.(damage, null);
+
+        if (stats.health <= 0 && this.player.state !== PlayerState.DEAD) {
+            this.player.healthCombat.die(null);
+        }
+
+        return actual;
+    }
+
+    _addArmor(delta) {
+        if (!delta) return 0;
+
+        const stats = this.player.stats;
+        const oldArmor = stats.armor;
+        const nextArmor = this.clampResource("armor", oldArmor + delta);
+        const actual = nextArmor - oldArmor;
+        if (!actual) return 0;
+
+        stats.setArmor(nextArmor);
+        this.player.entityBridge.syncArmor(stats.armor);
+        return actual;
+    }
+}
+
+class PlayerBuffManager {
+    constructor(player) {
+        this.player = player;
+        this.adapter = new PlayerBuffHostAdapter(player);
+        this._manager = new GenericBuffManager(this.adapter);
+    }
+
+    addBuff(typeId, params, source) {
+        if (TEMP_DISABLE.playerBuffs) return null;
+        return this._manager.addBuff(typeId, params, source);
+    }
+
+    removeBuff(typeIdOrFilter) {
+        if (TEMP_DISABLE.playerBuffs) {
+            return typeof typeIdOrFilter === "string" ? false : 0;
+        }
+        if (typeIdOrFilter == null) return false;
+        if (typeof typeIdOrFilter === "string") {
+            return this._manager.removeBuff(typeIdOrFilter);
+        }
+        return this._manager.removeByFilter(typeIdOrFilter ?? {});
+    }
+
+    removeById(id) {
+        if (TEMP_DISABLE.playerBuffs) return false;
+        return this._manager.removeById(id);
+    }
+
+    removeByTag(tag) {
+        if (TEMP_DISABLE.playerBuffs) return 0;
+        return this._manager.removeByTag(tag);
+    }
+
+    removeByFilter(filter) {
+        if (TEMP_DISABLE.playerBuffs) return 0;
+        return this._manager.removeByFilter(filter);
+    }
+
+    clearAll() {
+        if (TEMP_DISABLE.playerBuffs) return;
+        this._manager.clearAll();
+    }
+
+    clearCombatTemporary() {
+        if (TEMP_DISABLE.playerBuffs) return;
+        this._manager.clearCombatTemporary();
+    }
+
+    getBuff(typeId) {
+        if (TEMP_DISABLE.playerBuffs) return null;
+        return this._manager.getBuff(typeId);
+    }
+
+    hasBuff(typeId) {
+        if (TEMP_DISABLE.playerBuffs) return false;
+        return this._manager.hasBuff(typeId);
+    }
+
+    getBuffsByTag(tag) {
+        if (TEMP_DISABLE.playerBuffs) return [];
+        return this._manager.getAllBuffs().filter((buff) => buff.hasTag(tag));
+    }
+
+    getAllBuffs() {
+        if (TEMP_DISABLE.playerBuffs) return [];
+        return this._manager.getAllBuffs();
+    }
+
+    tick(dt) {
+        if (TEMP_DISABLE.playerBuffs) return;
+        this._manager.tick(dt);
+    }
+
+    onBeforeDamageTaken(ctx) {
+        if (TEMP_DISABLE.playerBuffs) return;
+        this._manager.onBeforeDamageTaken(ctx);
+    }
+
+    onAfterDamageTaken(ctx) {
+        if (TEMP_DISABLE.playerBuffs) return;
+        this._manager.onAfterDamageTaken(ctx);
+    }
+
+    onStateChange(oldState, newState) {
+        if (TEMP_DISABLE.playerBuffs) return;
+        this._manager.onStateChange(oldState, newState);
+    }
+
+    onRespawn() {
+        if (TEMP_DISABLE.playerBuffs) return;
+        this._manager.onRespawn();
+    }
+
+    recomputeModifiers() {
+        if (TEMP_DISABLE.playerBuffs) return;
+        this._manager.recomputeModifiers();
+    }
+}
+
+/**
+ * @module 玩家系统/玩家/组件/生命周期
+ */
+
+/**
+ * 玩家生命周期编排器。
+ *
+ * 将 PlayerState 的状态机转换封装为具名方法，在每个关键节点
+ * 协调各组件完成初始化、清理和事件分发。
+ *
+ * 生命周期阶段：
+ * | 方法          | 触发时机               | 核心动作                          |
+ * |---------------|------------------------|-----------------------------------|
+ * | `connect`     | 玩家首次连接           | 绑定 Controller，状态 → CONNECTED |
+ * | `activate`    | Pawn 生成 / 激活       | 绑定 Pawn，发放装备，状态 → ALIVE |
+ * | `disconnect`  | 玩家断开               | 清理 Buff，状态 → DISCONNECTED    |
+ * | `handleDeath` | HealthCombat 判定死亡  | 切旁观者，状态 → DEAD             |
+ * | `respawn`     | 重生触发               | 重置血量/护甲，通知 Persistent Buff |
+ *
+ * @navigationTitle 玩家生命周期
+ */
+class PlayerLifecycle {
+    /**
+     * @param {import("../player.js").Player} player 所属玩家实例
+     */
+    constructor(player) {
+        this.player = player;
+    }
+
+    /**
+     * 玩家首次连接
+     * @param {import("cs_script/point_script").CSPlayerController} controller
+     */
+    connect(controller) {
+        this.player.entityBridge.bindController(controller);
+        this.player.applyStateTransition(PlayerState.CONNECTED);
+        this.player.events.OnJoin?.(this.player);
+    }
+
+    /**
+     * 玩家激活（拿到有效 pawn）
+     * @param {import("cs_script/point_script").CSPlayerPawn} pawn
+     */
+    activate(pawn) {
+        this.player.entityBridge.bindPawn(pawn);
+
+        // 按当前等级初始化战斗资源
+        this.player.stats.refreshLevelStats();
+        this.player.stats.resetCombatResources(this.player.stats.maxHealth, 0);
+        this.player.entityBridge.syncMaxHealth(this.player.stats.maxHealth);
+        this.player.entityBridge.syncHealth(this.player.stats.health);
+
+        this.player.applyStateTransition(PlayerState.PREPARING);
+
+        // 给予初始装备
+        this._giveStartingEquipment();
+
+        this.player.events.OnActivate?.(this.player);
+        Instance.Msg(`玩家 ${this.player.entityBridge.getPlayerName()} 已激活`);
+    }
+
+    /**
+     * 玩家重置（OnPlayerReset：重生/换队）
+     * @param {import("cs_script/point_script").CSPlayerPawn} newPawn
+     */
+    handleReset(newPawn) {
+        this.player.entityBridge.rebindPawn(newPawn);
+
+        // 同步脚本数值到新 pawn
+        this.player.entityBridge.syncMaxHealth(this.player.stats.maxHealth);
+        this.player.entityBridge.syncHealth(this.player.stats.health);
+        this.player.entityBridge.syncArmor(this.player.stats.armor);
+
+        // 如果之前是 DEAD，进入 RESPAWNING
+        if (this.player.state === PlayerState.DEAD) {
+            this.player.applyStateTransition(PlayerState.RESPAWNING);
+            this.respawn();
+        } else {
+            // 非死亡状态的重置（换队等），保持原脚本生命值
+            if (this.player.stats.health <= 0) {
+                this.player.healthCombat.die(null);
+            }
+        }
+    }
+
+    /**
+     * 重生流程
+     * @param {number} [health]
+     * @param {number} [armor]
+     */
+    respawn(health, armor) {
+        const stats = this.player.stats;
+        stats.refreshLevelStats();
+        stats.resetCombatResources(health ?? stats.maxHealth, armor);
+
+        this.player.entityBridge.syncMaxHealth(stats.maxHealth);
+        this.player.entityBridge.syncHealth(stats.health);
+        this.player.entityBridge.syncArmor(stats.armor);
+        this.player.entityBridge.joinTeam(3);
+
+        this._giveStartingEquipment();
+
+        // 通知 persistent buff 重生
+        this.player.buffManager.onRespawn();
+
+        this.player.applyStateTransition(PlayerState.PREPARING);
+        this.player.events.OnRespawned?.(this.player);
+
+        Instance.Msg(`玩家 ${this.player.entityBridge.getPlayerName()} 已重生 (HP: ${stats.health})`);
+    }
+
+    /**
+     * 游戏正式开始后切入 ALIVE。
+     */
+    enterAliveState() {
+        const stats = this.player.stats;
+        stats.refreshLevelStats();
+        this.player.entityBridge.syncMaxHealth(stats.maxHealth);
+        this.player.entityBridge.syncHealth(stats.health);
+        this.player.entityBridge.syncArmor(stats.armor);
+        this.player.applyStateTransition(PlayerState.ALIVE);
+    }
+
+    /**
+     * 断开连接。
+     */
+    disconnect() {
+        this.player.buffManager.clearAll();
+        this.player.entityBridge.disconnect();
+        this.player.applyStateTransition(PlayerState.DISCONNECTED);
+        this.player.events.OnDisconnect?.(this.player);
+    }
+
+    /**
+     * 重置整局数据并回到等待准备。
+     */
+    resetGameStatus() {
+        const stats = this.player.stats;
+        this.player.buffManager.clearAll();
+        stats.resetGameProgress();
+        this.player.entityBridge.syncMaxHealth(stats.maxHealth);
+        this.player.entityBridge.syncHealth(stats.health);
+        this.player.entityBridge.syncArmor(stats.armor);
+        this.player.applyStateTransition(PlayerState.PREPARING);
+        this.player.lastTick = 0;
+        this._giveStartingEquipment();
+    }
+
+    /**
+     * 给予基础出生装备。
+     */
+    _giveStartingEquipment() {
+        this.player.entityBridge.giveItem("weapon_knife");
+        this.player.entityBridge.giveItem("weapon_glock");
+    }
+}
+
+/**
+ * @module 玩家系统/玩家/玩家实体
+ */
+
+/**
+ * 单玩家聚合根。
+ *
+ * 每个在线玩家对应一个 Player 实例，它是玩家系统中最核心的类。
+ * Player 自身不包含业务逻辑实现，而是将所有行为委托给内部组件：
+ *
+ * - `entityBridge`  – 维护引擎层 Controller / Pawn 引用，负责血量、护甲同步。
+ * - `stats`         – 管理金钱、经验、等级和升级判定。
+ * - `healthCombat`  – 处理脚本侧伤害、引擎侧伤害同步、治疗和死亡。
+ * - `buffManager`   – 维护 Buff 生命周期，驱动叠层/刷新/过期清理。
+ * - `lifecycle`     – 连接、激活、重生、重置、断开时的状态转换。
+ * - `tickDispatcher` – 每帧调度入口，推进 Buff tick 等持续逻辑。
+ *
+ * 外部系统（如 PlayerManager）通过 Player 上的公开方法与组件交互，
+ * 通过专用回调事件订阅领域事件（死亡、升级、Buff 变化等）。
+ *
+ * 状态管理：所有状态变更必须经过 `applyStateTransition()` 统一入口，
+ * 该方法会同步通知 Buff 系统和事件总线，确保状态一致性。
+ *
+ * @navigationTitle 玩家实体
+ */
+class Player {
+    /**
+     * @param {number} id 玩家唯一 ID
+     * @param {number} slot 引擎 PlayerSlot
+     */
+    constructor(id, slot) {
+        /** @type {number} 玩家唯一 ID */
+        this.id = id;
+        /** @type {number} 引擎 PlayerSlot */
+        this.slot = slot;
+
+        /** @type {number} 玩家当前状态，取值见 {@link PlayerState} */
+        this.state = PlayerState.DISCONNECTED;
+
+        /** @type {PlayerEvents} 玩家领域事件集合 */
+        this.events = new PlayerEvents();
+        /** @type {number} 上一次 tick 的游戏时间（0 表示尚未 tick） */
+        this.lastTick = 0;
+        // 组件
+        /** @type {PlayerEntityBridge} 引擎实体桥接组件 */
+        this.entityBridge  = new PlayerEntityBridge(this);
+        /** @type {PlayerStats} 玩家成长数据组件 */
+        this.stats         = new PlayerStats(this);
+        /** @type {PlayerHealthCombat} 生命/战斗组件 */
+        this.healthCombat  = new PlayerHealthCombat(this);
+        /** @type {PlayerBuffManager} Buff 管理组件 */
+        this.buffManager   = new PlayerBuffManager(this);
+        /** @type {PlayerLifecycle} 生命周期组件 */
+        this.lifecycle     = new PlayerLifecycle(this);
+    }
+
+    // ——— 生命周期入口（委托给 Lifecycle） ———
+
+    /**
+     * 绑定 Controller，进入 CONNECTED 状态。
+     * @param {import("cs_script/point_script").CSPlayerController} controller 玩家控制器
+     */
+    connect(controller) {
+        this.lifecycle.connect(controller);
+    }
+
+    /**
+     * 绑定 Pawn，进入可游戏状态。
+     * @param {import("cs_script/point_script").CSPlayerPawn} pawn 玩家 Pawn 实体
+     */
+    activate(pawn) {
+        this.lifecycle.activate(pawn);
+    }
+
+    /**
+     * 重置处理（重生/换队），更新 Pawn 引用并恢复状态。
+     * @param {import("cs_script/point_script").CSPlayerPawn} newPawn 新的 Pawn 实体
+     */
+    handleReset(newPawn) {
+        this.lifecycle.handleReset(newPawn);
+    }
+
+    /**
+     * 断开连接，清理资源。
+     */
+    disconnect() {
+        this.lifecycle.disconnect();
+        this.events.clear();
+    }
+
+    /**
+     * 重置局内状态（每局开始时调用）。
+     */
+    resetGameStatus() {
+        this.lifecycle.resetGameStatus();
+    }
+
+    // ——— 战斗入口（委托给 HealthCombat） ———
+
+    /**
+     * 对玩家造成脚本侧伤害。
+     * @param {number} damage 伤害量
+     * @param {import("cs_script/point_script").Entity|null} [attacker] 攻击者实体
+     * @returns {boolean} 是否导致死亡
+     */
+    takeDamage(damage, attacker) {
+        return this.healthCombat.takeDamage(damage, attacker);
+    }
+
+    /**
+     * 同步引擎侧伤害到脚本层状态。
+     * @param {number} damage 伤害量
+     * @param {import("cs_script/point_script").Entity|null} [attacker] 攻击者实体
+     * @param {import("cs_script/point_script").Entity|null} [inflictor] 伤害来源实体
+     * @returns {boolean} 是否导致死亡
+     */
+    syncDamageFromEngine(damage, attacker, inflictor) {
+        return this.healthCombat.syncDamageFromEngine(damage, attacker, inflictor);
+    }
+
+    /**
+     * 治疗玩家，恢复指定量的生命值。
+     * @param {number} amount 治疗量
+     * @returns {boolean} 是否成功
+     */
+    heal(amount) {
+        return this.healthCombat.heal(amount);
+    }
+
+    /**
+     * 给予玩家护甲。
+     * @param {number} amount 护甲量
+     * @returns {boolean} 是否成功
+     */
+    giveArmor(amount) {
+        return this.healthCombat.giveArmor(amount);
+    }
+
+    /**
+     * 复活玩家，可指定初始生命和护甲。
+     * @param {number} [health] 复活后生命值
+     * @param {number} [armor] 复活后护甲值
+     */
+    respawn(health, armor) {
+        this.lifecycle.respawn(health, armor);
+    }
+
+    enterAliveState() {
+        this.lifecycle.enterAliveState();
+    }
+
+    // ——— 成长入口（委托给 Stats） ———
+
+    /**
+     * 增加金钱。
+     * @param {number} amount 金额
+     * @param {string} [reason] 来源原因
+     */
+    addMoney(amount, reason) {
+        this.stats.addMoney(amount, reason);
+    }
+
+    /**
+     * 增加经验值。
+     * @param {number} amount 经验量
+     * @param {string} [reason] 来源原因
+     */
+    addExp(amount, reason) {
+        this.stats.addExp(amount, reason);
+    }
+
+    // ——— 输出伤害（基于等级配置缩放） ———
+
+    /**
+     * 计算玩家对目标造成的实际伤害（基础伤害 × 等级攻击倍率）。
+     * @param {number} baseDamage 基础伤害
+     * @returns {number}
+     */
+    getAttackDamage(baseDamage) {
+        return this.stats.getAttackDamage(baseDamage);
+    }
+
+    /**
+     * 计算玩家对实体的一次伤害值，供外部系统通过 PlayerManager 间接调用。
+     *
+     * 返回最终数值；若外部需要暴击等细节，可改用 PlayerStats.rollDamageAgainstEntity。
+     *
+     * @param {import("../player_const").PlayerDamageOptions} [options]
+     * @returns {number}
+     */
+    calculateDamageToEntity(options) {
+        return this.stats.rollDamageAgainstEntity(options).damage;
+    }
+
+    // ——— Buff 入口（委托给 BuffManager） ———
+
+    /**
+     * 添加指定类型的 Buff。
+     * @param {string} typeId Buff 类型标识
+     * @param {object} [params] Buff 初始化参数
+     * @returns {import("./buffs/buff_template").BuffTemplate | null} 创建的 Buff 实例，创建失败返回 null
+     */
+    addBuff(typeId, params, source) {
+        return this.buffManager.addBuff(typeId, params, source);
+    }
+
+    /**
+     * 移除指定类型的 Buff。
+     * @param {string} typeId Buff 类型标识
+     * @returns {boolean} 是否成功移除
+     */
+    removeBuff(typeIdOrFilter) {
+        return this.buffManager.removeBuff(typeIdOrFilter);
+    }
+
+    hasBuff(typeId) {
+        return this.buffManager.hasBuff(typeId);
+    }
+
+    getAllBuffs() {
+        return this.buffManager.getAllBuffs();
+    }
+
+    // ——— 准备状态 ———
+
+    /** @returns {boolean} */
+    get isReady() {
+        return this.state === PlayerState.READY;
+    }
+
+    /** @returns {boolean} */
+    get isAlive() {
+        return this.state !== PlayerState.DEAD && this.state !== PlayerState.DISCONNECTED;
+    }
+
+    /** @returns {boolean} */
+    get isInGame() {
+        return this.state >= PlayerState.PREPARING;
+    }
+
+    /**
+     * 设置玩家准备状态。
+     * @param {boolean} ready 是否准备
+     */
+    setReady(ready) {
+        if (ready && this.state === PlayerState.PREPARING) {
+            this.applyStateTransition(PlayerState.READY);
+            this.events.OnReadyChanged?.(true);
+        } else if (!ready && this.state === PlayerState.READY) {
+            this.applyStateTransition(PlayerState.PREPARING);
+            this.events.OnReadyChanged?.(false);
+        }
+    }
+
+    // ——— 状态机 ———
+
+    /**
+     * 状态迁移统一入口 — 唯一允许写 this.state 的地方。
+     * @param {number} nextState
+     * @returns {boolean}
+     */
+    applyStateTransition(nextState) {
+        if (this.state === nextState) return true;
+        const oldState = this.state;
+        this.state = nextState;
+        this.buffManager.onStateChange(oldState, nextState);
+        this.events.OnStateChanged?.(oldState, nextState);
+        return true;
+    }
+
+    /** @param {(ready: boolean) => void} callback */
+    setOnReadyChanged(callback) {
+        this.events.setOnReadyChanged(callback);
+    }
+    /** @param {(old: number, current: number, delta: number, reason?: string) => void} callback */
+    setOnMoneyChanged(callback) {
+        this.events.setOnMoneyChanged(callback);
+    }
+    /** @param {(oldLevel: number, newLevel: number) => void} callback */
+    setOnLevelUp(callback) {
+        this.events.setOnLevelUp(callback);
+    }
+    /** @param {(player: Player, killer?: any) => void} callback */
+    setOnDeath(callback) {
+        this.events.setOnDeath(callback);
+    }
+    /** @param {(player: Player) => void} callback */
+    setOnRespawned(callback) {
+        this.events.setOnRespawned(callback);
+    }
+    /** @param {(oldState: number, newState: number) => void} callback */
+    setOnStateChanged(callback) {
+        this.events.setOnStateChanged(callback);
+    }
+
+    // ——— Tick ———
+
+    /**
+     * 每帧调度入口。
+     * @param {number} now 当前引擎时间
+     */
+    tick(now) {
+        
+        if (this.state === PlayerState.DISCONNECTED) return;
+        if (this.state === PlayerState.DEAD) return;
+
+        const dt = this.lastTick > 0 ? now - this.lastTick : 0;
+        this.lastTick = now;
+        if (dt <= 0) return;
+
+        // 1. buff 计时 & 过期清理
+        this.buffManager.tick(dt);
+    }
+
+    // ——— 查询 ———
+
+    /**
+     * 获取玩家属性快照（委托给 Stats）。
+     * @returns {{id: number, name: string, slot: number, level: number, money: number, health: number, maxHealth: number, armor: number, attack: number, critChance: number, critMultiplier: number, kills: number, score: number, exp: number, expNeeded: number,pawn: CSPlayerPawn|null}}
+     */
+    getSummary() {
+        return { ...this.stats.getSummary(), pawn: this.entityBridge.pawn };
+    }
+}
+/**
+ * 玩家领域回调集合。
+ */
+class PlayerEvents {
+    constructor() {
+        this.clear();
+    }
+    /** 
+     * 玩家连接事件回调。
+     * @param {(player: Player) => void} callback 
+     */
+    setOnJoin(callback) { this.OnJoin = callback; }
+    /** 
+     * 玩家激活事件回调。
+     * @param {(player: Player) => void} callback 
+     */
+    setOnActivate(callback) { this.OnActivate = callback; }
+    /** 
+     * 玩家断开连接事件回调。
+     * @param {(player: Player) => void} callback 
+     */
+    setOnDisconnect(callback) { this.OnDisconnect = callback; }
+    /** 
+     * 玩家准备状态变化事件回调。
+     * @param {(ready: boolean) => void} callback 
+     */
+    setOnReadyChanged(callback) { this.OnReadyChanged = callback; }
+    /** 
+     * 玩家状态变化事件回调。
+     * @param {(oldState: number, newState: number) => void} callback 
+     */
+    setOnStateChanged(callback) { this.OnStateChanged = callback; }
+    /** 
+     * 玩家受到伤害后事件回调。
+     * @param {(damage: number, attacker?: any, inflictor?: any) => void} callback 
+     */
+    setOnAfterDamageTaken(callback) { this.OnAfterDamageTaken = callback; }
+    /** 
+     * 玩家治疗事件回调。
+     * @param {(amount: number) => void} callback 
+     */
+    setOnHeal(callback) { this.OnHeal = callback; }
+    /** 
+     * 玩家死亡事件回调。
+     * @param {(player: Player, killer?: any) => void} callback 
+     */
+    setOnDeath(callback) { this.OnDeath = callback; }
+    /** 
+     * 玩家重生事件回调。
+     * @param {(player: Player) => void} callback 
+     */
+    setOnRespawned(callback) { this.OnRespawned = callback; }
+    /** 
+     * 玩家金钱变化事件回调。
+     * @param {(old: number, current: number, delta: number, reason?: string) => void} callback 
+     */
+    setOnMoneyChanged(callback) { this.OnMoneyChanged = callback; }
+    /** 
+     * 玩家经验变化事件回调。
+     * @param {(exp: number, delta: number, reason?: string) => void} callback 
+     */
+    setOnExpChanged(callback) { this.OnExpChanged = callback; }
+    /** 
+     * 玩家升级事件回调。
+     * @param {(oldLevel: number, newLevel: number) => void} callback 
+     */
+    setOnLevelUp(callback) { this.OnLevelUp = callback; }
+    /** 
+     * 玩家获得Buff事件回调。
+     * @param {(buff: any) => void} callback 
+     */
+    setOnBuffAdded(callback) { this.OnBuffAdded = callback; }
+    /** 
+     * 玩家失去Buff事件回调。
+     * @param {(buff: any) => void} callback 
+     */
+    setOnBuffRemoved(callback) { this.OnBuffRemoved = callback; }
+    /** 
+     * 玩家刷新Buff事件回调。
+     * @param {(buff: any) => void} callback 
+     */
+    setOnBuffRefreshed(callback) { this.OnBuffRefreshed = callback; }
+    /** 
+     * 玩家每个Tick事件回调。
+     * @param {(dt: number) => void} callback 
+     */
+    setOnTick(callback) { this.OnTick = callback; }
+
+    /** 清除所有回调 */
+    clear() {
+        this.OnJoin = null;
+        this.OnActivate = null;
+        this.OnDisconnect = null;
+        this.OnReadyChanged = null;
+        this.OnStateChanged = null;
+        this.OnAfterDamageTaken = null;
+        this.OnHeal = null;
+        this.OnDeath = null;
+        this.OnRespawned = null;
+        this.OnMoneyChanged = null;
+        this.OnExpChanged = null;
+        this.OnLevelUp = null;
+        this.OnBuffAdded = null;
+        this.OnBuffRemoved = null;
+        this.OnBuffRefreshed = null;
+        this.OnTick = null;
+    }
+}
+
+/**
+ * @module 玩家系统/玩家管理器
+ */
+
+/**
+ * @typedef {object} TP_playerRewardPayload - 玩家奖励分发载荷
+ * @property {"buff"|"money"|"exp"|"heal"|"armor"|"damage"|"ready"|"respawn"|"resetGameStatus"} type - 奖励类型
+ * @property {string} [buffTypeId] - Buff 类型 ID（仅 type="buff" 时适用）
+ * @property {Record<string, any>} [params] - Buff 参数（仅 type="buff" 时适用）
+ * @property {number} [amount] - 数值（仅 type="money"、"exp"、"heal"、"armor"、"damage" 时适用）
+ * @property {string} [reason] - 原因描述（仅 type="money"、"exp" 时适用）
+ * @property {boolean} [isReady] - 准备状态（仅 type="ready" 时适用）
+ * @property {number} [health] - 生命值（仅 type="respawn" 时适用）
+ * @property {number} [armor] - 护甲值（仅 type="respawn" 时适用）
+ */
+/**
+ * 负责所有在线玩家实例的集合管理，以及引擎事件到脚本层的桥接。
+ * 它是外部系统与玩家系统交互的唯一入口。
+ *
+ * 主要职责：
+ * - 提供玩家相关引擎事件的路由方法，由 main.js 负责统一注册监听，
+ *   再转发到对应的 Player 实例上。
+ * - 维护 `players` Map（slot → Player），跟踪在线人数和准备状态。
+ * - 提供聚合操作 API：`dispatchReward` 等，
+ *   按 slot 定位玩家并委托执行。
+ * - 通过回调（`onPlayerJoin`、`onPlayerDeath` 等）向上层暴露关键生命周期事件。
+ * - 提供查询方法：`getAllPlayers`、`getAlivePlayers`、`areAllPlayersReady` 等。
+ *
+ * 使用方式：先构造 `new PlayerManager()`，由 main.js 调用
+ * `initializeExistingPlayers()` 完成初始玩家同步，再调用
+ * `setupEventListeners()` 注册仅保留在模块内的脚本输入监听，
+ * 然后在主循环中每帧调用 `tick(now)` 驱动所有玩家的持续逻辑。
+ *
+ * @navigationTitle 玩家管理器
+ */
+class PlayerManager {
+    /**
+     * @param {import("../util/definition").Adapter} adapter - 外部适配器（日志/广播/时钟）
+     */
+    constructor(adapter) {
+        /** 
+         * 玩家实例集合，key 为玩家 slot，value 为 Player 实例
+         * @type {Map<number, Player>} 
+         */
+        this.players = new Map();
+        /** 
+         * 下一个玩家 ID
+         * @type {number} 
+         */
+        this.nextPlayerId = 1;
+        /** 
+         * 总玩家数量
+         * @type {number} 
+         */
+        this.totalPlayers = 0;
+        /** 
+         * 已准备玩家数量
+         * @type {number} 
+         */
+        this.readyCount = 0;
+        /**
+         * 外部适配器实例，提供日志、广播和游戏时间接口
+         * @type {import("../util/definition").Adapter} 
+         */
+        this._adapter = adapter;
+        /** 每个 slot 的hud文本缓存 */
+        this._statusTextCache = new Map();
+        this._tempDisableLogKeys = new Set();
+        this.events = new PlayerManagerEvents();
+        /** @type {Record<string, (player: Player, payload: TP_playerRewardPayload) => void>} */
+        this._rewardHandlers = {
+            buff: (player, payload) => {
+                if (TEMP_DISABLE.playerBuffs) {
+                    this._logTempDisableOnce("reward:buff", "[TempDisable] Player reward buffs are disabled and will be ignored.");
+                    return;
+                }
+                this.applyBuff(player.slot, payload.buffTypeId ?? "", payload.params, payload.source);
+            },
+            money: (player, payload) => {
+                player.addMoney(payload.amount ?? 0, payload.reason);
+            },
+            exp: (player, payload) => {
+                player.addExp(payload.amount ?? 0, payload.reason);
+            },
+            heal: (player, payload) => {
+                player.heal(payload.amount ?? 0);
+            },
+            armor: (player, payload) => {
+                player.giveArmor(payload.amount ?? 0);
+            },
+            damage: (player, payload) => {
+                player.takeDamage(payload.amount ?? 0, null);
+            },
+            ready: (player, payload) => {
+                player.setReady(payload.isReady ?? false);
+            },
+            respawn: (player, payload) => {
+                player.respawn(payload.health ?? 100, payload.armor ?? 0);
+            },
+            resetGameStatus: (player) => {
+                player.resetGameStatus();
+            }
+        };
+        this.init();
+    }
+    // ——— 初始化 / 脚本输入监听 ———
+    /**
+     * 将脚本加载前已存在的玩家同步进管理器。注册实体输入监听。
+     *  - ready: 玩家准备状态变化，参数为玩家控制器。
+     */
+    init() {
+        Instance.OnScriptInput("ready",(e)=>{
+            const controller = e.activator;
+            if(controller && controller instanceof CSPlayerPawn)
+            {
+                const player = this.getPlayerByPawn(controller);
+                if (!player) return;
+                player.setReady(player.isReady ? false : true);
+            }
+        });
+    }
+    /**
+     * 所有类初始化完成后调用
+     */
+    refresh()
+    {
+        const players = Instance.FindEntitiesByClass("player");
+        for (const player of players) {
+            if (player && player instanceof CSPlayerPawn) {
+                const controller = player.GetPlayerController();
+                this.handlePlayerConnect(controller);
+                if (player.IsAlive()) {
+                    this.handlePlayerActivate(controller);
+                }
+            }
+        }
+    }
+    // ——— 事件路由（只做解析 + 转发） ———
+
+    /**
+     * 当玩家连接时调用。
+     * 参数1：玩家控制器。
+     * @param {CSPlayerController|undefined} controller
+     */
+    handlePlayerConnect(controller) {
+        if (!controller) return;
+
+        const slot = controller.GetPlayerSlot();
+        const existingPlayer = this.players.get(slot);
+        const player = new Player(this.nextPlayerId++, slot);
+        player.connect(controller);
+        // 订阅玩家领域事件，桥接到 manager 级回调
+        this._bindPlayerEvents(player);
+        if (existingPlayer) {
+            if (existingPlayer.isReady) {
+                this.readyCount--;
+            }
+            existingPlayer.disconnect();
+            this.players.delete(slot);
+        }
+        this.players.set(slot, player);
+        if (!existingPlayer) {
+            this.totalPlayers++;
+        }
+
+        this._adapter.broadcast(`玩家 ${controller.GetPlayerName()} 加入游戏 (SLOT: ${slot})`);
+        this.events.OnPlayerJoin?.(player);
+        
+        this._adapter.sendMessage(slot, "=== 欢迎加入游戏 ===");
+    }
+
+    /**
+     * 玩家激活时调用，绑定 Pawn 并将玩家切换到可游戏状态。
+     * @param {CSPlayerController|undefined} controller 玩家控制器
+     */
+    handlePlayerActivate(controller) {
+        if (!controller) return;
+
+        const slot = controller.GetPlayerSlot();
+        const player = this.players.get(slot);
+        if (!player) return;
+
+        const pawn = controller.GetPlayerPawn();
+        if(!pawn)return;
+        player.activate(pawn);
+    }
+
+    /**
+     * 玩家断开连接时调用，清理对应 Player 实例并更新计数。
+     * @param {number} playerSlot 玩家槽位
+     */
+    handlePlayerDisconnect(playerSlot) {
+        const player = this.players.get(playerSlot);
+        if (!player) return;
+
+        this._adapter.broadcast(`玩家 ${player.entityBridge.getPlayerName()} 离开游戏`);
+
+        if (player.isReady) {
+            this.readyCount--;
+        }
+
+        this.events.OnPlayerLeave?.(player);
+
+        player.disconnect();
+        this.players.delete(playerSlot);
+        this.totalPlayers--;
+
+        if (!player.isReady && this.areAllPlayersReady()) {
+            this.events.OnAllPlayersReady?.();
+        }
+    }
+
+    /**
+     * 玩家重置（重生/换队）时调用，更新 Pawn 引用并触发重生回调。
+     * @param {CSPlayerPawn} pawn 玩家 Pawn 实体
+     */
+    handlePlayerReset(pawn) {
+        if (!pawn) return;
+        const controller = pawn.GetPlayerController();
+        if (!controller) return;
+        let player = this.players.get(controller.GetPlayerSlot());
+
+        if (player) {
+            const wasDead = player.state === PlayerState.DEAD;
+            player.handleReset(pawn);
+            // 只有从 DEAD 恢复才是真正的重生，换队等不触发回调
+            if (wasDead) {
+                this.events.OnPlayerRespawn?.(player);
+            }
+        } else {
+            // 全新未知玩家，走 connect + activate
+            const controller = pawn.GetPlayerController();
+            this.handlePlayerConnect(controller);
+            this.handlePlayerActivate(controller);
+        }
+    }
+
+    /**
+     * 玩家死亡时调用，将玩家设为 DEAD 状态并触发死亡回调。
+     * @param {CSPlayerPawn} playerPawn 玩家 Pawn 实体
+     */
+    handlePlayerDeath(playerPawn) {
+        const player = this.getPlayerByPawn(playerPawn);
+        if (!player) return;
+
+        // 只在首次进入 DEAD 时触发回调，防止与 handlePlayerDamage 双重触发
+        if (player.state !== PlayerState.DEAD) {
+            player.healthCombat.die(null);
+            this.events.OnPlayerDeath?.(playerPawn);
+        }
+    }
+
+    /**
+     * 处理玩家聊天指令。
+     * 目前仅保留与玩家系统直接相关的入口；跨模块行为通过回调交给 main.js 编排。
+     * @param {{player: CSPlayerController | undefined;text: string;team: number;}} event 引擎聊天事件
+     */
+    handlePlayerChat(event) {
+        const controller = event.player;
+        const text = event.text;
+        if (!controller) return;
+        const player = this.getPlayerByController(controller);
+        if (!player) return;
+
+        const parts = text.trim().toLowerCase().split(/\s+/);
+        const command = parts[0];
+        Number(parts[1]);
+
+        if (command === "r" || command === "!r") {
+            //玩家准备
+            player.setReady(true);
+        }
+    }
+
+    /**
+     * 引擎伤害事件前置拦截，若玩家已死亡则中止伤害。
+     * @param {import("cs_script/point_script").ModifyPlayerDamageEvent} event 引擎伤害修改事件
+     */
+    handleBeforePlayerDamage(event) {
+        const player = this.getPlayerByPawn(event.player);
+        if (!player || !player.isAlive) {
+            return { abort: true };
+        }
+        return;
+    }
+
+    /**
+     * 同步引擎侧伤害到脚本层，若第一次检测到死亡则触发死亡回调。
+     * @param {import("cs_script/point_script").PlayerDamageEvent} event 引擎伤害事件
+     */
+    handlePlayerDamage(event) {
+        const player = this.getPlayerByPawn(event.player);
+        if (!player) return;
+
+        const wasDead = player.state === PlayerState.DEAD;
+        const died = player.syncDamageFromEngine(event.damage, event.attacker, event.inflictor);
+        // 只在本次首次检测到死亡时触发回调，防止与 handlePlayerDeath (OnPlayerKill) 双重触发
+        if (died && !wasDead) {
+            this.events.OnPlayerDeath?.(event.player);
+        }
+    }
+
+    // ——— 订阅 Player 领域事件 ———
+
+    /**
+     * 订阅玩家领域事件，将准备状态变化、金钱变化、升级等事件桥接到 manager 级回调。
+     * @param {Player} player 玩家实例
+     */
+    _bindPlayerEvents(player) {
+        player.setOnReadyChanged((ready) => {
+            if (ready) this.readyCount++;
+            else this.readyCount--;
+
+            const name = player.entityBridge.getPlayerName();
+            this._adapter.broadcast(
+                ready
+                    ? `${name} 已准备 (${this.readyCount}/${this.totalPlayers})`
+                    : `${name} 取消准备 (${this.readyCount}/${this.totalPlayers})`
+            );
+            this.events.OnPlayerReady?.(player, ready);
+
+            // 检查是否全员准备就绪
+            if (ready && this.areAllPlayersReady()) {
+                this.events.OnAllPlayersReady?.();
+            }
+        });
+
+        player.setOnMoneyChanged((old, current, delta, reason) => {
+            if (delta > 0) this._adapter.sendMessage(player.slot, `获得 $${delta} ${reason ?? ""}`);
+            this.events.OnPlayerMoneyChange?.(player, old, current);
+        });
+
+        player.setOnLevelUp((oldLevel, newLevel) => {
+            this._adapter.sendMessage(player.slot, `恭喜升级到 ${newLevel} 级！`);
+            this.events.OnPlayerLevelUp?.(player, oldLevel, newLevel);
+        });
+    }
+
+    // ——— 兼容 API ———
+
+    /**
+     * 计算玩家对实体的最终伤害，提供给外部系统调用。
+     * @param {number} playerSlot
+     * @param {number} amount
+     */
+    modifyDamage(playerSlot, amount) {
+        const player = this.players.get(playerSlot);
+        if (!player) return amount;
+        return player.getAttackDamage(amount);
+    }
+
+    _logTempDisableOnce(key, message) {
+        if (this._tempDisableLogKeys.has(key)) return;
+        this._tempDisableLogKeys.add(key);
+        this._adapter.log(message);
+    }
+
+    applyBuff(playerSlot, typeId, params, source) {
+        if (TEMP_DISABLE.playerBuffs) {
+            this._logTempDisableOnce("applyBuff", "[TempDisable] Player buffs are disabled; applyBuff() calls are ignored.");
+            return;
+        }
+        this._forEachTargetPlayer(playerSlot, (player) => {
+            player.addBuff(typeId, params, source);
+        });
+    }
+    /**
+     * 统一奖励/效果分发入口
+     * @param {number|null} playerSlot  null = 全体玩家
+     * @param {TP_playerRewardPayload} payload
+     */
+    dispatchReward(playerSlot, payload) {
+        const handler = this._rewardHandlers[payload.type];
+        if (!handler) return;
+        this._forEachTargetPlayer(playerSlot, (player) => {
+            handler(player, payload);
+        });
+    }
+
+    enterGameStart() {
+        this.readyCount = 0;
+        for (const [, player] of this.players) {
+            if (!player.entityBridge.pawn) continue;
+            player.enterAliveState();
+        }
+    }
+
+    resetAllGameStatus() {
+        this.readyCount = 0;
+        for (const [, player] of this.players) {
+            player.resetGameStatus();
+        }
+    }
+
+    /**
+     * 遍历奖励目标玩家。
+     * @param {number|null} playerSlot
+     * @param {(player: Player) => void} visitor
+     */
+    _forEachTargetPlayer(playerSlot, visitor) {
+        const slots = playerSlot != null ? [playerSlot] : [...this.players.keys()];
+        for (const slot of slots) {
+            const player = this.players.get(slot);
+            if (!player) continue;
+            visitor(player);
+        }
+    }
+
+    // ——— 查询 ———
+
+    /**
+     * 按槽位获取玩家实例。
+     * @param {number} playerSlot 玩家槽位
+     * @returns {Player|undefined}
+     */
+    getPlayer(playerSlot) {
+        return this.players.get(playerSlot);
+    }
+
+    /**
+     * 按 Controller 查找玩家实例。
+     * @param {CSPlayerController} controller 玩家控制器
+     * @returns {Player|null}
+     */
+    getPlayerByController(controller) {
+        if (!controller) return null;
+        return this.players.get(controller.GetPlayerSlot()) ?? null;
+    }
+
+    /**
+     * 按 Pawn 遍历查找玩家实例。
+     * @param {CSPlayerPawn} pawn 玩家 Pawn 实体
+     * @returns {Player|null}
+     */
+    getPlayerByPawn(pawn) {
+        if (!pawn) return null;
+        for (const [, player] of this.players) {
+            if (player.entityBridge.pawn === pawn) return player;
+        }
+        return null;
+    }
+
+    /**
+     * 获取所有在线玩家列表。
+     * @returns {Player[]}
+     */
+    getAllPlayers() {
+        return Array.from(this.players.values());
+    }
+
+    /**
+     * 获取所有在游戏中且存活的玩家。
+     * @returns {Player[]}
+     */
+    getActivePlayers() {
+        return Array.from(this.players.values()).filter(p => p.isInGame && p.isAlive);
+    }
+
+    /**
+     * 获取所有已准备的玩家。
+     * @returns {Player[]}
+     */
+    getReadyPlayers() {
+        return Array.from(this.players.values()).filter(p => p.isReady);
+    }
+
+    /**
+     * 获取所有存活玩家。
+     * @returns {Player[]}
+     */
+    getAlivePlayers() {
+        return Array.from(this.players.values()).filter(p => p.isAlive);
+    }
+
+    /**
+     * 所有在线玩家是否全部准备就绪。
+     * @returns {boolean}
+     */
+    areAllPlayersReady() {
+        if (this.totalPlayers === 0) return false;
+        return this.readyCount === this.totalPlayers;
+    }
+
+    /**
+     * 是否有存活玩家。
+     * @returns {boolean}
+     */
+    hasAlivePlayers() {
+        return this.getAlivePlayers().length > 0;
+    }
+
+    /**
+     * 获取玩家统计概览（总数 / 已准备 / 存活 / 活跃）。
+     * @returns {{total: number, ready: number, alive: number, active: number}}
+     */
+    getPlayerStats() {
+        return {
+            total: this.totalPlayers,
+            ready: this.readyCount,
+            alive: this.getAlivePlayers().length,
+            active: this.getActivePlayers().length
+        };
+    }
+
+    // ——— 消息 ———
+
+    /**
+     * 向指定玩家发送其属性摘要信息。
+     * @param {number} playerSlot 玩家槽位
+     */
+    sendPlayerStats(playerSlot) {
+        const player = this.players.get(playerSlot);
+        if (!player) return;
+        const s = player.getSummary();
+        const message =
+            `ID: ${s.id} | 等级: ${s.level} | 金钱: $${s.money}\n` +
+            `生命: ${s.health}/${s.maxHealth} | 护甲: ${s.armor} | 攻击: ${s.attack}\n` +
+            `击杀: ${s.kills} | 分数: ${s.score}`;
+        message.split('\n').forEach(line => this._adapter.sendMessage(playerSlot, line));
+    }
+
+    /**
+     * 计算指定玩家对实体的最终伤害。
+     *
+     * 外部只需传入 slot，即可拿到当前玩家在基础攻击、等级倍率、暴击等结算后的伤害值。
+     * 若玩家不存在或已不在可战斗状态，返回 0。
+     *
+     * @param {number} playerSlot 玩家 slot
+     * @param {import("./player_const").PlayerDamageOptions} [options] 额外伤害修正参数
+     * @returns {number}
+     */
+    calculatePlayerDamageToEntity(playerSlot, options) {
+        const player = this.players.get(playerSlot);
+        if (!player || !player.isAlive) return 0;
+        return player.calculateDamageToEntity(options);
+    }
+    
+    /**
+     * 获取管理器当前状态快照。
+     * @returns {{totalPlayers: number, readyCount: number, nextPlayerId: number}}
+     */
+    getStatus() {
+        return {
+            totalPlayers: this.totalPlayers,
+            readyCount: this.readyCount,
+            nextPlayerId: this.nextPlayerId
+        };
+    }
+
+    /**
+     * 每帧驱动所有在线玩家的持续逻辑。
+     */
+    tick() {
+        const nowtime = this._adapter.getGameTime();
+        for (const [slot, player] of this.players) {
+            player.tick(nowtime);
+        }
+    }
+}
+
+/**
+ * PlayerManager 级事件集合。
+ */
+class PlayerManagerEvents {
+    constructor() {
+        this.OnPlayerJoin = null;
+        this.OnPlayerLeave = null;
+        this.OnPlayerReady = null;
+        this.OnPlayerDeath = null;
+        this.OnPlayerRespawn = null;
+        this.OnPlayerMoneyChange = null;
+        this.OnPlayerLevelUp = null;
+        this.OnAllPlayersReady = null;
+    }
+    /** 设置玩家加入回调。 @param {(player: Player) => void} callback */
+    setOnPlayerJoin(callback) { this.OnPlayerJoin = callback; }
+    /** 设置玩家离开回调。 @param {(player: Player) => void} callback */
+    setOnPlayerLeave(callback) { this.OnPlayerLeave = callback; }
+    /** 设置玩家准备状态变化回调。 @param {(player: Player, isReady: boolean) => void} callback */
+    setOnPlayerReady(callback) { this.OnPlayerReady = callback; }
+    /** 设置玩家死亡回调。 @param {(playerPawn: CSPlayerPawn) => void} callback */
+    setOnPlayerDeath(callback) { this.OnPlayerDeath = callback; }
+    /** 设置玩家重生回调。 @param {(player: Player) => void} callback */
+    setOnPlayerRespawn(callback) { this.OnPlayerRespawn = callback; }
+    /** 设置玩家金钱变化回调。 @param {(player: Player, old: number, current: number) => void} callback */
+    setOnPlayerMoneyChange(callback) { this.OnPlayerMoneyChange = callback; }
+    /** 设置玩家升级回调。 @param {(player: Player, oldLevel: number, newLevel: number) => void} callback */
+    setOnPlayerLevelUp(callback) { this.OnPlayerLevelUp = callback; }
+    /** 设置全员准备就绪回调。 @param {() => void} callback */
+    setOnAllPlayersReady(callback) { this.OnAllPlayersReady = callback; }
+}
+
+/**
+ * @module 怪物系统/怪物状态
+ */
+
+/**
+ * 怪物状态枚举。
+ *
+ * 定义了怪物在战斗循环中可能处于的所有状态。
+ * Monster 的 `brainState` 组件和 `tickDispatcher` 会根据这些值
+ * 决定每帧应该执行的行为（移动、攻击、施法或待机）。
+ *
+ * 状态流转典型路径：
+ * `IDLE → CHASE → ATTACK → CHASE` 或 `IDLE → CHASE → SKILL → CHASE`，
+ * 死亡后进入 `DEAD` 终态。
+ *
+ * - `IDLE` (0)：空闲状态，刚生成或无目标时的默认状态。
+ * - `CHASE` (1)：追击状态，正在寻路并移动向目标玩家。
+ * - `ATTACK` (2)：攻击状态，到达攻击距离后执行普通攻击动作。
+ * - `SKILL` (3)：技能状态，正在施放主动技能，此时移动和普攻被暂停。
+ * - `DEAD` (4)：死亡终态，怪物已被击杀，等待清理。
+ */
+const MonsterState = {
+    IDLE: 0,//空闲
+    CHASE: 1,//追人
+    ATTACK: 2,//攻击
+    SKILL:  3,//技能
+    DEAD: 4//死亡
+};
+
+/**
+ * 怪物事件类型常量。
+ *
+ * 收录怪物技能内部事件名称字符串。
+ * 使用统一常量替代散落的字符串，防止拼写错误导致事件丢失。
+ *
+ * 事件按职责分为四组：
+ * - **生命周期**：生成（Spawn）、死亡（Die）、模型移除（ModelRemove）。
+ * - **战斗**：受伤（TakeDamage）、攻击命中（AttackTrue）、攻击未命中（AttackFalse）。
+ * - **AI**：每帧心跳（Tick）、目标更新（TargetUpdate）。
+ * - **技能**：技能施放（SkillCast）。
+ *
+ */
+const MonsterBuffEvents = {
+    // 生命周期
+    Spawn:        "OnSpawn",
+    Die:          "OnDie",
+    ModelRemove:  "OnModelRemove",
+    TakeDamage:   "OnTakeDamage",        // 受伤后事件，提供最终伤害值
+    AttackTrue:   "OnAttackTrue",
+    AttackFalse:  "OnAttackFalse",
+    // AI
+    Tick:         "OnTick",
+    TargetUpdate: "OnupdateTarget"};
+
+/**
+ * @module 怪物系统/怪物组件/实体桥接
+ */
+
+const BREAKABLE_HEALTH_SCALE = 10000;
+
+/**
+ * 怪物实体桥接组件。
+ *
+ * 负责生成 model / breakable，并把 breakable 受到的引擎伤害
+ * 单向折算到脚本侧生命，不再把脚本生命反向同步给 breakable。
+ * 
+ * @navigationTitle 怪物实体桥接
+ */
+class MonsterEntityBridge {
+    /**
+     * 创建怪物实体桥接组件。
+     * @param {import("../monster").Monster} monster 所属怪物实例
+     */
+    constructor(monster) {
+        /** 所属怪物实例。 */
+        this.monster = monster;
+    }
+    /**
+     * 根据怪物配置生成引擎实体（breakable + model）。
+     *
+     * 通过 `PointTemplate.ForceSpawn` 在指定位置创建模板实体，
+     * 并监听 breakable 的 `OnHealthChanged` 将引擎伤害转发给 `healthCombat`。
+     *
+     * @param {import("cs_script/point_script").Vector} position 出生世界坐标
+     * @param {import("../../../util/definition").monsterTypes} typeConfig 怪物类型配置
+     */
+    init(position, typeConfig) {
+        const template = Instance.FindEntityByName(typeConfig.template_name);
+        if (template && template instanceof PointTemplate) {
+            const spawned = template.ForceSpawn(position);
+            if (spawned && spawned.length > 0) {
+                spawned.forEach((element) => {
+                    if (element.GetClassName() == "func_breakable") {
+                        this.monster.breakable = element;
+                    }
+                    if (element.GetClassName() == "prop_dynamic" && element.GetEntityName() == typeConfig.model_name) {
+                        this.monster.model = element;
+                    }
+                });
+            }
+        }
+
+        if (this.monster.breakable) {
+            this.monster.preBreakableHealth = BREAKABLE_HEALTH_SCALE;
+            Instance.ConnectOutput(this.monster.breakable, "OnHealthChanged", (e) => {
+                if (typeof e.value !== "number") return;
+
+                const currentBreakableHealth = Math.max(
+                    0,
+                    Math.min(BREAKABLE_HEALTH_SCALE, BREAKABLE_HEALTH_SCALE * e.value)
+                );
+                const damage = this.monster.preBreakableHealth - currentBreakableHealth;
+                this.monster.preBreakableHealth = currentBreakableHealth;
+
+                if (damage <= 1) return;
+
+                const attacker = e.activator instanceof CSPlayerPawn ? e.activator : null;
+                this.monster.takeDamage(damage, attacker);
+            });
+        }
+
+        if (this.monster.model) {
+            this.monster.model.Teleport({ position: { x: position.x, y: position.y, z: position.z + 50 } });
+        }
+    }
+
+    /**
+     * 死亡后移除引擎实体。breakable 始终移除，model 可根据配置保留为尸体。
+     * @param {boolean} keepCorpse 是否保留模型作为尸体
+     */
+    removeAfterDeath(keepCorpse) {
+        if (this.monster.breakable?.IsValid()) {
+            this.monster.breakable.Remove();
+        }
+        if (!keepCorpse && this.monster.model?.IsValid()) {
+            this.monster.model.Remove();
+        }
+    }
+}
+
+/**
+ * @module 怪物系统/怪物组件/生命与战斗
+ */
+
+class MonsterHealthCombat {
+    constructor(monster) {
+        this.monster = monster;
+        /** @type {((amount: number) => number)[]} */
+        this._damageModifiers = [];
+    }
+
+    addDamageModifier(modifier) {
+        this._damageModifiers.push(modifier);
+    }
+
+    removeDamageModifier(modifier) {
+        const idx = this._damageModifiers.indexOf(modifier);
+        if (idx !== -1) this._damageModifiers.splice(idx, 1);
+    }
+
+    takeDamage(amount, attacker, meta = null) {
+        if (this.monster.state === MonsterState.DEAD) return true;
+
+        const modifiedAmount = this.monster.events.OnBeforeTakeDamage?.(this.monster, amount, attacker);
+        if (typeof modifiedAmount === "number") {
+            amount = modifiedAmount;
+        }
+
+        const ctx = {
+            damage: amount,
+            attacker,
+            source: meta?.source ?? null,
+            reason: meta?.reason,
+        };
+        this.monster.buffManager.onBeforeDamageTaken(ctx);
+        amount = ctx.damage;
+
+        if (amount <= 0) {
+            this.monster.buffManager.onAfterDamageTaken({ ...ctx, damage: 0 });
+            this.monster.emitEvent({ type: MonsterBuffEvents.TakeDamage, value: 0, health: this.monster.health });
+            return false;
+        }
+
+        let finalAmount = amount;
+        for (const mod of this._damageModifiers) {
+            finalAmount = mod(finalAmount);
+            if (finalAmount <= 0) {
+                this.monster.buffManager.onAfterDamageTaken({ ...ctx, damage: 0 });
+                this.monster.emitEvent({ type: MonsterBuffEvents.TakeDamage, value: 0, health: this.monster.health });
+                return false;
+            }
+        }
+
+        const previousHealth = this.monster.health;
+        this.monster.health = Math.max(0, Math.min(this.monster.health - finalAmount, this.monster.maxhealth));
+        this.monster.buffManager.onAfterDamageTaken({ ...ctx, damage: finalAmount });
+        this.monster.emitEvent({ type: MonsterBuffEvents.TakeDamage, value: finalAmount, health: this.monster.health });
+        Instance.Msg(`鎬墿 #${this.monster.id} 鍙楀埌 ${finalAmount} 鐐逛激瀹?(鍘熷:${amount}) (${previousHealth} -> ${this.monster.health})`);
+
+        if (this.monster.health <= 0) {
+            this.die(attacker);
+            return true;
+        }
+        return false;
+    }
+
+    die(killer) {
+        if (this.monster.state === MonsterState.DEAD) return;
+
+        Instance.EntFireAtTarget({
+            target: this.monster.breakable,
+            input: "fireuser1",
+            activator: killer ?? this.monster.target ?? undefined,
+        });
+
+        const prevState = this.monster.state;
+        this.monster.state = MonsterState.DEAD;
+        this.monster.buffManager.onStateChange(prevState, MonsterState.DEAD);
+        this.monster.buffManager.clearAll();
+        this.monster.model?.Unglow?.();
+        this.monster.emitEvent({ type: MonsterBuffEvents.Die });
+        this.monster.killer = killer;
+        this.monster.events.OnDie?.(this.monster, killer);
+        this.monster.animator.enter(MonsterState.DEAD);
+        Instance.Msg(`鎬墿 #${this.monster.id} 姝讳骸`);
+    }
+
+    enterAttack() {
+        if (!this.monster.target) return;
+
+        this.monster.animationOccupation.setOccupation("attack");
+        this.monster.movementPath.onOccupationChanged();
+        this.monster.attackCooldown = this.monster.atc;
+
+        const origin = this.monster.model.GetAbsOrigin();
+        const target = this.monster.target.GetAbsOrigin();
+        const distsq = this.monster.distanceTosq(this.monster.target);
+        if (distsq > this.monster.attackdist * this.monster.attackdist) {
+            this.monster.emitEvent({ type: MonsterBuffEvents.AttackFalse });
+            return;
+        }
+
+        this.monster.emitEvent({ type: MonsterBuffEvents.AttackTrue });
+        this.monster.events.OnAttackTrue?.(this.monster.damage, this.monster.target);
+
+        300 / Math.hypot(target.x - origin.x, target.y - origin.y);
+    }
+}
+
+/**
+ * @module 怪物系统/怪物组件/AI状态机
+ */
+
+/**
+ * 怪物 AI 决策组件。
+ *
+ * 每帧评估当前意图并解析为 MonsterState 转换：
+ * 1. `updateTarget` — 选择最近玩家作为目标。
+ * 2. `evaluateIntent` — 根据距离和冷却判断意图（Idle/Chase/Attack/Skill）。
+ * 3. `resolveState` — 将意图转化为实际状态，考虑占用锁和技能队列。
+ *
+ * @navigationTitle 怪物 AI 决策
+ */
+class MonsterBrainState {
+    /**
+     * 创建怪物 AI 决策组件。
+     * @param {import("../monster").Monster} monster 所属怪物实例
+     */
+    constructor(monster) {
+        /** 所属怪物实例。 */
+        this.monster = monster;
+    }
+
+    /**
+     * 更新追击目标：选择最近的存活玩家。同时发布 `TargetUpdate` 事件。
+     * @param {import("cs_script/point_script").CSPlayerPawn[]} allppos 所有存活玩家
+     */
+    updateTarget(allppos) {
+        let best = null;
+        let bestDistsq = Infinity;
+        for (const player of allppos) {
+            const dist = this.monster.distanceTosq(player);
+            if (dist < bestDistsq) {
+                best = player;
+                bestDistsq = dist;
+            }
+        }
+        this.monster.target = best;
+        this.monster.emitEvent({ type: MonsterBuffEvents.TargetUpdate });
+    }
+
+    /**
+     * 评估当前意图。只判断“想做什么”，不修改 `monster.state`。
+     *
+     * 优先级：被锁定→CHASE，有技能请求→SKILL，攻击距离内且无冷却→ATTACK，否则→CHASE。
+     * @returns {number} MonsterState 枚举值
+     */
+    evaluateIntent() {
+        if (!this.monster.target) return MonsterState.IDLE;
+        const distsq = this.monster.distanceTosq(this.monster.target);
+        if (this.monster.movementStateSnapshot.mode === "ladder") return MonsterState.CHASE;
+        if (this.monster.skillsManager.hasRequestedSkill()) return MonsterState.SKILL;
+        if (distsq <= this.monster.attackdist*this.monster.attackdist && this.monster.attackCooldown <= 0) return MonsterState.ATTACK;
+        return MonsterState.CHASE;
+    }
+
+    /**
+     * 根据意图评估结果执行状态切换。ATTACK/SKILL 切换成功后会调用对应入口方法。
+     * @param {number} intent 目标状态（MonsterState 枚举值）
+     */
+    resolveIntent(intent) {
+        switch (intent) {
+            case MonsterState.IDLE:
+                this.trySwitchState(MonsterState.IDLE);
+                break;
+            case MonsterState.CHASE:
+                this.trySwitchState(MonsterState.CHASE);
+                break;
+            case MonsterState.ATTACK:
+                if (this.trySwitchState(MonsterState.ATTACK)) {
+                    this.monster.enterAttack();
+                }
+                break;
+            case MonsterState.SKILL:
+                if (this.trySwitchState(MonsterState.SKILL)) {
+                    this.monster.enterSkill();
+                }
+                break;
+        }
+    }
+
+    /**
+     * 尝试状态迁移。委托 `monster.applyStateTransition`。
+     * @param {number} nextState 目标 MonsterState
+     * @returns {boolean} 是否切换成功
+     */
+    trySwitchState(nextState) {
+        return this.monster.applyStateTransition(nextState);
+    }
+}
+
+/**
+ * @module 怪物系统/技能基类
+ */
+
+/*
+技能分类规则（唯一权威）：
+  有 animation 字段（非 null/undefined）= 主动技能：canTrigger 通过后进入请求队列，
+    Monster 进入 SKILL 状态，skills_manager 先播放 animation 动作，再调用 trigger()。
+  无 animation 字段（null）           = 被动技能：在 canTrigger 内直接执行业务并返回 false，
+    不进入请求队列，不触发状态切换。
+
+冷却语义：
+  cooldown > 0  → 间隔触发（秒）
+  cooldown = 0  → 无限制
+  cooldown = -1 → 一次性：仅首次触发一次，之后永久失效
+  默认值为 -1（一次性），可在子类构造函数或 params.cooldown 中覆盖。
+
+实例 id 语义：
+  skill.id  = 运行时实例 id，由 MonsterSkillsManager.addSkill 按添加顺序分配（0,1,2,...）。
+             同一怪物上 id 越小，优先级越高（主动技能请求队列的排序依据）。
+  skill.typeId = 技能类型标识，对应 SkillFactory 注册键（如 "corestats"），子类在构造函数里设置。
+             同一怪物可同时拥有多个相同 typeId 的技能实例，各实例独立运行互不干扰。
+
+多事件触发：
+  子类构造函数中设置 this.events 数组，列出该技能响应的事件类型。
+  可在配置 params.events 中直接指定（如 ["OnSpawn","OnDie"]），未提供则使用技能类的默认值。
+  对 spawn 等技能：旧的单值 params.event 仍向后兼容（会被包装为单元素数组）。
+
+原 onAdd() 生命周期已移除；需要在生成时执行的初始化逻辑，
+请在 canTrigger 中响应 MonsterEvents.Spawn 并 return false。
+
+新增技能时不要手写 this.id（实例 id 由 addSkill 自动分配）；
+在子类构造函数里设置 this.typeId（技能类型标识）；
+isActive() 由基类根据 this.animation 自动判断。
+
+事件大全（统一使用 MonsterEvents 常量，见 monster_events.js）
+//怪物生成完后
+MonsterEvents.Spawn        → "OnSpawn"
+
+//当受到伤害后(伤害值，最后血量)
+MonsterEvents.TakeDamage   → "OnTakeDamage"   { value, health }
+
+//怪物死亡前，这时候实体还未销毁
+MonsterEvents.Die          → "OnDie"
+
+//当前TICK(tick间隔，所有怪物breakable实体)
+MonsterEvents.Tick         → "OnTick"          { dt, allmpos }
+
+//目标更新后
+MonsterEvents.TargetUpdate → "OnupdateTarget"
+
+//没有攻击到目标
+MonsterEvents.AttackFalse  → "OnAttackFalse"
+
+//对目标造成伤害后
+MonsterEvents.AttackTrue   → "OnAttackTrue"
+
+//模型移除后（动画结束）
+MonsterEvents.ModelRemove  → "OnModelRemove"
+ */
+/**
+ * 怪物技能基类。所有具体技能继承此类并重写 `canTrigger` 和 `trigger`。
+ *
+ * 技能分为两大类：
+ * - **主动技能**（`animation` 非 null）— `canTrigger` 返回 true 后入队，
+ *   Monster 进入 SKILL 状态，播放动作后调用 `trigger()`。
+ * - **被动技能**（`animation` 为 null）— 在 `canTrigger` 内直接执行并返回 false。
+ *
+ * 冷却语义：
+ * - `-1` = 一次性（默认），触发过一次后永久失效。
+ * - `0` = 无限制。
+ * - `> 0` = 按秒间隔触发。
+ *
+ * 子类在构造函数中设置 `this.typeId`，运行时实例 id `this.id` 由
+ * MonsterSkillsManager.addSkill 自动分配，id 越小优先级越高。
+ *
+ * @navigationTitle 技能基类
+ */
+class SkillTemplate
+{
+    /**
+     * 创建技能基类实例，绑定所属怪物。
+    * @param {import("./monster").Monster} monster
+     */
+    constructor(monster) {
+        /** 所属怪物实例的引用，用于访问怪物属性、目标、事件系统等。 */
+        this.monster=monster;
+        /** 技能类型标识，对应 SkillFactory 注册键（如 "corestats"）。子类在构造函数里设置。 */
+        this.typeId = "unknown";
+        /** 运行时实例 id，由 MonsterSkillsManager.addSkill 按添加顺序分配（0,1,2,...）。id 越小优先级越高。 */
+        this.id = -1;
+        /** @type {string|null} 动作名称：非 null = 有动作；null = 无动作 */
+        this.animation = null;
+        /** 冷却（秒）。-1=一次性，0=无限制，>0=按秒冷却。默认 -1。 */
+        this.cooldown = -1;
+        /** 上次触发的游戏时间。初始值 -999。由 `_markTriggered` 更新，供 `_cooldownReady` 判断冷却。 */
+        this.lastTriggerTime = -999;
+        /** 技能是否正在后台运行中（限时技能的执行期间为 true）。由子类 `tick` 逻辑控制。 */
+        this.running=false;
+        /**
+         * 异步技能占用标记。非 null 时表示技能自行管理占用生命周期：
+         * - trigger() 中调用 `monster.animationOccupation.setOccupation(asyncOccupation)` 接管占用。
+         * - 技能结束时调用 `monster.onOccupationEnd(asyncOccupation)` 释放。
+         * - 动画完成时的 onOccupationEnd("skill") 因类型不匹配而跳过，不会提前释放。
+         * @type {string|null}
+         */
+        this.asyncOccupation = null;
+        /** 请求优先级次级排序（主排序为实例 id 升序；越大越优先，默认 0）*/
+        this.priority = 0;
+
+        /**
+         * 技能对应的 buff 类型标识，null 表示不施加 buff。
+         * @type {string|null}
+         */
+        this.buffTypeId = null;
+        /** 技能施加 buff 时的默认参数 */
+        this.buffParams = {};
+    }
+
+    /**
+     * 构建发送给玩家 buff 系统的标准 payload。
+     * 子类可重写以提供动态参数（如基于怪物属性计算伤害）。
+     * @returns {{skillTypeId: string, buffTypeId: string|null, params: Record<string,any>, source: {monsterId: number, monsterType: string, skillTypeId: string}}}
+     */
+    buildBuffPayload() {
+        return {
+            skillTypeId: this.typeId,
+            buffTypeId: this.buffTypeId,
+            params: { ...this.buffParams },
+            source: {
+                sourceType: "monster-skill",
+                sourceId: this.monster.id,
+                monsterId: this.monster.id,
+                monsterType: this.monster.type ?? "unknown",
+                skillTypeId: this.typeId,
+            },
+        };
+    }
+    /**
+     * 是否为有动作技能（配置了 animation）。
+     * 有动作时由管理器进入 SKILL 状态并播放动作；无动作时在 canTrigger 内直接执行。
+     * @returns {boolean}
+     */
+    isActive() {
+        return this.animation !== null && this.animation !== undefined;
+    }
+    /**
+     * 这个事件能否执行。
+     * - 有 animation（isActive=true）：做条件判断通过后返回 true，由 emitEvent 调用 request 入队。
+     * - 无 animation（isActive=false）：在此处直接执行业务逻辑并返回 false，不入队不切换状态。
+     * @param {any} event
+     */
+    canTrigger(event) {
+        return false;
+    }
+    /**
+     * 请求执行（基类默认实现，子类无需重写）。
+     * 仅由 isActive()=true 的技能在 canTrigger 返回 true 后被 emitEvent 调用。
+     */
+    request(){
+        this.monster.requestSkill(this);
+    }
+    /**
+     * 执行技能主体逻辑。仅对主动技能有效——动画播放完毕后由 MonsterSkillsManager 调用。
+     * 子类必须重写此方法以实现具体技能效果。
+     */
+    trigger() {}
+    /**
+     * 后台限时技能的每帧执行入口。
+     * 对于有持续时间的技能（如护盾、急速），在 `running` 为 true 期间每帧调用。
+     * 子类按需重写以实现持续效果或到期清理。
+     */
+    tick(){}
+    /**
+     * 检查冷却是否就绪。
+     * - `cooldown = -1`（一次性）：仅当从未触发过时返回 true。
+     * - `cooldown <= 0`（无限制）：始终返回 true。
+     * - `cooldown > 0`：当前时间距上次触发超过冷却秒数时返回 true。
+     * @returns {boolean}
+     */
+    _cooldownReady() {
+        // -1 = 一次性：只要触发过一次（lastTriggerTime 不再是初始值 -999）就永久失效
+        if (this.cooldown === -1) return this.lastTriggerTime === -999;
+        if (this.cooldown <= 0) return true;
+        const now = Instance.GetGameTime();
+        return now - this.lastTriggerTime >= this.cooldown;
+    }
+
+    /**
+     * 标记技能已触发——更新 `lastTriggerTime` 为当前游戏时间。
+     * 若技能配置了 `buffTypeId` 且怪物当前有目标，还会通过事件系统发布 `SkillCast` 事件，
+     * 携带构建好的 buff 负载供玩家 buff 系统接收。
+     */
+    _markTriggered() {
+        this.lastTriggerTime = Instance.GetGameTime();
+        // 如果技能配置了 buffTypeId 且怪物有目标，发布 SkillCast 事件
+        if (this.buffTypeId && this.monster.target) {
+            const payload = this.buildBuffPayload();
+            this.monster.events.OnSkillCast?.(this.typeId, this.monster.target, payload);
+        }
+    }
+}
+
+/**
+ * @module 怪物系统/怪物技能/基础属性增强
+ */
+
+class CoreStats extends SkillTemplate {
+    constructor(monster, params) {
+        super(monster);
+        this.typeId = "corestats";
+        this.cooldown = params.cooldown ?? -1;
+        this.animation = params.animation ?? null;
+        this.events = params.events ?? [MonsterBuffEvents.Spawn];
+        this.params = params;
+    }
+
+    canTrigger(event) {
+        if (!this.events.includes(event.type)) return false;
+        if (!this._cooldownReady()) return false;
+        if (!this.isActive()) {
+            this.trigger();
+            return false;
+        }
+        return true;
+    }
+
+    trigger() {
+        if (this.params.health_value) {
+            this.monster.baseMaxHealth += this.params.health_value;
+            this.monster.health += this.params.health_value;
+        }
+        if (this.params.health_mult) {
+            this.monster.baseMaxHealth *= this.params.health_mult;
+            this.monster.health *= this.params.health_mult;
+        }
+        if (this.monster.baseMaxHealth <= 0) {
+            this.monster.baseMaxHealth = 1;
+            this.monster.health = Math.max(1, this.monster.health);
+        }
+
+        if (this.params.damage_value) this.monster.baseDamage += this.params.damage_value;
+        if (this.params.damage_mult) this.monster.baseDamage *= this.params.damage_mult;
+        if (this.monster.baseDamage < 0) this.monster.baseDamage = 0;
+
+        if (this.params.speed_value) this.monster.baseSpeed += this.params.speed_value;
+        if (this.params.speed_mult) this.monster.baseSpeed *= this.params.speed_mult;
+        if (this.monster.baseSpeed < 0) this.monster.baseSpeed = 0;
+
+        if (this.params.reward_value) this.monster.baseReward += this.params.reward_value;
+        if (this.params.reward_mult) this.monster.baseReward *= this.params.reward_mult;
+        if (this.monster.baseReward < 0) this.monster.baseReward = 0;
+
+        this.monster.buffManager.recomputeModifiers();
+        this.monster.health = Math.max(0, Math.min(this.monster.health, this.monster.maxhealth));
+        this._markTriggered();
+    }
+}
+
+/**
+ * @module 工具/定义
+ */
+/**
+ * @typedef {Object} broadcastMessage - 广播消息对象
+ * @property {string} message - 发送的信息
+ * @property {number} delay - 距波次开始的延迟时间（秒）
+ */
+/**
+ * @typedef {object} skill_pool - 技能池配置对象。同类型技能可重复出现多次。所有技能均支持：params.events（触发事件数组，可选）, params.cooldown（可选，默认-1一次性）, params.animation（可选）。
+ * @property {string} id - 技能类型名称，必须在 SkillFactory 中注册（同类型可重复出现多次）
+ * @property {number} chance - 技能获得概率（0~1）
+ * @property {object} params - 技能参数（各技能自定义，详见 skill_factory.js 注释）
+ */
+/**
+ * 通用动画集合类型：任意键对应动画名数组。
+ * 例如 `{ idle: string[], walk: string[] }`。"idle"、"walk"、"attack"、"skill"、"dead" 在对应状态切换时播放。
+ * @typedef {{ [key: string]: string[] }} animations
+ */
+/**
+ * @typedef {object} monsterTypes - 怪物类型配置对象。每个怪物实例对应一个 monsterTypes 配置项，包含其属性、技能池和动画列表。
+ * @property {string} template_name - 怪物模板名称，对应地图中 PointTemplate 的实体名称
+ * @property {string} model_name - 模型名称，对应游戏内模型资源路径（不含前缀 "models/" 和后缀 ".mdl"）
+ * @property {string} name - 怪物名称（仅作记录/展示）
+ * @property {number} baseHealth - 基础生命值
+ * @property {number} baseDamage - 基础伤害
+ * @property {number} speed - 移动速度
+ * @property {number} reward - 击杀奖励
+ * @property {number} attackdist - 攻击距离
+ * @property {number} attackCooldown - 攻击冷却时间（秒）
+ * @property {string} movementmode - 移动模式（例如 "walk"、"fly" 等，具体逻辑由怪物系统实现）
+ * @property {skill_pool[]} skill_pool - 技能池配置数组
+ * @property {animations} animations - 动画配置对象，键为状态名（如 "idle"、"walk"、"attack"、"skill"、"dead" 等），值为对应动画名数组
+ */
+/**
+ * @typedef {object} waveConfig - 波次配置对象。每波包含一个或多个 monsterTypes 配置项，定义该波次的怪物类型和属性。
+ * @property {string} name - 波次名称
+ * @property {number} totalMonsters - 怪物总数（仅作记录/展示）
+ * @property {number} reward - 波次奖励（仅作记录/展示）
+ * @property {number} spawnInterval - 怪物生成间隔（秒）
+ * @property {number} preparationTime - 波次准备时间（秒）
+ * @property {number} aliveMonster - 同时存在的怪物数量（仅作记录/展示）
+ * @property {string[]} monster_spawn_points_name - 怪物生成点名称数组，对应地图中 PointTemplate 的实体名称
+ * @property {{x: number, y: number, z: number}} monster_breakablemins - 怪物破坏物最小边界坐标（相对于生成点位置的偏移）
+ * @property {{x: number, y: number, z: number}} monster_breakablemaxs - 怪物破坏物最大边界坐标（相对于生成点位置的偏移）
+ * @property {broadcastMessage[]} broadcastmessage - 准备阶段广播消息
+ * @property {monsterTypes[]} monsterTypes - 怪物类型配置数组，定义该波次的怪物类型和属性
+ */
+/**
+ * @typedef {object} particleConfig - 粒子配置项。每个粒子对应一个地图中的 PointTemplate，ForceSpawn 后生成 info_particle_system。
+ * @property {string} id - 业务粒子 id（代码中引用的 key）
+ * @property {string} spawnTemplateName - 地图中 PointTemplate 的实体名称
+ * @property {string} middleEntityName - PointTemplate 内目标 info_particle_system 的实体名称，如果是范围特效，选择范围中心点的实体，用于精确匹配
+ * @property {number} [lifetime] - 默认活动时间（秒），为空时仅能外部 stop；运行时 options 可覆盖
+ */
+/**
+ * @typedef {object} Adapter - 外部适配器接口
+ * @property {(msg: string) => void} log - 输出日志
+ * @property {(msg: string) => void} broadcast - 广播消息给玩家
+ * @property {(playerSlot: number, msg: string) => void} sendMessage - 发送消息给指定玩家
+ * @property {() => number} getGameTime - 获取当前游戏时间（秒）
+ */
+/**
+ * 移动请求类型常量。
+ *
+ * 统一移动请求模型：Monster 侧只提交 MoveRequest / StopRequest / RemoveMovement，
+ * main 侧按 priority 合并后统一消费。
+ */
+const MovementRequestType = {
+    /** 移动请求：追击实体或移动到坐标 */
+    Move:   "Move",
+    /** 停止请求 */
+    Stop:   "Stop"};
+/**@typedef {import("cs_script/point_script").Entity} Entity */
+/**@typedef {import("cs_script/point_script").Vector} Vector */
+/**
+ * @typedef {object} MovementRequest
+ * @property {string}  type - MovementRequestType 值
+ * @property {Entity}  entity - 移动实体，也是请求合并与定位 Movement 的主键
+ * @property {number}  priority - MovementPriority 值
+ * @property {Entity}  [targetEntity] - 追击目标实体（与 targetPosition 互斥）
+ * @property {Vector}  [targetPosition] - 目标坐标（与 targetEntity 互斥）
+ * @property {boolean} [usePathRefresh] - 是否允许刷新路径（默认 true）
+ * @property {boolean} [useNPCSeparation] - 是否启用NPC分离速度；false 时每 tick 传空分离上下文
+ * @property {string}  [Mode] - 切换移动模式（walk / air / fly 等）
+ * @property {Vector}  [Velocity] - 设置速度向量（技能位移用,例如飞扑就需要）
+ * @property {number}  [maxSpeed] - 速度上限
+ * @property {boolean} [clearPath] - 是否清空现有路径
+ */
+
+/**
+ * 移动请求优先级。数值越小优先级越高。
+ * main 每帧按 priority 合并同一 entity 的请求，保留最高优先级。
+ */
+const MovementPriority = {
+    Skill:       0,
+    StateChange: 1,
+    Chase:       2,
+};
+
+/**
+ * @module 怪物系统/怪物技能/飞扑
+ */
+
+/**
+ * 飞扑技能。
+ *
+ * 当目标距离介于攻击距离和 `distance` 之间时，
+ * 怪物向目标发起抛物线跳跃。
+ * Monster 内部计算最终 velocity，通过移动事件发给 main 执行。
+ *
+ * @navigationTitle 飞扑技能
+ */
+class PounceSkill extends SkillTemplate {
+    /**
+     * @param {import("../monster").Monster} monster 
+     * @param {{
+     *   cooldown?: number;
+     *   distance: number;
+     *   events?: string[];
+     *   animation?: string;
+     *   duration?: number;
+     * }} params
+     */
+    constructor(monster,params) {
+        super(monster);
+        this.typeId = "pounce";
+        this.cooldown = params.cooldown ?? -1;
+        this.distance = params.distance;
+        this.animation = params.animation ?? null;
+        this.events = params.events ?? [MonsterBuffEvents.Tick];
+        /** 飞扑总时长（秒）。 */
+        this._duration = params.duration ?? 1;
+        /** 异步占用：飞扑由技能自行在落地时释放，动画结束不提前归还控制权。 */
+        this.asyncOccupation = "pounce";
+    }
+
+    /**
+     * 判断当前事件是否满足飞扑触发条件。
+     * @param {any} event
+     * @returns {boolean}
+     */
+    canTrigger(event) {
+        if (!this.events.includes(event.type)) return false;
+        if (!this.monster.target) return false;
+        if (this.monster.isOccupied()) return false;
+        if (!this._cooldownReady()) return false;
+        const distsq = this.monster.distanceTosq(this.monster.target);
+        if (!(distsq > this.monster.attackdist*this.monster.attackdist && distsq < this.distance*this.distance)) return false;
+        if (!this.isActive()) {
+            this.trigger();
+            return false;
+        }
+        return true;
+    }
+
+    /**
+     * 飞扑逐帧更新。
+     * 在新架构下，pounce 的物理推进由 main 侧 Movement 执行。
+     * Monster 侧只需检查状态摘要判断飞扑是否结束。
+     */
+    tick() {
+        if (!this.running) return;
+        if (this.monster.movementStateSnapshot.onGround) {
+            this.running = false;
+            this.monster.onOccupationEnd("pounce");
+        }
+    }
+
+    /**
+     * 发起飞扑。
+     * 计算抛物线初速度，通过移动事件提交给 main 执行 setVelocity + setMode。
+     */
+    trigger() {
+        if (!this.monster.target) return;
+        this.running = true;
+        this.monster.animationOccupation.setOccupation("pounce");
+        const start = this.monster.model.GetAbsOrigin();
+        const targetPos = this.monster.target.GetAbsOrigin();
+        const T = this._duration;
+
+        // 反解抛物线初速度
+        const velocity = {
+            x: (targetPos.x - start.x) / T,
+            y: (targetPos.y - start.y) / T,
+            z: (targetPos.z - start.z + 0.5 * gravity$1 * T * T) / T,
+        };
+
+        this.monster.submitMovementEvent({
+            type: MovementRequestType.Move,
+            entity: this.monster.model,
+            priority: MovementPriority.Skill,
+            targetPosition: targetPos,
+            usePathRefresh: false,
+            useNPCSeparation: true,
+            Mode: "air",
+            Velocity: velocity,
+        });
+
+        this._markTriggered();
+    }
+}
+
+/**
+ * @module 怪物系统/怪物技能/初始动画
+ */
+
+/**
+ * 初始动画技能。
+ *
+ * 生成时（默认 OnSpawn）播放一次指定动作，
+ * 常用于出场动画（从地面钻出、咕叫起立等）。
+ * 一次性主动技能。
+ *
+ * @navigationTitle 初始动画技能
+ */
+class InitAnimSkill extends SkillTemplate {
+    /**
+     * 创建初始动画技能实例。
+        * @param {import("../monster").Monster} monster 
+     * @param {{
+     *   cooldown?: number;
+     *   events?: string[];
+     *   animation?: string;
+     * }} params
+     */
+    constructor(monster,params) {
+        super(monster);
+        /** @type {string} 技能类型标识，固定为 `"initanim"` */
+        this.typeId = "initanim";
+        /** @type {number} 冷却时间（秒），-1 表示一次性 */
+        this.cooldown = params.cooldown ?? -1;
+        /** @type {string|null} 出场动画名称（如从地面钻出等） */
+        this.animation = params.animation ?? null;
+        /** @type {string[]} 监听的事件类型，默认 [OnSpawn] */
+        this.events = params.events ?? [MonsterBuffEvents.Spawn];
+    }
+    /**
+     * 判断当前事件是否满足初始动画触发条件。
+     *
+     * 检查事件类型匹配、怪物未被占用、冷却就绪。
+     * 条件通过但未激活时静默触发动画播放。
+     *
+     * @param {any} event 技能事件对象
+     * @returns {boolean} 是否需要通过动画流程触发
+     */
+    canTrigger(event) {
+        if(!this.events.includes(event.type))return false;
+        if (this.monster.isOccupied()) return false;
+        if (!this._cooldownReady()) return false;
+        if (!this.isActive()) {
+            this.trigger();
+            return false;
+        }
+        return true;
+    }
+    /**
+     * 触发初始动画播放。
+     *
+     * 具体动作由 animation 驱动；此处仅调用 `_markTriggered`
+     * 标记触发时间，防止重复播放。
+     */
+    trigger() 
+    {
+        this._markTriggered();
+    }
+}
+
+/**
+ * @module 怪物系统/怪物技能/双倍攻击
+ */
+
+/**
+ * 双重攻击技能。
+ *
+ * 在 AttackTrue 事件触发后立即发起第二次攻击。
+ * 主动技能，需要动作播放。
+ *
+ * @navigationTitle 双重攻击技能
+ */
+class DoubleAttackSkill extends SkillTemplate {
+    /**
+     * 创建双重攻击技能实例。
+     * @param {import("../monster").Monster} monster 
+     * @param {{
+     *   cooldown?: number;
+     *   events?: string[];
+     *   animation?: string;
+     * }} [params]
+     */
+    constructor(monster, params = {}) {
+        super(monster);
+        /** @type {string} 技能类型标识，固定为 `"doubleattack"` */
+        this.typeId = "doubleattack";
+        /** @type {number} 冷却时间（秒），-1 表示无冷却 */
+        this.cooldown = params.cooldown ?? -1;
+        /** @type {string|null} 第二次攻击播放的动画名 */
+        this.animation = params.animation ?? null;
+        /** @type {string[]} 监听的事件类型，默认 [AttackTrue] */
+        this.events = params.events ?? [MonsterBuffEvents.AttackTrue];
+    }
+    /**
+     * 判断当前事件是否满足双重攻击触发条件。
+     *
+     * 除标准检查（事件类型、冷却、占用）外，还要求目标存在。
+     * 若条件满足但未激活，则静默触发第二次攻击。
+     *
+     * @param {any} event 技能事件对象
+     * @returns {boolean} 是否需要通过动画流程触发
+     */
+    canTrigger(event) {
+        if(!this.events.includes(event.type))return false;
+        if (!this.monster.target) return false;
+        if (!this._cooldownReady()) return false;
+        if (!this.isActive()) {
+            this.trigger();
+            return false;
+        }
+        return true;
+    }
+
+    /**
+     * 执行第二次攻击。
+     *
+     * 当前为预留逻辑桩——后续在此对目标玩家施加伤害。
+     */
+    trigger() {
+        //这里给与玩家伤害
+        this._markTriggered();
+    }
+}
+
+/**
+ * @module 工具/向量工具
+ */
+/**
+ * 向量工具类，提供 2D/3D 向量的静态运算方法（加减、点积、叉积、归一化、插值等）。
+ * @navigationTitle 向量工具
+ */
+let vec$1 = class vec{
+    /**
+     * 返回向量vec1+vec2
+     * @param {import("cs_script/point_script").Vector} a
+     * @param {import("cs_script/point_script").Vector} b
+     * @returns {import("cs_script/point_script").Vector}
+     */
+    static add(a, b) {
+        return { x: a.x + b.x, y: a.y + b.y, z: a.z + b.z };
+    }
+    /**
+     * 添加 2D 分量
+     * @param {import("cs_script/point_script").Vector} a
+     * @param {import("cs_script/point_script").Vector} b
+     * @returns {import("cs_script/point_script").Vector}
+     */
+    static add2D(a, b) {
+        return { x: a.x + b.x, y: a.y + b.y, z: a.z};
+    }
+    /**
+     * 返回向量vec1-vec2
+     * @param {import("cs_script/point_script").Vector} a
+     * @param {import("cs_script/point_script").Vector} b
+     * @returns {import("cs_script/point_script").Vector}
+     */
+    static sub(a, b) {
+        return { x: a.x - b.x, y: a.y - b.y, z: a.z - b.z };
+    }
+    /**
+     * 返回向量vec1*s
+     * @param {import("cs_script/point_script").Vector} a
+     * @param {number} s
+     * @returns {import("cs_script/point_script").Vector}
+     */
+    static scale(a,s)
+    {
+        return {x:a.x*s,y:a.y*s,z:a.z*s}
+    }
+    /**
+     * 返回向量vec1*s
+     * @param {import("cs_script/point_script").Vector} a
+     * @param {number} s
+     * @returns {import("cs_script/point_script").Vector}
+     */
+    static scale2D(a,s) {
+        return {
+            x:a.x * s,
+            y:a.y * s,
+            z:a.z
+        };
+    }
+    /**
+     * 得到vector
+     * @param {number} [x]
+     * @param {number} [y]
+     * @param {number} [z]
+     * @returns {import("cs_script/point_script").Vector}
+     */
+    static get(x=0,y=0,z=0)
+    {
+        return {x,y,z};
+    }
+    /**
+     * 深复制
+     * @param {import("cs_script/point_script").Vector} a
+     * @returns {import("cs_script/point_script").Vector}
+     */
+    static clone(a)
+    {
+        return {x:a.x,y:a.y,z:a.z};
+    }
+    /**
+     * 计算空间两点之间的距离
+     * @param {import("cs_script/point_script").Vector} a
+     * @param {import("cs_script/point_script").Vector} [b]
+     * @returns {number}
+     */
+    static length(a, b={x:0,y:0,z:0}) {
+        const dx = a.x - b.x; const dy = a.y - b.y; const dz = a.z - b.z;
+        return Math.sqrt(dx * dx + dy * dy + dz * dz);
+    }
+    /**
+     * 计算xy平面两点之间的距离
+     * @param {import("cs_script/point_script").Vector} a
+     * @param {import("cs_script/point_script").Vector} [b]
+     * @returns {number}
+     */
+    static length2D(a, b={x:0,y:0,z:0}) {
+        const dx = a.x - b.x; const dy = a.y - b.y;
+        return Math.sqrt(dx * dx + dy * dy);
+    }
+    /**
+     * 计算空间两点之间的距离平方（无平方根，更快）
+     * @param {import("cs_script/point_script").Vector} a
+     * @param {import("cs_script/point_script").Vector} [b]
+     * @returns {number}
+     */
+    static lengthsq(a, b={x:0,y:0,z:0}) {
+        const dx = a.x - b.x; const dy = a.y - b.y; const dz = a.z - b.z;
+        return dx * dx + dy * dy + dz * dz;
+    }
+    /**
+     * 计算xy平面两点之间的距离平方（无平方根，更快）
+     * @param {import("cs_script/point_script").Vector} a
+     * @param {import("cs_script/point_script").Vector} [b]
+     * @returns {number}
+     */
+    static length2Dsq(a, b={x:0,y:0,z:0}) {
+        const dx = a.x - b.x; const dy = a.y - b.y;
+        return dx * dx + dy * dy;
+    }
+    /**
+     * 返回pos上方height高度的点
+     * @param {import("cs_script/point_script").Vector} pos
+     * @param {number} height
+     * @returns {import("cs_script/point_script").Vector}
+     */
+    static Zfly(pos, height) {
+        return { x: pos.x, y: pos.y, z: pos.z + height };
+    }
+    /**
+     * 输出点pos的坐标
+     * @param {import("cs_script/point_script").Vector} pos
+     */
+    static msg(pos) {
+        Instance.Msg(`{${pos.x} ${pos.y} ${pos.z}}`);
+    }
+    /**
+     * 计算两个三维向量的点积。
+     * @param {import("cs_script/point_script").Vector} a
+     * @param {import("cs_script/point_script").Vector} b
+     */
+    static dot(a,b) {
+        return a.x * b.x + a.y * b.y + a.z * b.z;
+    }
+
+    /**
+     * 计算两个向量在 XY 平面上的点积。
+     * @param {import("cs_script/point_script").Vector} a
+     * @param {import("cs_script/point_script").Vector} b
+     */
+    static dot2D(a,b) {
+        return a.x * b.x + a.y * b.y;
+    }
+
+    /**
+     * 计算两个三维向量的叉积。
+     * @param {import("cs_script/point_script").Vector} a
+     * @param {import("cs_script/point_script").Vector} b
+     */
+    static cross(a,b) {
+        return {
+            x:a.y * b.z - a.z * b.y,
+            y:a.z * b.x - a.x * b.z,
+            z:a.x * b.y - a.y * b.x
+        };
+    }
+    /**
+     * 返回三维向量的单位向量，零向量时返回原点。
+     * @param {import("cs_script/point_script").Vector} a
+     */
+    static normalize(a) {
+        const len = this.length(a);
+        if (len < 1e-6) {
+            return {x:0,y:0,z:0};
+        }
+        return this.scale(a,1 / len);
+    }
+    /**
+     * 返回向量在 XY 平面上的单位向量（z 置零），零向量时返回原点。
+     * @param {import("cs_script/point_script").Vector} a
+     */
+    static normalize2D(a) {
+        const len = this.length2D(a);
+        if (len < 1e-6) {
+            return {x:0,y:0,z:0};
+        }
+        return {
+            x:a.x / len,
+            y:a.y / len,
+            z:0
+        };
+    }
+    /**
+     * 判断向量是否为零向量（各分量绝对值小于 1e-6）。
+     * @param {import("cs_script/point_script").Vector} a
+     */
+    static isZero(a) {
+        return (
+            Math.abs(a.x) < 1e-6 &&
+            Math.abs(a.y) < 1e-6 &&
+            Math.abs(a.z) < 1e-6
+        );
+    }
+};
+
+/**
+ * @module 怪物系统/怪物技能/重击
+ */
+
+/**
+ * 重击技能。
+ *
+ * 攻击命中时（默认 AttackTrue）对目标玩家施加 KnockUpBuff，
+ * 产生击飞效果。可配置冲量、垂直加速和 Buff 持续时间。
+ * 被动技能，无动作。
+ *
+ * @navigationTitle 重击技能
+ */
+class PowerAttackSkill extends SkillTemplate {
+    /**
+     * 创建重击技能实例。
+     * @param {import("../monster").Monster} monster 
+     * @param {{
+     *   cooldown?: number;
+     *   events?: string[];
+     *   animation?: string;
+     *   impulse?: number;
+     *   verticalBoost?: number;
+     *   buffDuration?: number;
+     * }} [params]
+     */
+    constructor(monster, params = {}) {
+        super(monster);
+        /** @type {string} 技能类型标识，固定为 `"powerattack"` */
+        this.typeId = "powerattack";
+        /** @type {number} 冷却时间（秒），-1 表示无冷却 */
+        this.cooldown = params.cooldown ?? -1;
+        /** @type {string|null} 技能动画名（被动技能通常为 null） */
+        this.animation = params.animation ?? null;
+        /** @type {string[]} 监听的事件类型，默认 [AttackTrue] */
+        this.events = params.events ?? [MonsterBuffEvents.AttackTrue];
+
+        /** @type {string} 施加的 Buff 类型标识（击飞） */
+        this.buffTypeId = "knockup";
+        /** @type {{impulse: number, verticalBoost: number, duration: number}} 击飞 Buff 参数（水平冲量、垂直加速、持续时间） */
+        this.buffParams = {
+            impulse:       params.impulse       ?? 300,
+            verticalBoost: params.verticalBoost  ?? 400,
+            duration:      params.buffDuration   ?? 0.6,
+        };
+    }
+    /**
+     * 判断当前事件是否满足重击触发条件。
+     *
+     * 检查事件类型、目标存在、占用状态和冷却。
+     * 被动触发——条件满足但未激活时静默触发。
+     *
+     * @param {any} event 技能事件对象
+     * @returns {boolean} 是否需要通过动画流程触发
+     */
+    canTrigger(event) {
+        if(!this.events.includes(event.type))return false;
+        if (!this.monster.target) return false;
+        if (this.monster.isOccupied()) return false;
+        if (!this._cooldownReady()) return false;
+        if (!this.isActive()) {
+            this.trigger();
+            return false;
+        }
+        return true;
+    }
+
+    /**
+     * 执行重击。
+     *
+     * 当前为预留逻辑桩——后续将对目标玩家施加击飞 Buff。
+     */
+    trigger() {
+        //这里给与玩家速度
+        this._markTriggered();
+    }
+
+    /**
+     * 构建 Buff 载荷——计算怪物→目标方向并注入 direction。
+     *
+     * 重写基类方法，在标准 payload 上追加归一化的
+     * 水平方向向量，用于击飞 Buff 的冲量方向计算。
+     *
+     * @returns {any} 包含 direction 的 Buff 载荷对象
+     */
+    buildBuffPayload() {
+        const payload = super.buildBuffPayload();
+        const target = this.monster.target;
+        if (target) {
+            const monsterPos = this.monster.model.GetAbsOrigin();
+            const targetPos  = target.GetAbsOrigin?.();
+            if (monsterPos && targetPos) {
+                const delta = vec$1.sub(targetPos, monsterPos);
+                const dir = vec$1.normalize2D(delta);
+                // normalize2D 在零长度时返回 {0,0,0}；此场景目标与怪物不会重合
+                payload.params.direction = dir;
+            }
+        }
+        return payload;
+    }
+}
+
+/**
+ * @module 怪物系统/怪物技能/毒气
+ */
+
+/**
+ * 毒气技能。
+ *
+ * 怪物死亡时（默认 OnDie）在脚下创建毒气区域，
+ * 通过 AreaEffectService 持续对范围内玩家施加 PoisonBuff。
+ * 可配置毒区半径、持续时间、施加间隔和粒子效果。
+ * 被动一次性技能。
+ *
+ * @navigationTitle 毒气技能
+ */
+class PoisonGasSkill extends SkillTemplate {
+    /**
+     * 创建毒气技能实例。
+     * @param {import("../monster").Monster} monster 
+     * @param {{
+     *   cooldown?: number;
+     *   events?: string[];
+     *   animation?: string;
+     *   particleId?: string;
+     *   dps?: number;
+     *   buffDuration?: number;
+     *   tickInterval?: number;
+     *   zoneDuration?: number;
+     *   zoneRadius?: number;
+     *   applyInterval?: number;
+     * }} [params]
+     */
+    constructor(monster, params = {}) {
+        super(monster);
+        /** @type {string} 技能类型标识，固定为 `"poisongas"` */
+        this.typeId = "poisongas";
+        /** @type {number} 冷却时间（秒），-1 表示一次性 */
+        this.cooldown = params.cooldown ?? -1;
+        /** @type {string|null} 技能动画名（被动技能通常为 null） */
+        this.animation = params.animation ?? null;
+        /** @type {string[]} 监听的事件类型，默认 [OnDie] */
+        this.events = params.events ?? [MonsterBuffEvents.Die];
+
+        /** @type {string} 毒气粒子效果标识 */
+        this.particleId = params.particleId ?? "poisongas";
+
+        /** @type {string} 施加的 Buff 类型标识 */
+        this.buffTypeId = "poison";
+        /** @type {{dps: number, duration: number, tickInterval: number}} Buff 参数（每秒伤害、持续时间、判定间隔） */
+        this.buffParams = {
+            dps:          params.dps          ?? 5,
+            duration:     params.buffDuration ?? 4,
+            tickInterval: params.tickInterval ?? 1,
+        };
+
+        /** @type {number} 毒区持续时间（秒） */
+        this.zoneDuration = params.zoneDuration ?? 5;
+        /** @type {number} 毒区半径 */
+        this.zoneRadius = params.zoneRadius ?? 150;
+        /** @type {number} 对同一玩家重新施加 buff 的最小间隔（秒） */
+        this.applyInterval = params.applyInterval ?? 1;
+    }
+
+    /**
+     * 判断当前事件是否满足毒气释放条件。
+     *
+     * 仅检查事件类型与冷却状态。被动触发——条件满足但未激活时
+     * 立即调用 {@link trigger}。
+     *
+     * @param {any} event 技能事件对象
+     * @returns {boolean} 是否需要通过动画流程触发（被动技能始终返回 false）
+     */
+    canTrigger(event) {
+        if(!this.events.includes(event.type))return false;
+        if (!this._cooldownReady()) return false;
+        if (!this.isActive()) {
+            this.trigger();
+            return false;
+        }
+        return true;
+    }
+
+    /**
+     * 创建毒气区域效果。
+     *
+     * 捕获怪物死亡位置，通过 `events.onAreaEffectRequest` 回调
+     * 向 MonsterManager 的 AreaEffectService 提交区域效果请求。
+     * 请求包含毒区半径、持续时间、Buff 参数及粒子特效等信息。
+     */
+    trigger() {
+        const pos = this.monster.model?.GetAbsOrigin?.();
+        if (!pos) return;
+
+        // 向 MonsterManager 的 AreaEffectService 提交区域效果请求
+        if (this.monster.events.onAreaEffectRequest) {
+            this.monster.events.onAreaEffectRequest({
+                effectType: "poisongas",
+                position: { x: pos.x, y: pos.y, z: pos.z },
+                radius: this.zoneRadius,
+                duration: this.zoneDuration,
+                applyInterval: this.applyInterval,
+                buffTypeId: this.buffTypeId,
+                buffParams: { ...this.buffParams },
+                source: {
+                    sourceType: "monster-skill",
+                    sourceId: this.monster.id,
+                    monsterId: this.monster.id,
+                    monsterType: this.monster.type ?? "unknown",
+                    skillTypeId: this.typeId,
+                },
+                particleId: this.particleId,
+                particleLifetime: this.zoneDuration,
+            });
+        }
+
+        this._markTriggered();
+    }
+}
+
+/**
+ * @module 怪物系统/怪物技能/产卵
+ */
+
+/**
+ * 产卵技能。
+ *
+ * 在指定事件（默认 OnDie）触发时，在怪物周围生成
+ * count 个指定类型的小怪，受 maxSummons 整体上限约束。
+ * 生成位置在 `radiusMin` – `radiusMax` 的随机圆环内，
+ * 最多尝试 `tries` 次寻找有效位置。
+ * 被动技能。
+ *
+ * @navigationTitle 产卵技能
+ */
+class SpawnSkill extends SkillTemplate {
+    /**
+     * 创建召唤技能实例。
+        * @param {import("../monster").Monster} monster
+     * @param {{
+     *   events?: string[];
+     *   count?: number;
+     *   typeName?: string;
+     *   cooldown?: number;
+     *   maxSummons?: number;
+     *   radiusMin?: number;
+     *   radiusMax?: number;
+     *   tries?: number;
+     *   animation?: string;
+     * }} params
+     */
+    constructor(monster, params) {
+        super(monster);
+        /** @type {string} 技能类型标识，固定为 `"spawn"` */
+        this.typeId = "spawn";
+        /** @type {string|null} 技能动画名（被动技能通常为 null） */
+        this.animation = params.animation ?? null;
+        /** @type {string[]} 监听的事件类型列表 */
+        this.events = params.events??[MonsterBuffEvents.Die];
+        /** @type {number} 每次触发生成的小怪数量 */
+        this.count = Math.max(1, params.count ?? 1);
+        /** @type {string} 生成的怪物类型名，默认继承父怪类型 */
+        this.typeName = params.typeName ?? monster.type;
+        /** @type {number} 冷却时间（秒），-1 表示无冷却 */
+        this.cooldown = params.cooldown ?? -1;
+        /** @type {number} 总生成上限，-1 表示无限 */
+        this.maxSummons = params.maxSummons ?? 1;
+        /** @type {number} 生成位置最小半径 */
+        this.radiusMin = Math.max(0, params.radiusMin ?? 24);
+        /** @type {number} 生成位置最大半径 */
+        this.radiusMax = Math.max(this.radiusMin, params.radiusMax ?? 96);
+        /** @type {number} 寻找有效生成位置的最大尝试次数 */
+        this.tries = Math.max(1, params.tries ?? 6);
+
+        /** @type {number} 已累计生成数，受 maxSummons 约束 */
+        this.spawnedTotal = 0;
+        /** @type {number} 本次触发待生成的小怪数量 */
+        this._pendingCount=0;
+    }
+
+    /**
+     * 判断当前事件是否满足产卵触发条件。
+     *
+     * 检查事件类型、总生成上限、冷却状态和本次可生成数。
+     * 将本次可生成数缓存至 `_pendingCount` 供 trigger 使用。
+     *
+     * @param {any} event 技能事件对象
+     * @returns {boolean} 是否需要通过动画流程触发
+     */
+    canTrigger(event) {
+        if (!this.events.includes(event.type)) return false;
+        if (this.maxSummons >= 0 && this.spawnedTotal >= this.maxSummons) return false;
+        if (!this._cooldownReady()) return false;
+
+        const remaining = this.maxSummons < 0
+            ? this.count
+            : Math.min(this.count, this.maxSummons - this.spawnedTotal);
+        if (remaining <= 0) return false;
+
+        this._pendingCount = remaining;
+        if (!this.isActive()) {
+            this.trigger();
+            return false;
+        }
+        return true;
+    }
+
+    /**
+     * 执行产卵。
+     *
+     * 循环调用 `monster.requestSpawn` 在怪物周围随机圆环内
+     * 生成小怪，累计成功数并更新 `spawnedTotal`。
+     */
+    trigger() {
+        let spawnedNow = 0;
+        for (let i = 0; i < this._pendingCount; i++) {
+            const ok = this.monster.requestSpawn({
+                typeName: this.typeName,
+                radiusMin: this.radiusMin,
+                radiusMax: this.radiusMax,
+                tries: this.tries,
+            });
+            if (ok) spawnedNow++;
+        }
+        this._pendingCount = 0;
+        if (spawnedNow > 0) {
+            this.spawnedTotal += spawnedNow;
+            this._markTriggered();
+        }
+    }
+}
+
+/**
+ * @module 怪物系统/怪物技能/护盾
+ */
+
+/**
+ * 护盾技能。
+ *
+ * 生成时注册伤害修饰器到 HealthCombat，在 runtime 秒内
+ * 吸收最多 value 点伤害。护盾耗尽或超时后自动移除。
+ * 支持粒子特效和发光效果。
+ * 被动技能，events 必须包含 OnSpawn 以初始化修饰器。
+ *
+ * @navigationTitle 护盾技能
+ */
+class ShieldSkill extends SkillTemplate {
+    /**
+     * 创建护盾技能实例。
+        * @param {import("../monster").Monster} monster 
+     * @param {{
+     *   cooldown?: number;
+     *   runtime: number;
+     *   value: number;
+     *   events?: string[];
+     *   animation?: string;
+     * }} params
+     */
+    constructor(monster,params) {
+        super(monster);
+        /** @type {string} 技能类型标识，固定为 `"shield"` */
+        this.typeId = "shield";
+        /** @type {number} 冷却时间（秒），-1 表示无冷却 */
+        this.cooldown = params.cooldown ?? -1;
+        /** @type {number} 护盾持续时间（秒），-1 表示无限时 */
+        this.runtime=params.runtime;
+        /** @type {number} 护盾最大吸收量 */
+        this.maxshield=params.value;
+        /** @type {number} 当前护盾剩余值，活跃时从 maxshield 递减至 0 */
+        this.shield=0;
+        /** @type {string|null} 技能动画名（被动技能通常为 null） */
+        this.animation = params.animation ?? null;
+        // 修饰器初始化必须在 Spawn 时完成，无论用户如何配置 events，始终保闭 Spawn
+        const userEvents = params.events ?? [MonsterBuffEvents.Spawn, MonsterBuffEvents.Tick];
+        /** @type {string[]} 监听的事件类型，强制包含 OnSpawn */
+        this.events = userEvents.includes(MonsterBuffEvents.Spawn)
+            ? userEvents
+            : [MonsterBuffEvents.Spawn, ...userEvents];
+        /** @type {boolean} 值守标志，确保伤害修饰器仅注册一次 */
+        this._initialized = false;
+    }
+    /**
+     * 判断当前事件是否满足护盾触发条件。
+     *
+     * - **OnSpawn**：初始化伤害修饰器，将拤截函数注册到 HealthCombat，
+     *   使护盾活跃时像“降伤层”一样吸收伤害。只注册一次。
+     * - **其它事件**：检查护盾是否可激活（未运行、未占用、冷却就绪）。
+     *
+     * @param {any} event 技能事件对象
+     * @returns {boolean} 是否需要通过动画流程触发
+     */
+    canTrigger(event) {
+
+        // OnSpawn：初始化伤害修饰器（每个实例只注册一次）
+        if (event.type === MonsterBuffEvents.Spawn) {
+            if (!this._initialized) {
+                this._initialized = true;
+                this._modFn = (/** @type {number} */ amount) => {
+                    if (!this.running) return amount;
+                    const absorbed = Math.min(amount, this.shield);
+                    this.shield -= absorbed;
+                    if (this.shield <= 0) {
+                        this.running = false;
+                        if (this.monster.model instanceof BaseModelEntity) {
+                            this.monster.model.Unglow();
+                        }
+                    }
+                    return amount - absorbed;
+                };
+                this.monster.healthCombat.addDamageModifier(this._modFn);
+            }
+            return false;
+        }
+
+        // 其他事件：判断是否可激活护盾
+        if (this.running) return false;
+        if (this.monster.isOccupied()) return false;
+        if (!this._cooldownReady()) return false;
+        if (!this.isActive()) {
+            this.trigger();
+            return false;
+        }
+        return true;
+    }
+    /**
+     * 护盾逐帧更新。
+     *
+     * 检查护盾是否超时；若 `runtime` 已达到则关闭护盾
+     * 并移除发光效果。
+     */
+    tick()
+    {
+        if (this.runtime!=-1&&this.lastTriggerTime+this.runtime<=Instance.GetGameTime())
+        {//时间到直接关闭护盾
+            this.running=false;
+            if(this.monster.model instanceof BaseModelEntity)
+            {
+                this.monster.model.Unglow();
+            }
+            return;
+        }
+    }
+    /**
+     * 激活护盾。
+     *
+     * 将 shield 重置为 maxshield，开启蓝色发光特效，
+     * 标记 running=true 并记录触发时间。
+     */
+    trigger() 
+    {
+        this.shield=this.maxshield;
+        if(this.monster.model instanceof BaseModelEntity)
+        {
+            this.monster.model.Glow({r:0,g:0,b:255});
+        }
+        this.running=true;
+        this._markTriggered();
+    }
+}
+
+/**
+ * @module 怪物系统/怪物技能/急速
+ */
+
+class SpeedBoostSkill extends SkillTemplate {
+    constructor(monster, params) {
+        super(monster);
+        this.typeId = "speedboost";
+        this.cooldown = params.cooldown ?? -1;
+        this.runtime = params.runtime ?? 3;
+        this.speed_mult = params.speed_mult ?? 1;
+        this.speed_value = params.speed_value ?? 0;
+        this.animation = params.animation ?? null;
+        this.events = params.events ?? [MonsterBuffEvents.Tick];
+        this.glow = params.glow ?? null;
+    }
+
+    canTrigger(event) {
+        if (!this.events.includes(event.type)) return false;
+        if (this.running) return false;
+        if (this.monster.isOccupied()) return false;
+        if (!this._cooldownReady()) return false;
+        if (!this.isActive()) {
+            this.trigger();
+            return false;
+        }
+        return true;
+    }
+
+    tick() {
+        if (!this.running) return;
+
+        const hasOwnBuff = this.monster
+            .getAllBuffs()
+            .some((buff) => buff.groupKey === this._getBuffGroupKey());
+
+        if (!hasOwnBuff) {
+            this._endBoost();
+            return;
+        }
+
+        if (this.runtime !== -1 && this.lastTriggerTime + this.runtime <= Instance.GetGameTime()) {
+            this._endBoost();
+        }
+    }
+
+    trigger() {
+        const buff = this.monster.addBuff("speed_up", {
+            duration: this.runtime,
+            multiplier: this.speed_mult,
+            flatBonus: this.speed_value,
+            groupKey: this._getBuffGroupKey(),
+        }, {
+            sourceType: "monster-self-buff",
+            sourceId: this.monster.id,
+            monsterId: this.monster.id,
+            monsterType: this.monster.type ?? "unknown",
+            skillTypeId: this.typeId,
+        });
+
+        if (!buff) return;
+
+        if (this.glow && this.monster.model instanceof BaseModelEntity) {
+            this.monster.model.Glow(this.glow);
+        }
+        this.running = true;
+        this._markTriggered();
+    }
+
+    _endBoost() {
+        this.running = false;
+        if (this.glow && this.monster.model instanceof BaseModelEntity) {
+            this.monster.model.Unglow();
+        }
+    }
+
+    _getBuffGroupKey() {
+        return `skill:speedboost:${this.id}`;
+    }
+}
+
+/**
+ * @module 怪物系统/怪物技能/投掷石头
+ */
+
+/**
+ * 抛射技能。
+ *
+ * 向目标投掷抛射物，支持重力影响和爆炸半径。
+ * 当目标在 distanceMin – distanceMax 范围内时触发。
+ * 主动技能，trigger 待实现。
+ *
+ * @navigationTitle 抛射技能
+ */
+class ThrowStoneSkill extends SkillTemplate {
+    /**
+     * 创建投石技能实例。
+     * @param {import("../monster").Monster} monster 
+     * @param {{
+     *   cooldown?: number;
+     *   events?: string[];
+     *   animation?: string;
+     *   distanceMin?: number;
+     *   distanceMax?: number;
+     *   damage?: number;
+     *   projectileSpeed?: number;
+     *   gravityScale?: number;
+     *   radius?: number;
+     *   maxTargets?: number;
+     * }} params
+     */
+    constructor(monster, params) {
+        super(monster);
+        /** @type {string} 技能类型标识，固定为 `"throwstone"` */
+        this.typeId = "throwstone";
+        /** @type {number} 冷却时间（秒），-1 表示无冷却 */
+        this.cooldown = params.cooldown ?? -1;
+        /** @type {string|null} 抛射动画名称 */
+        this.animation = params.animation ?? null;
+        /** @type {string[]} 监听的事件类型，默认 [OnTick] */
+        this.events = params.events ?? [MonsterBuffEvents.Tick];
+        /** @type {number} 触发最小距离 */
+        this.distanceMin = params.distanceMin ?? 0;
+        /** @type {number} 触发最大距离 */
+        this.distanceMax = params.distanceMax ?? 600;
+        /** @type {number} 抛射物伤害值 */
+        this.damage = params.damage ?? 10;
+        /** @type {number} 抛射物速度 */
+        this.projectileSpeed = params.projectileSpeed ?? 500;
+        /** @type {number} 重力缩放系数 */
+        this.gravityScale = params.gravityScale ?? 1;
+        /** @type {number} 爆炸半径 */
+        this.radius = params.radius ?? 32;
+        /** @type {number} 单次最大命中目标数 */
+        this.maxTargets = params.maxTargets ?? 1;
+        /** @type {any} 后续接入独立投掷类实例 */
+        this._projectile = null;
+        /** @type {any} tick 上下文缓存 */
+        this._tickCtx = null;
+    }
+    /**
+     * 判断当前事件是否满足抛射触发条件。
+     *
+     * 除标准检查外，要求目标存在且距离在 `distanceMin` – `distanceMax`
+     * 范围内。通过时缓存 tick 上下文。
+     *
+     * @param {any} event 技能事件对象
+     * @returns {boolean} 是否需要通过动画流程触发
+     */
+    canTrigger(event) {
+        if (!this.events.includes(event.type)) return false;
+        if (!this.monster.target) return false;
+        if (this.running) return false;
+        if (this.monster.isOccupied()) return false;
+        if (!this._cooldownReady()) return false;
+        const distsq = this.monster.distanceTosq(this.monster.target);
+        if (distsq < this.distanceMin*this.distanceMin || distsq > this.distanceMax*this.distanceMax) return false;
+        this._tickCtx = { dt: event.dt, allmpos: event.allmpos };
+        if (!this.isActive()) {
+            this.trigger();
+            return false;
+        }
+        return true;
+    }
+    /**
+     * 抛射物逐帧更新。
+     *
+     * 当前为预留逻辑桩——后续将在此驱动投掷类实例的 update，
+     * 并收集命中结果。
+     */
+    tick() {
+        if (!this.running) return;
+        // 后续在此驱动投掷类实例的 update，并收集命中结果
+        // if (this._projectile) {
+        //     this._projectile.update(dt);
+        //     if (this._projectile.isFinished()) {
+        //         const hitTargets = this._projectile.getHitTargets();
+        //         // 处理命中回调
+        //         this.running = false;
+        //         this._projectile = null;
+        //     }
+        // }
+    }
+    /**
+     * 触发抛射。
+     *
+     * 当前为预留逻辑桩——后续将创建投掷类实例并设置 running=true。
+     */
+    trigger() {
+        // this._projectile = new ProjectileRunner({ ... });
+        // this.running = true;
+        this._markTriggered();
+    }
+}
+
+/**
+ * @module 怪物系统/怪物技能/激光
+ */
+
+/**
+ * 激光技能。
+ *
+ * 向当前目标方向发射激光，支持持续照射（`duration > 0`）
+ * 和瞬发两种模式。可配置宽度、穿透、最大目标数、启动延迟。
+ * 持续模式下通过 tick 累加器按 tickInterval 间隔造成伤害。
+ *
+ * @navigationTitle 激光技能
+ */
+class LaserBeamSkill extends SkillTemplate {
+    /**
+     * 创建激光射线技能实例。
+     * @param {import("../monster").Monster} monster 
+     * @param {{
+     *   cooldown?: number;
+     *   events?: string[];
+     *   animation?: string;
+     *   distance?: number;
+     *   duration?: number;
+     *   damagePerSecond?: number;
+     *   tickInterval?: number;
+     *   width?: number;
+     *   pierce?: boolean;
+     *   maxTargets?: number;
+     *   startDelay?: number;
+     * }} params
+     */
+    constructor(monster, params) {
+        super(monster);
+        /** @type {string} 技能类型标识，固定为 `"laserbeam"` */
+        this.typeId = "laserbeam";
+        /** @type {number} 冷却时间（秒），-1 表示无冷却 */
+        this.cooldown = params.cooldown ?? -1;
+        /** @type {string|null} 激光释放动画名称 */
+        this.animation = params.animation ?? null;
+        /** @type {string[]} 监听的事件类型，默认 [OnTick] */
+        this.events = params.events ?? [MonsterBuffEvents.Tick];
+        /** @type {number} 激光最大射程（单位距离） */
+        this.distance = params.distance ?? 500;
+        /** @type {number} 持续时间（秒）；>0 为持续光束，<=0 为瞬时激光 */
+        this.duration = params.duration ?? 0;
+        /** @type {number} 每秒伤害量 */
+        this.damagePerSecond = params.damagePerSecond ?? 20;
+        /** @type {number} 持续模式下伤害判定间隔（秒） */
+        this.tickInterval = params.tickInterval ?? 0.25;
+        /** @type {number} 激光宽度 */
+        this.width = params.width ?? 8;
+        /** @type {boolean} 是否穿透目标 */
+        this.pierce = params.pierce ?? false;
+        /** @type {number} 单次发射最大命中目标数 */
+        this.maxTargets = params.maxTargets ?? 1;
+        /** @type {number} 激光启动延迟（秒） */
+        this.startDelay = params.startDelay ?? 0;
+        /** tick 累积器，用于控制持续伤害节奏 */
+        this._tickAccumulator = 0;
+        /** @type {any} tick 上下文缓存 */
+        this._tickCtx = null;
+    }
+    /**
+     * 判断当前事件是否满足激光触发条件。
+     *
+     * 除标准检查（事件类型、冷却、占用、运行中）外，还要求
+     * 目标存在且在射程内。通过时缓存 tick 上下文（dt/allmpos）
+     * 供后续 tick 使用。
+     *
+     * @param {any} event 技能事件对象
+     * @returns {boolean} 是否需要通过动画流程触发
+     */
+    canTrigger(event) {
+        if (!this.events.includes(event.type)) return false;
+        if (!this.monster.target) return false;
+        if (this.running) return false;
+        if (this.monster.isOccupied()) return false;
+        if (!this._cooldownReady()) return false;
+        const distsq = this.monster.distanceTosq(this.monster.target);
+        if (distsq > this.distance*this.distance) return false;
+        this._tickCtx = { dt: event.dt, allmpos: event.allmpos };
+        if (!this.isActive()) {
+            this.trigger();
+            return false;
+        }
+        return true;
+    }
+    /**
+     * 持续光束的逐帧更新。
+     *
+     * 检查光束是否超时结束；后续将在此按 `tickInterval`
+     * 累积伤害并执行射线检测。
+     */
+    tick() {
+        if (!this.running) return;
+        const now = Instance.GetGameTime();
+        // 持续光束超时结束
+        if (this.duration > 0 && this.lastTriggerTime + this.duration <= now) {
+            this.running = false;
+            this._tickAccumulator = 0;
+            return;
+        }
+        // 后续在此按 tickInterval 累积伤害
+        // this._tickAccumulator += dt;
+        // while (this._tickAccumulator >= this.tickInterval) {
+        //     this._tickAccumulator -= this.tickInterval;
+        //     // 射线检测 + 造成伤害
+        // }
+    }
+    /**
+     * 触发激光发射。
+     *
+     * 当前为预留逻辑桩——后续将根据 `duration` 区分
+     * 瞬时激光（单次命中结算）与持续光束（设置 running=true）。
+     */
+    trigger() {
+        // if (this.duration > 0) this.running = true;  // 持续光束
+        // else { /* 瞬时激光：一次性命中结算 */ }
+        this._markTriggered();
+    }
+}
+
+/**
+ * @module 怪物系统/技能工厂
+ */
+/*
+技能分类规则（唯一权威）：
+  有 animation 参数（非 null）= 有动作：canTrigger 返回 true 后 request 入队，
+    Monster 进入 SKILL 状态，管理器先播放 animation，再调用 trigger()。
+  无 animation（null）       = 无动作：canTrigger 内直接执行业务并返回 false。
+  cooldown = -1              = 一次性：仅首次触发后永久失效。默认为 -1。
+  cooldown = 0               = 无冷却。
+  cooldown > 0               = 按秒间隔触发。
+
+实例 id 语义：
+  skill.typeId 是技能类型标识（即下方的 id 字段）。
+  skill.id 是运行时实例 id，由 MonsterSkillsManager.addSkill 按添加顺序分配，
+  id 越小优先级越高。同一怪物可同时拥有多个相同 typeId 的技能实例。
+
+所有技能均支持 params.events（string[]）配置多个触发事件，未提供则使用各技能自身默认。
+每个技能均支持可选 animation 参数，不传则默认 null（无动作）。
+每个技能均支持可选 cooldown 参数，不传则默认 -1（一次性）。
+
+技能列表（typeId 均为小写无前缀）：
+
+corestats   基础属性增加（默认 OnSpawn 执行一次，cooldown=-1）
+  { health_mult?, health_value?, damage_mult?, damage_value?,
+    speed_mult?, speed_value?, reward_mult?, reward_value?,
+    cooldown?, events?, animation? }
+
+pounce      飞扑（默认 OnTick 判断距离和冷却）
+  { distance: number, cooldown?, events?, animation? }
+
+initanim    初始动画（默认 OnSpawn 一次性）
+  { cooldown?, events?, animation? }
+
+doubleattack  双倍攻击（默认 AttackTrue 触发）
+  { cooldown?, events?, animation? }
+
+powerattack   重击（默认 AttackTrue 触发，可击飞玩家）
+  { cooldown?, events?, animation? }
+
+poisongas     毒气（默认 Die 触发，可释放毒气粒子）
+  { cooldown?, events?, animation? }
+
+shield      能量护盾（默认 [OnSpawn, OnTick]，Spawn 始终保留以初始化修饰器）
+  { runtime: number, value: number, cooldown?, events?, animation? }
+
+speedboost  急速（默认 OnTick，临时提升移动速度，超时后恢复）
+  { runtime: number, speed_mult?, speed_value?, cooldown?, events?, animation?,
+    glow?: {r,g,b} }
+
+throwstone  投掷石头（默认 OnTick，距离判定后投掷，trigger 待实现）
+  { distanceMin?, distanceMax?, damage?, projectileSpeed?, gravityScale?,
+    radius?, maxTargets?, cooldown?, events?, animation? }
+
+laserbeam   发射激光（默认 OnTick，distance 内判定，trigger 待实现）
+  { distance?, duration?, damagePerSecond?, tickInterval?, width?,
+    pierce?, maxTargets?, startDelay?, cooldown?, events?, animation? }
+
+spawn       事件触发产卵（默认 OnDie）
+  { events?, event?(旧单值兄容), count?, typeName?, cooldown?,
+    maxSummons?, radiusMin?, radiusMax?, tries?, animation? }
+ */
+/**
+ * 技能工厂。根据 typeId 创建对应的技能实例。
+ *
+ * 当前支持的 typeId：
+ * corestats、pounce、initanim、doubleattack、powerattack、
+ * poisongas、spawn、shield、speedboost、throwstone、laserbeam。
+ *
+ * 所有技能均支持 `params.events`、`params.animation`、`params.cooldown`。
+ * 详细参数见各技能类的 JSDoc。
+ */
+const SkillFactory = {
+    /**
+     * 根据 typeId 创建对应的技能实例。未识别的 id 返回 null。
+     * @param {import("./monster").Monster} monster 所属怪物实例
+     * @param {string} id 技能类型标识（如 "corestats"、"pounce"）
+     * @param {any} params 技能配置参数
+     * @returns {SkillTemplate|null}
+     */
+    create(monster,id, params) {
+        switch (id) {
+            case "corestats":
+                return new CoreStats(monster, params);
+            case "pounce":
+                return new PounceSkill(monster, params);
+            case "initanim":
+                return new InitAnimSkill(monster, params);
+            case "doubleattack":
+                return new DoubleAttackSkill(monster, params);
+            case "powerattack":
+                return new PowerAttackSkill(monster, params);
+            case "poisongas":
+                return new PoisonGasSkill(monster, params);
+            case "spawn":
+                return new SpawnSkill(monster, params);
+            case "shield":
+                return new ShieldSkill(monster, params);
+            case "speedboost":
+                return new SpeedBoostSkill(monster, params);
+            case "throwstone":
+                return new ThrowStoneSkill(monster, params);
+            case "laserbeam":
+                return new LaserBeamSkill(monster, params);
+            default:
+                return null;
+        } 
+    }
+};
+
+class SkillRequestQueue {
+    constructor() {
+        /** @type {import("../skill_manager").SkillTemplate[]} */
+        this._items = [];
+    }
+
+    push(skill) {
+        if (this._items.includes(skill)) return;
+        this._items.push(skill);
+        this._items.sort((a, b) => a.id - b.id);
+    }
+
+    has() {
+        return this._items.length > 0;
+    }
+
+    pop() {
+        return this._items.shift();
+    }
+
+    clear() {
+        this._items.length = 0;
+    }
+}
+
+class MonsterSkillsManager {
+    constructor(monster) {
+        this.monster = monster;
+        this._queue = new SkillRequestQueue();
+    }
+
+    initSkills(skillPool) {
+        if (TEMP_DISABLE.monsterSkills) {
+            this._queue.clear();
+            this.monster.skills.length = 0;
+            return;
+        }
+        if (!skillPool) return;
+
+        for (const cfg of skillPool) {
+            if (Math.random() > cfg.chance) continue;
+            const skill = SkillFactory.create(this.monster, cfg.id, cfg.params);
+            if (!skill) continue;
+            this.addSkill(skill);
+        }
+    }
+
+    addSkill(skill) {
+        if (TEMP_DISABLE.monsterSkills) return;
+        skill.id = this.monster.skills.length;
+        this.monster.skills.push(skill);
+    }
+
+    emitEvent(event) {
+        if (TEMP_DISABLE.monsterSkills) return;
+
+        for (const skill of this.monster.skills) {
+            if (!skill.canTrigger(event)) continue;
+            skill.request();
+        }
+    }
+
+    tickRunningSkills() {
+        if (TEMP_DISABLE.monsterSkills) return;
+
+        for (const skill of this.monster.skills) {
+            if (!skill.running) continue;
+            skill.tick();
+        }
+    }
+
+    requestSkill(skill) {
+        if (TEMP_DISABLE.monsterSkills) {
+            this._queue.clear();
+            return;
+        }
+        if (this.monster.movementStateSnapshot.mode === "ladder") {
+            this._queue.clear();
+            return;
+        }
+        this._queue.push(skill);
+    }
+
+    hasRequestedSkill() {
+        if (TEMP_DISABLE.monsterSkills) {
+            this._queue.clear();
+            return false;
+        }
+        if (this.monster.movementStateSnapshot.mode === "ladder") {
+            this._queue.clear();
+            return false;
+        }
+        return this._queue.has();
+    }
+
+    triggerRequestedSkill() {
+        if (TEMP_DISABLE.monsterSkills) {
+            this._queue.clear();
+            return;
+        }
+        if (this.monster.movementStateSnapshot.mode === "ladder") {
+            this._queue.clear();
+            return;
+        }
+
+        const skill = this._queue.pop();
+        if (!skill) return;
+
+        if (skill.animation) this.monster.animator.play(skill.animation);
+        skill.trigger();
+    }
+}
+
+/**
+ * @module 怪物系统/怪物组件/移动意图适配
+ */
+
+
+/**
+ * 怪物移动意图适配器（事件驱动）。
+ *
+ * 不再每帧推送 Move 请求，而是在状态变化点发出请求：
+ * - activate()   — 进入追击态时提交 Move
+ * - deactivate() — 进入技能/空闲/死亡时提交 Stop
+ * - onTargetChanged()      — 追击目标更换时重新提交
+ * - onOccupationChanged()  — 动画占用开始/结束时重新提交 Chase 请求，更新 usePathRefresh
+ *
+ * MovementManager 持有长期任务，无需每帧重复推送。
+ *
+ * @navigationTitle 怪物移动意图适配器
+ */
+class MonsterMovementPathAdapter {
+    /**
+     * @param {import("../monster").Monster} monster 所属怪物实例
+     */
+    constructor(monster) {
+        /** 所属怪物实例。 */
+        this.monster = monster;
+        /** 注册时的默认移动模式。由 init 保存。 */
+        this._defaultMode = "walk";
+        /** 当前是否有活跃的追击任务。 */
+        this._active = false;
+    }
+
+    /**
+     * 初始化：仅记录配置，不创建运动执行器。
+     * @param {import("../../../util/definition").monsterTypes} typeConfig 怪物类型配置
+     */
+    init(typeConfig) {
+        switch (typeConfig.movementmode) {
+            case "fly":
+                this._defaultMode = "fly";
+                break;
+            default:
+                this._defaultMode = "walk";
+                break;
+        }
+    }
+
+    /**
+     * 激活追击。进入 CHASE / ATTACK 等需要持续移动的状态时调用。
+     */
+    activate() {
+        if (!this.monster.target) return;
+        this._active = true;
+        this._submitChase();
+    }
+
+    /**
+     * 停止移动。进入 SKILL / IDLE / DEAD 或丢失目标时调用。
+     */
+    deactivate() {
+        if (!this._active) return;
+        this._active = false;
+        this.monster.submitMovementEvent({
+            type: MovementRequestType.Stop,
+            entity: this.monster.model,
+            priority: MovementPriority.StateChange,
+            clearPath: false,
+        });
+    }
+
+    /**
+     * 追击目标实体变化时调用。若当前活跃则重新提交 Move；
+     * 若新目标为 null 则自动停止。
+     */
+    onTargetChanged() {
+        if (!this._active) return;
+        if (!this.monster.target) {
+            this.deactivate();
+            return;
+        }
+        this._submitChase();
+    }
+
+    /**
+     * 动画占用状态变化时调用（开始/结束）。
+     * 重新提交 Chase 请求，用 usePathRefresh 直接表达“当前是否允许刷新路径”。
+     */
+    onOccupationChanged() {
+        if (!this._active) return;
+        this._submitChase();
+    }
+
+    /** 内部：提交一次 Chase Move 请求。 */
+    _submitChase() {
+        this.monster.submitMovementEvent({
+            type: MovementRequestType.Move,
+            entity: this.monster.model,
+            priority: MovementPriority.Chase,
+            targetEntity: this.monster.target??undefined,
+            usePathRefresh: !this.monster.isOccupied(),
+            useNPCSeparation: true,
+            Mode: this._defaultMode,
+        });
+    }
+
+    /** 获取注册用的默认模式。 */
+    getDefaultMode() {
+        return this._defaultMode;
+    }
+}
+
+/**
+ * @module 怪物系统/怪物动画控制器
+ */
+
+/**
+ * 怪物动画控制器。
+ *
+ * 封装 Source 2 实体动画接口，提供状态机式动作切换。
+ * 通过 `OnAnimationDone` 事件检测动作完成，支持占用锁（locked）
+ * 防止攻击/技能动作被中断。提供 `onAttackFinish` 回调。
+ *
+ * @navigationTitle 怪物动画控制器
+ */
+class MonsterAnimator {
+    /**
+     * 创建怪物动画控制器实例。
+     * @param {Entity} model Source 2 怪物模型实体
+     * @param {import("../../util/definition").animations} animConfig 动画配置表（idle/walk/attack/skill/dead 动画名数组）
+     */
+    constructor(model, animConfig) {
+        /** Source 2 怪物模型实体。 */
+        this.model = model;
+        /**
+         * 动画配置表。每个键对应一组可随机播放的动画名。
+         * @type {import("../../util/definition").animations}
+         */
+        this.animConfig = animConfig;
+        /** 是否处于动作占用期。播放动画时置 true，`OnAnimationDone` 事件触发后置 false。 */
+        this.locked = false;
+        /** 当前动画对应的 MonsterState 值。由 `tick` / `enter` 设置。 */
+        this.currentstats=-1;
+        
+        Instance.ConnectOutput(this.model,"OnAnimationDone",(e)=>{
+            //动画播放完了
+            this.locked = false;
+            this.onStateFinish?.(this.currentstats);
+        });
+    }
+    /**
+     * 设置动画播放完成回调。当任一动画结束（`OnAnimationDone`）时触发，
+     * 传入当时的 MonsterState 值。
+     * @param {(state: number) => void} callback 状态回调
+     */
+    setonStateFinish(callback)
+    {
+        this.onStateFinish=callback;
+    }
+    /**
+     * 每帧更新。若 `locked` 则跳过；否则根据当前状态播放对应动画。
+     * @param {number} state 当前 MonsterState
+     */
+    tick(state) {
+        if (this.locked) return;
+        this.currentstats=state;
+        switch (state) {
+            case MonsterState.IDLE:
+                this.play("idle");
+                break;
+            case MonsterState.CHASE:
+                this.play("walk");
+                break;
+            case MonsterState.ATTACK:
+                this.play("attack");
+                break;
+            case MonsterState.SKILL:
+                this.play("skill");
+                break;
+            case MonsterState.DEAD:
+                this.play("dead");
+                break;
+        }
+    }
+    /**
+     * 未被占用时始终允许；占用期间仅当当前不是 ATTACK/SKILL 时允许。
+     * @returns {boolean}
+     */
+    canSwitch() {
+        if (!this.locked) {
+            return true;
+        }
+        if (this.currentstats==MonsterState.ATTACK||this.currentstats==MonsterState.SKILL) {
+            return false;
+        }
+        return true;
+    }
+    /**
+     * 强制播放指定状态对应的动画，无视 `locked` 状态。
+     * 由 `applyStateTransition` 在状态切换成功后调用。
+     * @param {number} nextState MonsterState
+     */
+    enter(nextState) {
+        this.currentstats=nextState;
+        switch (nextState) {
+            case MonsterState.IDLE:
+                this.play("idle");
+                break;
+            case MonsterState.CHASE:
+                this.play("walk");
+                break;
+            case MonsterState.ATTACK:
+                this.play("attack");
+                break;
+            case MonsterState.SKILL:
+                this.play("skill");
+                break;
+            case MonsterState.DEAD:
+                this.play("dead");
+                break;
+        }
+    }
+    /**
+     * 播放指定类型的动画。从配置表中随机选择一个动画名，
+     * 通过 `EntFireAtTarget(SetAnimation)` 发送给引擎。
+     * @param {string} type 动画类型键（"idle"|"walk"|"attack"|"skill"|"dead"）
+     */
+    play(type) {
+        const list = this.animConfig[type];
+        if (!list || list.length === 0) return null;
+        const anim = list[Math.floor(Math.random() * list.length)];
+        if (!anim) return;
+        Instance.EntFireAtTarget({target:this.model,input:"SetAnimation",value:anim});
+        this.locked=true;
+    }
+}
+
+/**
+ * @module 怪物系统/怪物组件/动画占用
+ */
+
+/**
+ * 怪物动画占用组件。
+ *
+ * 封装 MonsterAnimator 并在攻击、技能、死亡动作播放期间
+ * 设置占用标志，禁止其他动作插入。
+ * 动作结束后自动取消占用并触发回调。
+ * 同时管理死亡动画/尸体降落流程。
+ *
+ * @navigationTitle 怪物动画占用
+ */
+class MonsterAnimationOccupation {
+    /**
+     * 创建怪物动画占用组件。
+     * @param {import("../monster").Monster} monster 所属怪物实例
+     */
+    constructor(monster) {
+        /** 所属怪物实例。 */
+        this.monster = monster;
+    }
+
+    /**
+     * 初始化动画控制器，并注册动画完成回调处理占用释放和死亡流程。
+     * @param {import("../../../util/definition").animations} animations 动画配置表
+     */
+    init(animations) {
+        this.monster.animator = new MonsterAnimator(this.monster.model, animations);
+        this.monster.animator.setonStateFinish((/** @type {number} */ state) => {
+            if (state == MonsterState.ATTACK) this.monster.onOccupationEnd("attack");
+            else if (state == MonsterState.SKILL) this.monster.onOccupationEnd("skill");
+            else if (state == MonsterState.DEAD) {
+                this.monster.emitEvent({ type: MonsterBuffEvents.ModelRemove });
+                this.monster.entityBridge.removeAfterDeath(monstercorpse);
+            }
+        });
+    }
+
+    /**
+     * 当前是否被占用。
+     * @returns {boolean}
+     */
+    isOccupied() {
+        return this.monster.occupation != "";
+    }
+
+    /**
+     * 设置占用标记。占用期间状态切换被禁止。
+     * @param {string} type 占用类型（"attack" | "skill" | "pounce"）
+     */
+    setOccupation(type) {
+        this.monster.occupation = type;
+    }
+
+    /**
+     * 占用结束回调。仅当 type 与当前占用一致时才清除。
+     * @param {string} type 占用类型
+     */
+    onOccupationEnd(type) {
+        if (this.monster.occupation !== type) return;
+        this.monster.occupation = "";
+    }
+
+    /**
+     * 每帧动画同步。委托 Animator。
+     * @param {number} state 当前 MonsterState
+     */
+    tick(state) {
+        this.monster.animator.tick(state);
+    }
+
+    /**
+     * 判断动画是否允许切换到目标状态。委托 Animator。
+     * @returns {boolean}
+     */
+    canSwitch() {
+        return this.monster.animator.canSwitch();
+    }
+
+    /**
+     * 强制播放指定状态动画。委托 Animator。
+     * @param {number} nextState 目标 MonsterState
+     */
+    enter(nextState) {
+        this.monster.animator.enter(nextState);
+    }
+}
+
+const MONSTER_RESOURCE_KEYS = new Set(["health"]);
+const MONSTER_STAT_KEYS = new Set(["maxHealth", "attack", "speed"]);
+
+class MonsterBuffHostAdapter extends BuffHostAdapter {
+    constructor(monster) {
+        super();
+        this.monster = monster;
+        this.hostType = BuffTargetType.MONSTER;
+        this.hostId = monster.id;
+    }
+
+    getNow() {
+        return Instance.GetGameTime();
+    }
+
+    isAlive() {
+        return this.monster.state !== MonsterState.DEAD;
+    }
+
+    getState() {
+        return this.monster.state;
+    }
+
+    getResource(key) {
+        switch (key) {
+            case "health":
+                return this.monster.health;
+            default:
+                return 0;
+        }
+    }
+
+    setResource(key, value) {
+        return this.addResource(key, value - this.getResource(key), {
+            reason: `buff:set:${key}`,
+        });
+    }
+
+    addResource(key, delta, meta = null) {
+        switch (key) {
+            case "health":
+                return this._addHealth(delta, meta);
+            default:
+                return 0;
+        }
+    }
+
+    clampResource(key, value) {
+        switch (key) {
+            case "health":
+                return Math.max(0, Math.min(value, this.monster.maxhealth));
+            default:
+                return value;
+        }
+    }
+
+    getBaseStat(key) {
+        switch (key) {
+            case "maxHealth":
+                return this.monster.baseMaxHealth;
+            case "attack":
+                return this.monster.baseDamage;
+            case "speed":
+                return this.monster.baseSpeed;
+            default:
+                return 0;
+        }
+    }
+
+    setDerivedStat(key, value) {
+        switch (key) {
+            case "maxHealth":
+                this.monster.maxhealth = Math.max(1, value);
+                break;
+            case "attack":
+                this.monster.damage = Math.max(0, value);
+                break;
+            case "speed":
+                this.monster.speed = Math.max(0, value);
+                break;
+        }
+    }
+
+    recomputeDerivedStats() {
+        this.monster.maxhealth = Math.max(1, this.monster.maxhealth);
+        this.monster.damage = Math.max(0, this.monster.damage);
+        this.monster.speed = Math.max(0, this.monster.speed);
+        this.monster.health = this.clampResource("health", this.monster.health);
+    }
+
+    emitBuffEvent(eventType, payload) {
+    }
+
+    supportsEffect(effect) {
+        if (!effect) return false;
+
+        switch (effect.type) {
+            case BuffEffectType.INSTANT_RESOURCE:
+            case BuffEffectType.PERIODIC_RESOURCE:
+                return MONSTER_RESOURCE_KEYS.has(effect.key);
+            case BuffEffectType.STAT_MODIFIER:
+                return MONSTER_STAT_KEYS.has(effect.key);
+            case BuffEffectType.GAIN_MODIFIER:
+            default:
+                return false;
+        }
+    }
+
+    _addHealth(delta, meta) {
+        if (!delta) return 0;
+        if (this.monster.state === MonsterState.DEAD) return 0;
+
+        if (delta > 0) {
+            const oldHealth = this.monster.health;
+            const nextHealth = this.clampResource("health", oldHealth + delta);
+            const actual = nextHealth - oldHealth;
+            if (!actual) return 0;
+            this.monster.health = nextHealth;
+            return actual;
+        }
+
+        this.monster.healthCombat.takeDamage(-delta, null, meta);
+        return delta;
+    }
+}
+
+class MonsterBuffManager {
+    constructor(monster) {
+        this.monster = monster;
+        this.adapter = new MonsterBuffHostAdapter(monster);
+        this._manager = new GenericBuffManager(this.adapter);
+    }
+
+    addBuff(typeId, params, source) {
+        if (TEMP_DISABLE.monsterBuffs) return null;
+        return this._manager.addBuff(typeId, params, source);
+    }
+
+    removeBuff(typeIdOrFilter) {
+        if (TEMP_DISABLE.monsterBuffs) {
+            return typeof typeIdOrFilter === "string" ? false : 0;
+        }
+        if (typeIdOrFilter == null) return false;
+        if (typeof typeIdOrFilter === "string") {
+            return this._manager.removeBuff(typeIdOrFilter);
+        }
+        return this._manager.removeByFilter(typeIdOrFilter ?? {});
+    }
+
+    removeById(id) {
+        if (TEMP_DISABLE.monsterBuffs) return false;
+        return this._manager.removeById(id);
+    }
+
+    removeByTag(tag) {
+        if (TEMP_DISABLE.monsterBuffs) return 0;
+        return this._manager.removeByTag(tag);
+    }
+
+    removeByFilter(filter) {
+        if (TEMP_DISABLE.monsterBuffs) return 0;
+        return this._manager.removeByFilter(filter);
+    }
+
+    clearAll() {
+        if (TEMP_DISABLE.monsterBuffs) return;
+        this._manager.clearAll();
+    }
+
+    clearCombatTemporary() {
+        if (TEMP_DISABLE.monsterBuffs) return;
+        this._manager.clearCombatTemporary();
+    }
+
+    getBuff(typeId) {
+        if (TEMP_DISABLE.monsterBuffs) return null;
+        return this._manager.getBuff(typeId);
+    }
+
+    hasBuff(typeId) {
+        if (TEMP_DISABLE.monsterBuffs) return false;
+        return this._manager.hasBuff(typeId);
+    }
+
+    getAllBuffs() {
+        if (TEMP_DISABLE.monsterBuffs) return [];
+        return this._manager.getAllBuffs();
+    }
+
+    tick(dt) {
+        if (TEMP_DISABLE.monsterBuffs) return;
+        this._manager.tick(dt);
+    }
+
+    onBeforeDamageTaken(ctx) {
+        if (TEMP_DISABLE.monsterBuffs) return;
+        this._manager.onBeforeDamageTaken(ctx);
+    }
+
+    onAfterDamageTaken(ctx) {
+        if (TEMP_DISABLE.monsterBuffs) return;
+        this._manager.onAfterDamageTaken(ctx);
+    }
+
+    onStateChange(oldState, newState) {
+        if (TEMP_DISABLE.monsterBuffs) return;
+        this._manager.onStateChange(oldState, newState);
+    }
+
+    onRespawn() {
+        if (TEMP_DISABLE.monsterBuffs) return;
+        this._manager.onRespawn();
+    }
+
+    recomputeModifiers() {
+        if (TEMP_DISABLE.monsterBuffs) return;
+        this._manager.recomputeModifiers();
+    }
+}
+
+/**
+ * @module 怪物系统/怪物实体
+ */
+
+class Monster {
+    constructor(id, position, typeConfig) {
+        this.id = id;
+
+        /** @type {Entity} */
+        this.model = undefined;
+        /** @type {Entity} */
+        this.breakable = undefined;
+        /** @type {import("./skill_manager").SkillTemplate[]} */
+        this.skills = [];
+
+        this.type = typeConfig.name;
+
+        this.baseMaxHealth = typeConfig.baseHealth;
+        this.maxhealth = this.baseMaxHealth;
+        this.health = this.baseMaxHealth;
+        this.preBreakableHealth = 10000;
+
+        this.baseDamage = typeConfig.baseDamage;
+        this.damage = this.baseDamage;
+
+        this.baseSpeed = typeConfig.speed;
+        this.speed = this.baseSpeed;
+
+        this.attackdist = typeConfig.attackdist;
+        this.baseReward = typeConfig.reward;
+        this.atc = typeConfig.attackCooldown;
+
+        this.occupation = "";
+        this.events = new MonsterEvents();
+        /** @type {CSPlayerPawn | null} */
+        this.killer = null;
+
+        this.entityBridge = new MonsterEntityBridge(this);
+        this.healthCombat = new MonsterHealthCombat(this);
+        this.buffManager = new MonsterBuffManager(this);
+        this.brainState = new MonsterBrainState(this);
+        this.skillsManager = new MonsterSkillsManager(this);
+        this.movementPath = new MonsterMovementPathAdapter(this);
+        this.animationOccupation = new MonsterAnimationOccupation(this);
+
+        this.initEntities(position, typeConfig);
+
+        this.state = MonsterState.IDLE;
+        /** @type {CSPlayerPawn | null} */
+        this.target = null;
+        this.lastTargetUpdate = 0;
+        this.attackCooldown = 0;
+        this.lasttick = 0;
+
+        /** @type {{ mode: string; onGround: boolean; currentGoalMode: number | null; }} */
+        this.movementStateSnapshot = {
+            mode: "walk",
+            onGround: true,
+            currentGoalMode: null,
+        };
+
+        /** @type {import("./animator").MonsterAnimator} */
+        this.animator = undefined;
+
+        this.initSkills(typeConfig.skill_pool);
+        this.movementPath.init(typeConfig);
+        this.animationOccupation.init(typeConfig.animations);
+        this.buffManager.recomputeModifiers();
+    }
+
+    init() {
+        this.emitEvent({ type: MonsterBuffEvents.Spawn });
+    }
+
+    initSkills(skillPool) {
+        this.skillsManager.initSkills(skillPool);
+    }
+
+    addSkill(skill) {
+        this.skillsManager.addSkill(skill);
+    }
+
+    initEntities(position, typeConfig) {
+        this.entityBridge.init(position, typeConfig);
+    }
+
+    takeDamage(amount, attacker) {
+        return this.healthCombat.takeDamage(amount, attacker);
+    }
+
+    addBuff(typeId, params, source) {
+        return this.buffManager.addBuff(typeId, params, source);
+    }
+
+    removeBuff(typeIdOrFilter) {
+        return this.buffManager.removeBuff(typeIdOrFilter);
+    }
+
+    hasBuff(typeId) {
+        return this.buffManager.hasBuff(typeId);
+    }
+
+    getAllBuffs() {
+        return this.buffManager.getAllBuffs();
+    }
+
+    die(killer) {
+        this.healthCombat.die(killer);
+    }
+
+    requestSpawn(options) {
+        if (!this.events.onSpawnRequest) return false;
+        return this.events.onSpawnRequest(this, options) === true;
+    }
+
+    tick(allmpos, allppos) {
+        if (!this.model || !this.breakable?.IsValid()) return;
+        if (this.state === MonsterState.DEAD) return;
+
+        const now = Instance.GetGameTime();
+        const dt = this.lasttick > 0 ? now - this.lasttick : 0;
+        this.lasttick = now;
+
+        if (this.attackCooldown > 0) {
+            this.attackCooldown -= dt;
+        }
+
+        if (dt > 0) {
+            this.buffManager.tick(dt);
+        }
+        if (this.state === MonsterState.DEAD) return;
+
+        this.emitEvent({ type: MonsterBuffEvents.Tick, dt, allmpos });
+        this.skillsManager.tickRunningSkills();
+
+        if (now - this.lastTargetUpdate > 3.0 || !this.target) {
+            this.updateTarget(allppos);
+            this.lastTargetUpdate = now;
+        }
+        if (!this.target) return;
+        if (this.isOccupied()) return;
+
+        const intent = this.evaluateIntent();
+        this.resolveIntent(intent);
+        this.animationOccupation.tick(this.state);
+    }
+
+    updateTarget(allppos) {
+        const prevTarget = this.target;
+        this.brainState.updateTarget(allppos);
+        if (this.target !== prevTarget) {
+            this.movementPath.onTargetChanged();
+        }
+    }
+
+    isOccupied() {
+        return this.animationOccupation.isOccupied();
+    }
+
+    emitEvent(event) {
+        this.skillsManager.emitEvent(event);
+    }
+
+    evaluateIntent() {
+        return this.brainState.evaluateIntent();
+    }
+
+    resolveIntent(intent) {
+        this.brainState.resolveIntent(intent);
+    }
+
+    trySwitchState(nextState) {
+        return this.brainState.trySwitchState(nextState);
+    }
+
+    applyStateTransition(nextState) {
+        if (this.state === nextState) return true;
+        if (this.state === MonsterState.DEAD) return false;
+        if (this.isOccupied()) return false;
+        if (!this.animationOccupation.canSwitch()) return false;
+
+        const prevState = this.state;
+        this.state = nextState;
+        this.buffManager.onStateChange(prevState, nextState);
+        this.animationOccupation.enter(nextState);
+
+        if (nextState === MonsterState.CHASE || nextState === MonsterState.ATTACK) {
+            this.movementPath.activate();
+        } else if (prevState === MonsterState.CHASE || prevState === MonsterState.ATTACK) {
+            this.movementPath.deactivate();
+        }
+        return true;
+    }
+
+    enterSkill() {
+        this.movementPath.deactivate();
+        this.animationOccupation.setOccupation("skill");
+        this.skillsManager.triggerRequestedSkill();
+    }
+
+    enterAttack() {
+        this.healthCombat.enterAttack();
+    }
+
+    distanceTosq(ent) {
+        const a = this.model.GetAbsOrigin();
+        const b = ent.GetAbsOrigin();
+        return vec$1.lengthsq(a, b);
+    }
+
+    onOccupationEnd(type) {
+        this.animationOccupation.onOccupationEnd(type);
+        this.movementPath.onOccupationChanged();
+    }
+
+    requestSkill(skill) {
+        this.skillsManager.requestSkill(skill);
+    }
+
+    submitMovementEvent(request) {
+        this.events.onMovementEvent?.(request);
+    }
+
+    updateMovementSnapshot(snapshot) {
+        this.movementStateSnapshot = snapshot;
+    }
+}
+
+class MonsterEvents {
+    constructor() {
+        /** @type {((monster: Monster, killer: CSPlayerPawn | null) => void) | null} */
+        this.OnDie = null;
+        /** @type {((damage: number, target: CSPlayerPawn) => void) | null} */
+        this.OnAttackTrue = null;
+        /** @type {((id: string, target: CSPlayerPawn, payload?: any) => void) | null} */
+        this.OnSkillCast = null;
+        /** @type {((monster: Monster, amount: number, attacker: CSPlayerPawn | null) => number | void) | null} */
+        this.OnBeforeTakeDamage = null;
+        /** @type {((caster: Monster, options: any) => boolean) | null} */
+        this.onSpawnRequest = null;
+        /** @type {((desc: any) => void) | null} */
+        this.onAreaEffectRequest = null;
+        /** @type {((event: any) => void) | null} */
+        this.onMovementEvent = null;
+    }
+
+    setOnDie(callback) {
+        this.OnDie = callback;
+    }
+
+    setOnAttackTrue(callback) {
+        this.OnAttackTrue = callback;
+    }
+
+    setOnSkillCast(callback) {
+        this.OnSkillCast = callback;
+    }
+
+    setOnBeforeTakeDamage(callback) {
+        this.OnBeforeTakeDamage = callback;
+    }
+
+    setOnSpawnRequest(callback) {
+        this.onSpawnRequest = callback;
+    }
+
+    setOnAreaEffectRequest(callback) {
+        this.onAreaEffectRequest = callback;
+    }
+
+    setOnMovementEvent(callback) {
+        this.onMovementEvent = callback;
+    }
+}
+
+/**
+ * @module 怪物系统/怪物管理器/怪物生成相关
+ */
+/**
+ * 怪物刷新服务。
+ *
+ * 负责按波次配置在地图上生成怪物实例。核心流程：
+ * 1. `spawnWave(waveConfig)` – 设置当前波次配置，解析生成点。
+ * 2. `tick(now)` – 每帧检查是否到达刷怪间隔、是否超过存活上限、是否达到总数。
+ * 3. `spawnMonster(waveConfig)` – 在随机生成点创建单个怪物，绑定事件并注册到 MonsterManager。
+ *
+ * 刷怪点距离检测：当 `spawnPointsDistance > 0` 时，只会选择
+ * 离最近玩家距离不超过该值的生成点，避免怪物生成在无人区域。
+ *
+ * 内部持有 MonsterFactory 用于实际创建 Monster 对象。
+ *
+ * @navigationTitle 怪物刷新服务
+ */
+class SpawnService {
+    /**
+     * 创建怪物刷新服务实例。
+     * @param {MonsterManager} manager 怪物管理器，提供怪物注册、事件绑定等服务
+     */
+    constructor(manager) {
+        /** 怪物管理器引用，提供怪物注册、ID 分配、事件绑定等能力。 */
+        this.manager = manager;
+        /**
+         * 当前波次可用的生成点实体列表。由 `spawnWave` 按配置名称查找并填充，
+         * 每次新波次开始时清空重建。
+         * @type {Entity[]}
+         */
+        this.spawnPoints = [];
+        /** 上一次成功生成怪物的游戏时间。初始值 -1 表示本波尚未生成过。由 `tick` 更新。 */
+        this.spawnpretick = -1;
+        /** 当前波次已生成的怪物数量。达到 `spawnconfig.totalMonsters` 时自动停止。由 `tick` 递增。 */
+        this.spawnmonstercount = 0;
+        /** 当前是否正在刷怪。`spawnWave` 设为 true，`stopWave` 或达到总数时设为 false。 */
+        this.spawn = false;
+        /**
+         * 当前波次的配置数据。由 `spawnWave` 设置，`tick` 和 `spawnMonster` 读取。
+         * @type {import("../../util/definition").waveConfig | null}
+         */
+        this.spawnconfig = null;
+    }
+
+    /**
+     * 启动一个新波次的刷怪流程。
+     *
+     * 重置计数器与生成点列表，按配置中的 `monster_spawn_points_name` 查找地图实体，
+     * 之后每帧由 `tick` 按间隔和存活上限驱动实际生成。
+     *
+     * @param {import("../../util/definition").waveConfig} waveConfig 波次配置，包含怪物总数、间隔、生成点名称等
+     */
+    spawnWave(waveConfig) {
+        if (!waveConfig || waveConfig.totalMonsters <= 0) return;
+        this.spawnpretick = -1;
+        this.spawnmonstercount = 0;
+        this.spawn = true;
+        this.spawnconfig = waveConfig;
+        this.spawnPoints = [];
+        const spawnPointNames = waveConfig.monster_spawn_points_name;
+        spawnPointNames.forEach((/** @type {string} */ name) => {
+            const found = Instance.FindEntitiesByName(name);
+            this.spawnPoints.push(...found);
+        });
+    }
+
+    /**
+     * 停止当前波次的刷怪。将 `spawn` 标记设为 false，`tick` 不再生成新怪物。
+     * 已生成的怪物不受影响。
+     */
+    stopWave() {
+        this.spawn = false;
+    }
+
+    /**
+     * 每帧刷怪驱动。按以下顺序检查是否应生成新怪物：
+     * 1. 刷怪开关 `spawn` 是否开启。
+     * 2. 已生成数 `spawnmonstercount` 是否达到波次总数。
+     * 3. 距上次生成是否超过 `spawnInterval`。
+     * 4. 当前存活怪物数是否低于 `aliveMonster` 上限。
+     *
+     * 满足全部条件后调用 `spawnMonster` 生成一只怪物并更新计数器。
+     *
+     * @param {number} now 当前游戏时间（秒）
+     */
+    tick(now) {
+        if (!this.spawn) return;
+        if (!this.spawnconfig) return;
+        if (this.spawnmonstercount >= this.spawnconfig.totalMonsters) {
+            this.spawn = false;
+            return;
+        }
+        if (now - this.spawnpretick < this.spawnconfig.spawnInterval) return;
+        if (this.manager.activeMonsters >= this.spawnconfig.aliveMonster) return;
+        const monster = this.spawnMonster(this.spawnconfig);
+        if (monster) {
+            this.spawnmonstercount++;
+            if (this.spawnmonstercount >= this.spawnconfig.totalMonsters) {
+                this.spawn = false;
+            }
+            this.spawnpretick = now;
+        }
+    }
+
+    /**
+     * 在随机生成点创建一只怪物。
+     *
+     * 流程：
+     * 1. 若启用了 `spawnPointsDistance`，从生成点中筛选出离玩家足够近的子集。
+     * 2. 随机选取一个生成点，用包围盒射线检测碰撞遮挡。
+     * 3. 按怪物 ID 轮询选取怪物类型配置。
+     * 4. 调用 `createMonster` 完成实际创建与注册。
+     *
+     * @param {import("../../util/definition").waveConfig} waveConfig 当前波次配置
+     * @returns {Monster|null} 成功返回怪物实例，失败返回 null
+     */
+    spawnMonster(waveConfig) {
+        try {
+            if (this.spawnPoints.length === 0) {
+                const spawnPointNames = waveConfig.monster_spawn_points_name;
+                spawnPointNames.forEach((/** @type {string} */ name) => {
+                    const found = Instance.FindEntitiesByName(name);
+                    this.spawnPoints.push(...found);
+                });
+                if (this.spawnPoints.length === 0)
+                {   
+                    Instance.Msg("错误: 未找到怪物生成点");
+                    return null;
+                }
+            }
+            let nearbySpawnPoints = this.spawnPoints;
+            if (spawnPointsDistance > 0) ;
+            if (nearbySpawnPoints.length === 0) {
+                Instance.Msg("错误: 未找到怪物生成点");
+                return null;
+            }
+            const spawnPoint = nearbySpawnPoints[Math.floor(Math.random() * nearbySpawnPoints.length)];
+            const pos = spawnPoint.GetAbsOrigin();
+            const start = { x: pos.x, y: pos.y, z: pos.z + 50 };
+            const end = { x: pos.x, y: pos.y, z: pos.z + 50 };
+            if (Instance.TraceSphere({ radius:30, start, end, ignorePlayers: true }).hitEntity) {
+                Instance.Msg("错误: 生成点有遮挡");
+                return null;
+            }
+            const typeConfig = this.getMonsterType(waveConfig, this.manager.nextMonsterId);
+            const monster = this.createMonster(typeConfig, end);
+            if (!monster) return null;
+            Instance.Msg(`生成怪物 #${monster.id} ${monster.type} HP:${monster.health}`);
+            return monster;
+        } catch (error) {
+            Instance.Msg(`生成怪物失败: ${error}`);
+            return null;
+        }
+    }
+
+    /**
+     * 由技能触发的怪物产卵。在施法者周围随机位置尝试生成一只指定类型的怪物。
+     *
+     * 在 `radiusMin`~`radiusMax` 范围内随机采样位置，最多尝试 `tries` 次，
+     * 每次用包围盒检测碰撞遮挡，通过后调用 `createMonster` 创建。
+     *
+     * @param {Monster} caster 施法者怪物，用于获取中心坐标和默认类型
+     * @param {{typeName?:string,radiusMin?:number,radiusMax?:number,tries?:number}} options 产卵选项
+     * @returns {boolean} 是否成功生成
+     */
+    spawnBySkill(caster, options) {
+        options = options || {};
+        const typeName = options.typeName ?? caster.type;
+        const typeConfig = this.findMonsterTypeByName(typeName);
+        if (!typeConfig) {
+            Instance.Msg(`技能产卵失败: 未找到怪物类型 ${typeName}`);
+            return false;
+        }
+        if (!caster.breakable || !caster.breakable.IsValid()) return false;
+
+        const center = caster.breakable.GetAbsOrigin();
+        const radiusMin = Math.max(0, options.radiusMin ?? 24);
+        const radiusMax = Math.max(radiusMin, options.radiusMax ?? 96);
+        const tries = Math.max(1, options.tries ?? 6);
+        const mins = this.spawnconfig?.monster_breakablemins ?? { x: -30, y: -30, z: -30 };
+        const maxs = this.spawnconfig?.monster_breakablemaxs ?? { x: 30, y: 30, z: 30 };
+
+        for (let i = 0; i < tries; i++) {
+            const angle = Math.random() * Math.PI * 2;
+            const dist = radiusMin + Math.random() * (radiusMax - radiusMin);
+            const pos = {
+                x: center.x + Math.cos(angle) * dist,
+                y: center.y + Math.sin(angle) * dist,
+                z: center.z
+            };
+            const start = { x: pos.x, y: pos.y, z: pos.z + 45 };
+            const end = { x: pos.x, y: pos.y, z: pos.z + 50 };
+            if (Instance.TraceBox({ mins, maxs, start, end, ignorePlayers: true }).hitEntity) continue;
+            const monster = this.createMonster(typeConfig, end);
+            if (!monster) return false;
+            Instance.Msg(`技能产卵成功 #${monster.id} ${monster.type}`);
+            return true;
+        }
+
+        return false;
+    }
+
+    /**
+     * 创建一只怪物并完成全部注册流程。
+     *
+     * 依次执行：分配全局递增 ID → 工厂创建实例 → 绑定管理器回调 →
+     * 注册到 monsters 映射表 → 记录生命周期统计 → 注册首次寻路 → 发布生成事件。
+     *
+     * @param {import("../../util/definition").monsterTypes} typeConfig 怪物类型配置
+     * @param {import("cs_script/point_script").Vector} position 生成世界坐标
+     * @returns {Monster} 创建好的怪物实例
+     */
+    createMonster(typeConfig, position) {
+        const monsterId = this.manager.nextMonsterId++;
+        const monster = new Monster(monsterId, position, typeConfig);
+        this.manager.bindMonsterCallbacks(monster);
+        this.manager.monsters.set(monsterId, monster);
+        this.manager.lifecycle.recordSpawn();
+        this.manager._addMonsterToCache(monster);
+        this.manager.events.OnMonsterSpawn?.(monster);
+        monster.init();
+        return monster;
+    }
+
+    /**
+     * 在当前波次配置的怪物类型列表中按名称查找配置。
+     * @param {string} typeName 要查找的怪物名称
+     * @returns {import("../../util/definition").monsterTypes|null} 找到的配置，未找到返回 null
+     */
+    findMonsterTypeByName(typeName) {
+        const allTypes = this.spawnconfig?.monsterTypes ?? [];
+        for (const cfg of allTypes) {
+            if (cfg.name == typeName) return cfg;
+        }
+        return null;
+    }
+
+    /**
+     * 按怪物 ID 轮询选取波次中的怪物类型配置（取模分配）。
+     * @param {import("../../util/definition").waveConfig} waveConfig 波次配置
+     * @param {number} monsterId 怪物全局 ID
+     * @returns {import("../../util/definition").monsterTypes}
+     */
+    getMonsterType(waveConfig, monsterId) {
+        const typeIndex = monsterId % waveConfig.monsterTypes.length;
+        return waveConfig.monsterTypes[typeIndex];
+    }
+
+    /**
+     * 当前是否正在刷怪中。
+     * @returns {boolean}
+     */
+    isSpawning() {
+        return this.spawn;
+    }
+
+    hasPendingSpawns() {
+        if (!this.spawnconfig) return false;
+        return this.spawnmonstercount < this.spawnconfig.totalMonsters;
+    }
+}
+
+/**
+ * @module 怪物系统/怪物管理器/全局生命周期相关
+ */
+/**
+ * 怪物生命周期服务。
+ *
+ * 负责怪物死亡、清理、强制击杀等数量层面的生命周期逻辑。
+ * 
+ * @navigationTitle 怪物生命周期服务
+ */
+class LifecycleService {
+    /**
+     * 创建生命周期服务实例。
+     * @param {MonsterManager} manager 所属怪物管理器
+     * @param {SpawnService} spawnService 刷怪服务实例
+     */
+    constructor(manager, spawnService) {
+        /** 所属怪物管理器。 */
+        this.manager = manager;
+        /** 刷怪服务实例，用于判断是否正在刷怪。 */
+        this.spawnService = spawnService;
+        /** 
+         * 当前抑制“全部怪物已死亡”事件的层级。每进入一个强制清理/输局回收流程时增加，离开时减少。
+         * 仅当为0且没有活跃怪物时，才允许触发自然清场的“全部怪物已死亡”事件。
+         * @type {number} 
+         */
+        this._allDeadSuppressDepth = 0;
+    }
+
+    /**
+     * 处理单个怪物死亡，记录统计并在自然清场时发布事件。
+     * @param {Monster} monsterInstance 死亡的怪物实例
+     * @param {Entity|null|undefined} killer 击杀者实体
+     */
+    handleMonsterDeath(monsterInstance, killer) {
+        const monsterId = monsterInstance.id;
+        const reward = monsterInstance.baseReward;
+        this.recordDeath(reward);
+        this.manager.monsters.delete(monsterId);
+        this.manager._removeMonsterFromCache(monsterId);
+        this.manager.events.OnMonsterDeath?.(monsterInstance, killer, reward);
+        if (this._shouldEmitAllMonstersDead()) {
+            this.manager.events.OnAllMonstersDead?.(this.manager.totalKills, this.manager.totalReward);
+        }
+        Instance.Msg(`怪物 #${monsterId} 死亡，奖励 ${reward}`);
+    }
+
+    /**
+     * 强制清理所有怪物并停止刷怪。
+     * 强制流程不应被当成正常通关。
+     */
+    cleanup() {
+        this._withAllDeadSuppressed(() => {
+            for (const [id, monster] of this.manager.monsters) {
+                try {
+                    monster.die(null);
+                } catch (error) {
+                    Instance.Msg(`清理怪物 #${id} 失败: ${error}`);
+                }
+            }
+            this.manager.monsters.clear();
+            this.manager._clearMonsterCache();
+            this.manager.activeMonsters = 0;
+            this.spawnService.stopWave();
+        });
+        Instance.Msg("所有怪物已清理");
+    }
+
+    /**
+     * 强制击杀所有怪物，不触发自然清场逻辑。
+     * @returns {number[]}
+     */
+    killAllMonsters() {
+        /**
+         * @type {number[]}
+         */
+        const killed = [];
+        this._withAllDeadSuppressed(() => {
+            for (const [id, monster] of this.manager.monsters) {
+                try {
+                    monster.die(null);
+                    killed.push(id);
+                } catch (error) {
+                    Instance.Msg(`杀死怪物 #${id} 失败: ${error}`);
+                }
+            }
+        });
+        Instance.Msg(`强制杀死${killed.length} 个怪物`);
+        return killed;
+    }
+
+    /**
+     * 记录一次怪物生成。
+     */
+    recordSpawn() {
+        this.manager.activeMonsters++;
+    }
+
+    /**
+     * 记录一次怪物死亡。
+     * @param {number} reward
+     */
+    recordDeath(reward) {
+        this.manager.activeMonsters = Math.max(0, this.manager.activeMonsters - 1);
+        this.manager.totalKills++;
+        this.manager.totalReward += reward;
+    }
+
+    /**
+     * 是否应该发布“全部怪物已死亡”。
+     * 仅自然清场允许触发，强制清理/输局回收必须抑制。
+     * @returns {boolean}
+     */
+    _shouldEmitAllMonstersDead() {
+        if (this._allDeadSuppressDepth > 0) return false;
+        if (this.manager.activeMonsters > 0) return false;
+        return !this.spawnService.hasPendingSpawns();
+    }
+
+    /**
+     * @param {() => void} action
+     */
+    _withAllDeadSuppressed(action) {
+        this._allDeadSuppressDepth++;
+        try {
+            action();
+        } finally {
+            this._allDeadSuppressDepth = Math.max(0, this._allDeadSuppressDepth - 1);
+        }
+    }
+}
+
+/**
+ * @module 怪物系统/怪物管理器
+ */
+/**
+ * 怪物管理器。
+ *
+ * 负责整个怪物集合的生命周期和每帧调度，是外部系统（如 GameManager、
+ * DebugManager）与怪物系统交互的唯一入口。
+ *
+ * 主要职责：
+ * - 持有全部怪物实例（`monsters` Map，id → Monster）。
+ * - 协调 `SpawnService` 刷怪。
+ * - 采集本帧上下文（所有怪物位置、所有玩家 pawn），传给怪物 tick。
+ * - 维护区域效果服务 `AreaEffectService`，驱动怪物技能制造的持续区域效果。
+ * - 监听怪物领域事件并通过 `MonsterManagerEvents` 向上层暴露统一回调。
+ *
+ * 支持交替移动模式：当 `alternatMode` 开启时，奇偶帧各驱动一半怪物，
+ * 降低每帧计算量，从而支持更大规模的怪物数量。
+ *
+ * 使用方式：先构造 `new MonsterManager()`（会自动初始化 NavMesh），
+ * 然后在主循环中每帧调用 `tick()` 驱动所有怪物逻辑。
+ *
+ * @navigationTitle 怪物管理器
+ */
+class MonsterManager {
+    constructor() {
+        /**
+         * 所有怪物实例映射表（id → Monster）。由 SpawnService 添加，LifecycleService 移除。
+         * @type {Map<number,Monster>}
+         */
+        this.monsters = new Map();
+        /** 下一个怪物 ID。单调递增，不会回收。
+         * @type {number} */
+        this.nextMonsterId = 1;
+        /** 当前活跃怪物计数。由 lifecycle recordSpawn/recordDeath 更新。
+         * @type {number} */
+        this.activeMonsters = 0;
+        /** 累计击杀数。
+         * @type {number} */
+        this.totalKills = 0;
+        /** 累计奖励金额。
+         * @type {number} */
+        this.totalReward = 0;
+        /** 总帧计数。用于奇偶帧交替调度怪物 tick。 */
+        this.totaltick=-1;
+
+        // ── 帧上下文缓存（增量维护，tick 只刷新位置）──
+        /** @type {Monster[]} 缓存的活跃怪物实例，与 _cachedAllmpos/_cachedPositions 同索引。 */
+        this._cachedMonsters = [];
+        /** @type {Entity[]} 缓存的活跃怪物 breakable 数组（内部复用，调用方只读）。 */
+        this._cachedAllmpos = [];
+        /** @type {import("cs_script/point_script").Vector[]} 缓存的怪物位置（每 tick 原位更新）。 */
+        this._cachedPositions = [];
+        /** @type {Map<number,number>} 私有索引：怪物 id → 缓存数组下标，用于 O(1) 删除。 */
+        this._monsterCacheIdx = new Map();
+        /** @type {CSPlayerPawn[]} 缓存的存活敌对玩家 pawn（事件驱动更新）。 */
+        this._cachedAllppos = [];
+        /**
+         * 复用的 tickContext 对象壳。
+         * 返回的 allmpos / allppos / monsterPositions 是内部缓存引用，调用方只读、不可持久化后修改。
+         */
+        this._tickContext = { allmpos: this._cachedAllmpos, allppos: this._cachedAllppos, monsterPositions: this._cachedPositions };
+
+        /** 管理器级事件集合。向上层暴露生成/死亡/全灭/攻击/技能事件。 */
+        this.events = new MonsterManagerEvents();
+        /** 刷怪服务。负责波次调度和单体生成。 */
+        this.spawnService = new SpawnService(this);
+        /** 生命周期服务。处理死亡/清理/统计。 */
+        this.lifecycle = new LifecycleService(this, this.spawnService);
+    }
+    /**
+     * 生成一波怪物。委托 SpawnService。
+     * @param {import("../util/definition").waveConfig} waveConfig 波次配置
+     */
+    spawnWave(waveConfig) {
+        this.spawnService.spawnWave(waveConfig);
+    }
+    /**
+     * 停止刷怪。委托 SpawnService。
+     */
+    stopWave()
+    {
+        this.spawnService.stopWave();
+    }
+    /**
+     * 生成单个怪物。委托 SpawnService。
+     * @param {import("../util/definition").waveConfig} waveConfig 波次配置
+     * @returns {Monster|null}
+     */
+    spawnMonster(waveConfig) {
+        return this.spawnService.spawnMonster(waveConfig);
+    }
+    /**
+     * 处理怪物死亡。委托 LifecycleService。
+     * @param {Monster} monsterInstance 死亡怪物实例
+     * @param {import("cs_script/point_script").Entity|null|undefined} killer 击杀者
+     */
+    handleMonsterDeath(monsterInstance, killer) {
+        this.lifecycle.handleMonsterDeath(monsterInstance, killer);
+    }
+    /**
+     * 强制清理所有怪物和区域效果。
+     */
+    cleanup() {
+        this.lifecycle.cleanup();
+    }
+    /**
+     * 强制击杀所有怪物。
+     * @returns {number[]} 被击杀怪物 ID 列表
+     */
+    killAllMonsters() {
+        return this.lifecycle.killAllMonsters();
+    }
+
+    /**
+     * 每帧主循环。依次：刷新上下文 → 怪物 tick → 刷怪 tick。
+     * 移动的实际推进由 main 在 tick 后统一执行。
+     *
+     * 返回的 tickContext 是内部复用对象，调用方只读。
+     * @returns {{allmpos: Entity[], allppos: CSPlayerPawn[], monsterPositions: import("cs_script/point_script").Vector[]}}
+     */
+    tick()
+    {
+        this.totaltick++;
+        const now=Instance.GetGameTime();
+        const tickContext=this.collectTickContext();
+        this.tickMonsters(tickContext.allmpos,tickContext.allppos);
+        this.spawnService.tick(now);
+        return tickContext;
+    }
+    /**
+     * 刷新缓存中的怪物位置并返回复用的上下文对象。
+     *
+     * allmpos / allppos 由生命周期事件增量维护，此处只原位更新 monsterPositions。
+     * @returns {{allmpos: Entity[], allppos: CSPlayerPawn[], monsterPositions: import("cs_script/point_script").Vector[]}}
+     */
+    collectTickContext()
+    {
+        for(let i=0;i<this._cachedMonsters.length;i++){
+            this._cachedPositions[i]=this._cachedMonsters[i].model.GetAbsOrigin();
+        }
+        return this._tickContext;
+    }
+
+    /**
+     * 驱动所有怪物的 tick。奇偶帧交替调度降低每帧计算量。
+     * @param {Entity[]} allmpos 所有活跃怪物实体
+     * @param {CSPlayerPawn[]} allppos 所有存活玩家
+     */
+    tickMonsters(allmpos,allppos)
+    {
+        for (const [id, monster] of this.monsters) {
+            try {
+                monster.tick(allmpos,allppos);
+            } catch (error) {
+                Instance.Msg(`更新怪物 #${id} 失败: ${error}`);
+            }
+        }
+    }
+
+    /**
+    * 为新生成的怪物绑定事件回调。绑定死亡/攻击/技能事件，
+     * 设置产卵和区域效果请求回调。
+     * @param {Monster} monster 新生成的怪物实例
+     */
+    bindMonsterCallbacks(monster)
+    {
+        monster.events.setOnDie((monsterInstance, killer) => {
+            this.handleMonsterDeath(monsterInstance, killer);
+        });
+        monster.events.setOnAttackTrue((damage, target) => {
+            this.events.OnAttack?.(damage, target);
+        });
+        monster.events.setOnSkillCast((id, target, payload) => {
+            this.events.OnSkill?.(id, target, payload);
+        });
+        monster.events.setOnBeforeTakeDamage((monsterInstance, amount, attacker) => {
+            return this.events.OnBeforeTakeDamage?.(monsterInstance, amount, attacker);
+        });
+        // 产卵请求需返回布尔值，保留直接回调模式
+        monster.events.setOnSpawnRequest((caster, options) => {
+            return this.spawnService.spawnBySkill(caster, options);
+        });
+        // 移动意图事件转发：Monster 产生的移动事件汇入 Manager 级队列
+        monster.events.setOnMovementEvent((event) => {
+            this.events.OnMovementRequest?.(event);
+        });
+    }
+
+    // ── 怪物缓存维护（私有，由 SpawnService / LifecycleService 调用）──
+
+    /** @param {Monster} monster */
+    _addMonsterToCache(monster) {
+        const idx = this._cachedMonsters.length;
+        this._cachedMonsters.push(monster);
+        this._cachedAllmpos.push(monster.breakable);
+        this._cachedPositions.push(monster.model.GetAbsOrigin());
+        this._monsterCacheIdx.set(monster.id, idx);
+    }
+
+    /** @param {number} monsterId */
+    _removeMonsterFromCache(monsterId) {
+        const idx = this._monsterCacheIdx.get(monsterId);
+        if (idx === undefined) return;
+        const last = this._cachedMonsters.length - 1;
+        if (idx !== last) {
+            const tail = this._cachedMonsters[last];
+            this._cachedMonsters[idx] = tail;
+            this._cachedAllmpos[idx] = this._cachedAllmpos[last];
+            this._cachedPositions[idx] = this._cachedPositions[last];
+            this._monsterCacheIdx.set(tail.id, idx);
+        }
+        this._cachedMonsters.pop();
+        this._cachedAllmpos.pop();
+        this._cachedPositions.pop();
+        this._monsterCacheIdx.delete(monsterId);
+    }
+
+    _clearMonsterCache() {
+        this._cachedMonsters.length = 0;
+        this._cachedAllmpos.length = 0;
+        this._cachedPositions.length = 0;
+        this._monsterCacheIdx.clear();
+    }
+
+    // ── 玩家缓存维护（公开，由 main.js 事件桥接调用）──
+
+    /**
+     * 将一个玩家 pawn 加入缓存。内部检查队伍和去重。
+     * @param {CSPlayerPawn} pawn
+     */
+    addPlayerPawn(pawn) {
+        if (!pawn) return;
+        if ((pawn.GetTeamNumber() ^ targetTeam) === 1) return;
+        if (this._cachedAllppos.indexOf(pawn) !== -1) return;
+        this._cachedAllppos.push(pawn);
+    }
+
+    /**
+     * 从缓存移除一个玩家 pawn。
+     * @param {CSPlayerPawn} pawn
+     */
+    removePlayerPawn(pawn) {
+        const idx = this._cachedAllppos.indexOf(pawn);
+        if (idx === -1) return;
+        const last = this._cachedAllppos.length - 1;
+        if (idx !== last) {
+            this._cachedAllppos[idx] = this._cachedAllppos[last];
+        }
+        this._cachedAllppos.pop();
+    }
+
+    /**
+     * 用给定的 pawn 列表重建玩家缓存。内部过滤队伍。
+     * @param {CSPlayerPawn[]} pawns
+     */
+    syncAllPlayerPawns(pawns) {
+        this._cachedAllppos.length = 0;
+        for (const p of pawns) {
+            if (p && (p.GetTeamNumber() ^ targetTeam) !== 1) {
+                this._cachedAllppos.push(p);
+            }
+        }
+    }
+
+    /**
+     * 通过 ID 获取怪物实例。
+     * @param {number} id 怪物 ID
+     * @returns {Monster|undefined}
+     */
+    getMonsterById(id) {
+        return this.monsters.get(id);
+    }
+
+    applyBuff(monsterOrId, typeId, params, source) {
+        const monster = typeof monsterOrId === "number"
+            ? this.getMonsterById(monsterOrId)
+            : monsterOrId;
+        if (!monster) return null;
+        return monster.addBuff(typeId, params, source);
+    }
+
+    /**
+     * 将 movement 状态快照回写给对应的怪物实例。
+     * 由 main 在 movementManager.tick() 后调用。
+     * @param {Map<Entity, { mode: string; onGround: boolean; currentGoalMode: number | null; }>} states
+     */
+    syncMovementStates(states) {
+        for (const [, monster] of this.monsters) {
+            const state = states.get(monster.model);
+            if (state) monster.updateMovementSnapshot(state);
+        }
+    }
+
+    /**
+     * 获取所有怪物实例数组。
+     * @returns {Monster[]}
+     */
+    getAllMonsters() {
+        return Array.from(this.monsters.values());
+    }
+    
+    /**
+     * 获取所有未死亡的怪物实例数组。
+     * @returns {Monster[]}
+     */
+    getActiveMonsters() {
+        return Array.from(this.monsters.values()).filter(monster => monster.state!=MonsterState.DEAD);
+    }
+    
+    /**
+     * 获取所有怪物 ID 数组。
+     * @returns {number[]}
+     */
+    getAllMonsterIds() {
+        return Array.from(this.monsters.keys());
+    }
+    
+    /**
+     * 获取当前活跃怪物数量。
+     * @returns {number}
+     */
+    getMonsterCount() {
+        return this.activeMonsters;
+    }
+    
+    /**
+     * 获取累计击杀数。
+     * @returns {number}
+     */
+    getTotalKills() {
+        return this.totalKills;
+    }
+    
+    /**
+     * 获取累计奖励金额。
+     * @returns {number}
+     */
+    getTotalReward() {
+        return this.totalReward;
+    }
+    
+    /**
+     * 重置统计数据（击杀数和奖励）。
+     */
+    resetStats() {
+        this.totalKills = 0;
+        this.totalReward = 0;
+    }
+    /**
+     * 手动触发全灭事件。
+     */
+    triggerAllMonstersDead() {
+        this.events.OnAllMonstersDead?.(this.totalKills, this.totalReward);
+    }
+    /**
+     * 获取管理器状态快照。
+     * @returns {{totalMonsters: number, activeMonsters: number, nextId: number, totalKills: number, totalReward: number}}
+     */
+    getStatus() {
+        return {
+            totalMonsters: this.monsters.size,
+            activeMonsters: this.activeMonsters,
+            nextId: this.nextMonsterId,
+            totalKills: this.totalKills,
+            totalReward: this.totalReward
+        };
+    }
+}
+/**
+ * MonsterManager 级事件集合。
+ */
+class MonsterManagerEvents {
+    constructor() {
+        /** @type {((monster: Monster) => void) | null} */
+        this.OnMonsterSpawn = null;
+        /** @type {((monster: Monster, killer: Entity|null|undefined, reward: number) => void) | null} */
+        this.OnMonsterDeath = null;
+        /** @type {((totalKills: number, totalReward: number) => void) | null} */
+        this.OnAllMonstersDead = null;
+        /** @type {((damage: number, target: CSPlayerPawn) => void) | null} */
+        this.OnAttack = null;
+        /** @type {((id: string, target: CSPlayerPawn, payload?: any) => void) | null} */
+        this.OnSkill = null;
+        /** @type {((monster: Monster, amount: number, attacker: CSPlayerPawn | null) => number | void) | null} */
+        this.OnBeforeTakeDamage = null;
+        /** @type {((req: any) => void) | null} */
+        this.OnMovementRequest = null;
+    }
+    /** @param {(monster: Monster) => void} callback */
+    setOnMonsterSpawn(callback) {
+        this.OnMonsterSpawn = callback;
+    }
+    /** @param {(monster: Monster, killer: Entity|null|undefined, reward: number) => void} callback */
+    setOnMonsterDeath(callback) {
+        this.OnMonsterDeath = callback;
+    }
+    /** @param {(totalKills: number, totalReward: number) => void} callback */
+    setOnAllMonstersDead(callback) {
+        this.OnAllMonstersDead = callback;
+    }
+    /** @param {(damage: number, target: CSPlayerPawn) => void} callback */
+    setOnAttack(callback) {
+        this.OnAttack = callback;
+    }
+    /** @param {(id: string, target: CSPlayerPawn, payload?: any) => void} callback */
+    setOnSkill(callback) {
+        this.OnSkill = callback;
+    }
+    /** @param {(monster: Monster, amount: number, attacker: CSPlayerPawn | null) => number | void} callback */
+    setOnBeforeTakeDamage(callback) {
+        this.OnBeforeTakeDamage = callback;
+    }
+    /** @param {(req: any) => void} callback */
+    setOnMovementRequest(callback) {
+        this.OnMovementRequest = callback;
+    }
+}
+
+/**
+ * @module 实体移动/常量配置
+ */
+// ── 运动模块内聚常量─────────────────
+
+/** 世界重力 (hu/s²) */
+const gravity = 800;
+/** 地面摩擦系数 */
+const friction = 6;
+/** 爬台阶高度 (hu) */
+const stepHeight = 13;
+/** 路径节点到达判定距离 (hu) */
+const goalTolerance = 20;
+/** 终点到达判定距离 (hu) */
+const arriveDistance = 1;
+/** 转向速度 (度/s) */
+const turnSpeed = 360;
+
+// ── 碰撞相关 ────────────────────────────────────────────────
+/** 碰撞盒最小点 */
+const traceMins = { x: -4, y: -4, z: 1 };
+/** 碰撞盒最大点 */
+const traceMaxs = { x: 4, y: 4, z: 4 };
+/** 碰撞面安全偏移距离 (hu) */
+const surfaceEpsilon = 4;
+
+// ── 怪物群体分离 ───────────────────────────────────────────
+/** 怪物之间开始相互推开的 2D 半径 (hu)。
+ * 该值需要和实际怪物占用尺寸一致，否则会出现视觉上重叠但没有分离的情况。
+ */
+const separationRadius = 32;
+/** 分离力满额生效的近距离半径 (hu) */
+const separationMinRadius = 10;
+/** 最大分离速度 (hu/s) */
+const separationMaxStrength = 150;
+
+// ── 卡死检测 ────────────────────────────────────────────────
+/** 低于此距离认为没动 (hu) */
+const moveEpsilon = 0.5;
+/** 持续多久算卡死 (s) */
+const stuckTimeThreshold = 2;
+
+// ── 路径节点类型 ────────────────────────────────────────────
+/** @enum {number} */
+const PathState$1 = {
+    WALK: 1,
+    JUMP: 2,
+    LADDER: 3,
+    PORTAL: 4
+};
+
+/**
+ * @module 实体移动/碰撞探测器
+ */
+
+/** @typedef {import("cs_script/point_script").Vector} Vector */
+/** @typedef {import("cs_script/point_script").Entity} Entity */
+
+/**
+ * 碰撞探测器：封装 TraceBox 调用，提供 traceMove / traceGround / tryStep。
+ */
+class MoveProbe {
+    /**
+     * @param {{ mins?: Vector; maxs?: Vector }} [config]
+     */
+    constructor(config = {}) {
+        this.mins = config.mins ?? traceMins;
+        this.maxs = config.maxs ?? traceMaxs;
+    }
+
+    /**
+     * 扫描前方是否被阻挡
+     * @param {Vector} start
+     * @param {Vector} end
+     * @param {Entity[]} ignoreEntities
+     */
+    traceMove(start, end, ignoreEntities) {
+        const tr = Instance.TraceBox({
+            mins: this.mins,
+            maxs: this.maxs,
+            start,
+            end,
+            ignorePlayers: true,
+            ignoreEntity: ignoreEntities
+        });
+        return {
+            hit: !!(tr && tr.didHit),
+            endPos: end,
+            hitPos: vec$1.add(tr.end, vec$1.scale(tr.normal, surfaceEpsilon)),
+            normal: tr.normal,
+            fraction: tr.fraction
+        };
+    }
+
+    /**
+     * 向下检测地面
+     * @param {Vector} pos
+     * @param {Entity[]} ignoreEntities
+     */
+    traceGround(pos, ignoreEntities) {
+        const start = vec$1.clone(pos);
+        const end = vec$1.Zfly(pos, -8);
+        const tr = Instance.TraceBox({
+            mins: this.mins,
+            maxs: this.maxs,
+            start,
+            end,
+            ignorePlayers: true,
+            ignoreEntity: ignoreEntities
+        });
+        if (!tr || !tr.didHit || tr.normal.z < 0.5) {
+            return {
+                hit: false,
+                hitPos: vec$1.add(tr.end, vec$1.scale(tr.normal, surfaceEpsilon)),
+                normal: tr.normal
+            };
+        }
+        return {
+            hit: true,
+            hitPos: vec$1.add(tr.end, vec$1.scale(tr.normal, surfaceEpsilon)),
+            normal: tr.normal
+        };
+    }
+
+    /**
+     * 尝试上台阶（上→前→下）
+     * @param {Vector} start
+     * @param {Vector} move
+     * @param {number} step
+     * @param {Entity[]} ignoreEntities
+     */
+    tryStep(start, move, step, ignoreEntities) {
+        const up = vec$1.Zfly(start, step);
+        const trUp = this.traceMove(start, up, ignoreEntities);
+        if (trUp.hit) return { success: false, endPos: trUp.hitPos };
+
+        const forwardEnd = vec$1.add(up, move);
+        const trForward = this.traceMove(up, forwardEnd, ignoreEntities);
+        if (trForward.hit) return { success: false, endPos: trUp.hitPos };
+
+        const downEnd = vec$1.Zfly(forwardEnd, -step);
+        const trDown = this.traceMove(forwardEnd, downEnd, ignoreEntities);
+        if (!trDown.hit) return { success: false, endPos: trDown.hitPos };
+        if (trDown.normal.z < 0.5) return { success: false, endPos: trDown.hitPos };
+
+        return { success: true, endPos: trDown.hitPos };
+    }
+}
+
+/**
+ * @module 实体移动/运动电机
+ */
+
+/** @typedef {import("cs_script/point_script").Vector} Vector */
+/** @typedef {import("cs_script/point_script").Entity} Entity */
+
+/**
+ * 运动电机：负责速度、重力、碰撞检测、地面吸附和位移推进。
+ * 不感知任何业务语义（monster / path / mode 等）。
+ *
+ * 与旧 AIMotor 的区别：
+ * - 不持有 Entity 引用，不调用 Teleport / GetAbsOrigin
+ * - 所有方法接收当前位置、返回新位置，实际传送由门面层统一执行
+ */
+class Motor {
+    /**
+     * @param {{
+     *   gravity?: number;
+     *   friction?: number;
+     *   stepHeight?: number;
+     *   turnSpeed?: number;
+     *   probe?: MoveProbe;
+     * }} [config]
+     */
+    constructor(config = {}) {
+        this.gravity = config.gravity ?? gravity;
+        this.friction = config.friction ?? friction;
+        this.stepHeight = config.stepHeight ?? stepHeight;
+        this.turnSpeed = config.turnSpeed ?? turnSpeed;
+        this.probe = config.probe ?? new MoveProbe();
+
+        /** @type {Vector} */
+        this.velocity = vec$1.get(0, 0, 0);
+        this.onGround = false;
+        this.wasOnGround = false;
+        /** @type {{ hit: boolean; normal: Vector; point: Vector }} */
+        this.ground = { hit: false, normal: vec$1.get(0, 0, 0), point: vec$1.get(0, 0, 0) };
+
+        // ── 卡死检测 ──
+        this._stuckLastPos = vec$1.get(0, 0, 0);
+        this._stuckTime = 0;
+    }
+
+    // ───────────────────── 公共运动方法 ─────────────────────
+
+    /**
+     * 地面移动：摩擦→加速→分离→Step/Slide→贴地
+     * @param {Vector} pos       当前位置
+     * @param {Vector} wishDir   期望方向（单位向量）
+     * @param {number} wishSpeed 期望速度
+     * @param {number} dt        帧间隔
+     * @param {{entities: Entity[], positions: Vector[]}} sepCtx 分离上下文
+     * @returns {Vector} 新位置
+     */
+    moveGround(pos, wishDir, wishSpeed, dt, sepCtx) {
+        this._applyFriction(dt);
+        this._accelerate2D(wishDir, wishSpeed, dt);
+        this.velocity = vec$1.add(this.velocity, this._computeSeparation(pos, sepCtx.positions));
+
+        const move = vec$1.scale(this.velocity, dt);
+        move.z = 0;
+
+        let newPos = this._stepSlideMove(pos, move, sepCtx.entities).pos;
+        this._updateGround(newPos, sepCtx.entities);
+        newPos = this._snapToGround(newPos);
+        this._updateStuck(newPos, dt);
+        return newPos;
+    }
+
+    /**
+     * 空中移动：弱方向控制 + 重力
+     * @param {Vector} pos
+     * @param {Vector} wishDir
+     * @param {number} wishSpeed
+     * @param {number} dt
+     * @param {{entities: Entity[], positions: Vector[]}} sepCtx 分离上下文
+     * @returns {Vector}
+     */
+    moveAir(pos, wishDir, wishSpeed, dt, sepCtx) {
+        // 空中弱方向控制
+        if (vec$1.length2Dsq(wishDir) > 0.1) {
+            const wishDir2D = vec$1.normalize2D(wishDir);
+            const airAccel = 10;
+            const currentSpeed = vec$1.dot2D(this.velocity, wishDir2D);
+            const addSpeed = wishSpeed - currentSpeed;
+            if (addSpeed > 0) {
+                const accelSpeed = Math.min(airAccel * dt * wishSpeed, addSpeed);
+                this.velocity.x += accelSpeed * wishDir2D.x;
+                this.velocity.y += accelSpeed * wishDir2D.y;
+            }
+        }
+        // 重力
+        this.velocity.z = Math.max(-this.gravity, this.velocity.z - this.gravity * dt);
+        // 分离
+        this.velocity = vec$1.add(this.velocity, this._computeSeparation(pos, sepCtx.positions));
+
+        const move = vec$1.scale(this.velocity, dt);
+        const result = this._airSlideMove(pos, move, sepCtx.entities);
+        let newPos = result.pos;
+        if (result.clipNormals.length) {
+            for (const n of result.clipNormals) {
+                this.velocity = this._clipVelocity(this.velocity, n);
+            }
+        }
+        this._updateGround(newPos, sepCtx.entities);
+        this._updateStuck(newPos, dt);
+        return newPos;
+    }
+
+    /**
+     * 飞行移动：3D 加速，无重力
+     * @param {Vector} pos
+     * @param {Vector} wishDir
+     * @param {number} wishSpeed
+     * @param {number} dt
+     * @param {{entities: Entity[], positions: Vector[]}} sepCtx 分离上下文
+     * @returns {Vector}
+     */
+    moveFly(pos, wishDir, wishSpeed, dt, sepCtx) {
+        this._accelerate3D(wishDir, wishSpeed, dt);
+        this.velocity = vec$1.add(this.velocity, this._computeSeparation(pos, sepCtx.positions));
+
+        const move = vec$1.scale(this.velocity, dt);
+        const result = this._airSlideMove(pos, move, sepCtx.entities);
+        let newPos = result.pos;
+        if (result.clipNormals.length) {
+            for (const n of result.clipNormals) {
+                this.velocity = this._clipVelocity(this.velocity, n);
+            }
+        }
+        this.onGround = false;
+        this._updateStuck(newPos, dt);
+        return newPos;
+    }
+
+    /**
+     * 梯子移动：XY 方向快速贴近目标，Z 方向缓慢变化。
+     * @param {Vector} pos
+     * @param {Vector} goalPos
+     * @param {number} baseSpeed
+     * @param {number} dt
+     * @param {{entities: Entity[], positions: Vector[]}} sepCtx 分离上下文
+     * @returns {Vector}
+     */
+    moveLadder(pos, goalPos, baseSpeed, dt, sepCtx) {
+        const toGoal = vec$1.sub(goalPos, pos);
+        const horizontalDelta = vec$1.get(toGoal.x, toGoal.y, 0);
+        const horizontalDist = vec$1.length2D(horizontalDelta);
+        const horizontalDir = vec$1.normalize2D(horizontalDelta);
+        const horizontalSpeed = horizontalDist <= 4
+            ? 0
+            : Math.min(220, Math.max(baseSpeed * 1.5, horizontalDist * 8));
+        const verticalSpeed = Math.abs(toGoal.z) <= 4
+            ? 0
+            : Math.sign(toGoal.z) * Math.min(96, Math.max(48, Math.abs(toGoal.z) * 2));
+
+        this.velocity = vec$1.get(
+            horizontalDir.x * horizontalSpeed,
+            horizontalDir.y * horizontalSpeed,
+            verticalSpeed
+        );
+
+        const move = vec$1.scale(this.velocity, dt);
+        const result = this._airSlideMove(pos, move, sepCtx.entities);
+        let newPos = result.pos;
+        if (result.clipNormals.length) {
+            for (const n of result.clipNormals) {
+                this.velocity = this._clipVelocity(this.velocity, n);
+            }
+        }
+        this.onGround = false;
+        this._updateStuck(newPos, dt);
+        return newPos;
+    }
+
+    stop() { this.velocity = vec$1.get(0, 0, 0); }
+    isOnGround() { return this.onGround; }
+    getVelocity() { return vec$1.clone(this.velocity); }
+
+    /**
+     * 计算朝向（yaw 角度）
+     * @param {Vector} wishDir
+     * @param {number} currentYaw 当前 yaw (度)
+     * @param {number} dt
+     * @returns {number} 新 yaw
+     */
+    computeYaw(wishDir, currentYaw, dt) {
+        if (vec$1.length2Dsq(wishDir) < 0.1) return currentYaw;
+        const targetYaw = Math.atan2(wishDir.y, wishDir.x) * 180 / Math.PI;
+        let delta = targetYaw - currentYaw;
+        while (delta > 180) delta -= 360;
+        while (delta < -180) delta += 360;
+        const maxStep = this.turnSpeed * dt;
+        if (delta > maxStep) delta = maxStep;
+        else if (delta < -maxStep) delta = -maxStep;
+        return currentYaw + delta;
+    }
+
+    isStuck() { return this._stuckTime >= stuckTimeThreshold; }
+
+    // ───────────────────── 内部方法 ─────────────────────────
+
+    /** @param {number} dt */
+    _applyFriction(dt) {
+        if (vec$1.length2Dsq(this.velocity) < 0.1) return;
+        const frictionScale = Math.max(0, 1 - this.friction * dt);
+        this.velocity = vec$1.scale2D(this.velocity, frictionScale);
+    }
+
+    /** @param {Vector} wishDir @param {number} wishSpeed @param {number} dt */
+    _accelerate2D(wishDir, wishSpeed, dt) {
+        if (wishSpeed <= 0) return;
+        const currentSpeed = vec$1.dot2D(this.velocity, wishDir);
+        const addSpeed = wishSpeed - currentSpeed;
+        if (addSpeed <= 0) return;
+        const accelSpeed = Math.min(addSpeed, wishSpeed * dt * 10);
+        this.velocity = vec$1.add2D(this.velocity, vec$1.scale(wishDir, accelSpeed));
+    }
+
+    /** @param {Vector} wishDir @param {number} wishSpeed @param {number} dt */
+    _accelerate3D(wishDir, wishSpeed, dt) {
+        if (wishSpeed <= 0) return;
+        const currentSpeed = vec$1.dot(this.velocity, wishDir);
+        const addSpeed = wishSpeed - currentSpeed;
+        if (addSpeed <= 0) return;
+        const accel = wishSpeed * dt * 10;
+        const accelSpeed = Math.min(addSpeed, accel);
+        this.velocity = vec$1.add(this.velocity, vec$1.scale(wishDir, accelSpeed));
+    }
+
+    /**
+     * NPC-NPC 分离速度（直接消费位置缓存，不调用 GetAbsOrigin）
+     * @param {Vector} pos        当前怪物位置
+     * @param {Vector[]} positions 所有活跃怪物位置缓存
+     * @returns {Vector}
+     */
+    _computeSeparation(pos, positions) {
+        const radius = separationRadius;
+        const radiusSq = radius * radius;
+        const maxStrength = separationMaxStrength;
+        const maxStrengthSq = maxStrength * maxStrength;
+        const minRadiusSq = separationMinRadius * separationMinRadius;
+        const falloffRangeSq = Math.max(1e-6, radiusSq - minRadiusSq);
+        const minDistSq = 16;
+        let sep = vec$1.get(0, 0, 0);
+        for (let i = 0; i < positions.length; i++) {
+
+            const otherPos = positions[i];
+            let delta = vec$1.sub(pos, otherPos);
+            const dist2Dsq = vec$1.length2Dsq(delta);
+            if (dist2Dsq < minDistSq || vec$1.lengthsq(delta) > radiusSq) continue;
+            delta.z = 0;
+            const l1 = Math.abs(delta.x) + Math.abs(delta.y);
+            if (l1 < 1e-6) continue;
+            const dir = vec$1.scale(delta, 1 / l1);
+            let strength = 1.0;
+            if (dist2Dsq > minRadiusSq) {
+                const t = Math.min(1, (dist2Dsq - minRadiusSq) / falloffRangeSq);
+                strength = 1 - t * t * (3 - 2 * t);
+            }
+            sep = vec$1.add(sep, vec$1.scale(dir, strength * maxStrength));
+        }
+        const lenSq = vec$1.length2Dsq(sep);
+        if (lenSq > maxStrengthSq) sep = vec$1.scale(sep, maxStrengthSq / lenSq);
+        return sep;
+    }
+
+    /**
+     * Step + Slide（地面碰撞处理）
+     * @param {Vector} start
+     * @param {Vector} move
+     * @param {Entity[]} allm
+     */
+    _stepSlideMove(start, move, allm) {
+        const end = vec$1.add(start, move);
+        const direct = this.probe.traceMove(start, end, allm);
+        if (!direct.hit) return { pos: direct.endPos };
+
+        const step = this.probe.tryStep(start, move, this.stepHeight, allm);
+        if (step.success) return { pos: step.endPos };
+
+        const MAX_CLIPS = 3;
+        let remaining = vec$1.clone(move);
+        const clipNormals = [];
+        let pos = start;
+        for (let i = 0; i < MAX_CLIPS; i++) {
+            if (vec$1.length2Dsq(remaining) < 0.1) break;
+            const endPos = vec$1.add(pos, remaining);
+            const tr = this.probe.traceMove(pos, endPos, allm);
+            if (!tr.hit) return { pos: tr.endPos };
+            pos = tr.hitPos;
+            clipNormals.push(vec$1.clone(tr.normal));
+            remaining = vec$1.scale(remaining, 1 - tr.fraction);
+            remaining = this._clipMoveByNormals(remaining, clipNormals);
+        }
+        return { pos };
+    }
+
+    /**
+     * 空中 Slide（TryPlayerMove 风格）
+     * @param {Vector} start
+     * @param {Vector} move
+     * @param {Entity[]} allm
+     */
+    _airSlideMove(start, move, allm) {
+        const MAX_CLIPS = 3;
+        let remaining = vec$1.clone(move);
+        /** @type {Vector[]} */
+        const clipNormals = [];
+        let pos = start;
+
+        for (let i = 0; i < MAX_CLIPS; i++) {
+            if (vec$1.lengthsq(remaining) < 0.1) break;
+            const endPos = vec$1.add(pos, remaining);
+            const tr = this.probe.traceMove(pos, endPos, allm);
+            if (!tr.hit) return { pos: tr.endPos, clipNormals };
+            pos = tr.hitPos;
+            clipNormals.push(vec$1.clone(tr.normal));
+            remaining = vec$1.scale(remaining, 1 - tr.fraction);
+            remaining = this._clipMoveByNormals(remaining, clipNormals);
+        }
+        return { pos, clipNormals };
+    }
+
+    /**
+     * @param {Vector} move
+     * @param {Vector[]} normals
+     */
+    _clipMoveByNormals(move, normals) {
+        let out = vec$1.clone(move);
+        for (const n of normals) {
+            const dot = vec$1.dot2D(out, n);
+            if (dot < 0) out = vec$1.sub(out, vec$1.scale(n, dot));
+        }
+        return out;
+    }
+
+    /**
+     * Source ClipVelocity
+     * @param {Vector} vel
+     * @param {Vector} normal
+     * @param {number} [overbounce]
+     */
+    _clipVelocity(vel, normal, overbounce = 1.01) {
+        const backoff = vec$1.dot(vel, normal);
+        if (backoff >= 0) return vec$1.clone(vel);
+        const change = vec$1.scale(normal, backoff * overbounce);
+        const out = vec$1.sub(vel, change);
+        if (Math.abs(out.x) < 0.0001) out.x = 0;
+        if (Math.abs(out.y) < 0.0001) out.y = 0;
+        if (Math.abs(out.z) < 0.0001) out.z = 0;
+        return out;
+    }
+
+    /** @param {Vector} pos */
+    _snapToGround(pos) {
+        if (!this.wasOnGround || !this.onGround || this.velocity.z < -1 || !this.ground.hit) return pos;
+        const dz = this.ground.point.z - pos.z;
+        if (Math.abs(dz) > 4) return pos;
+        pos.z = this.ground.point.z;
+        return pos;
+    }
+
+    /**
+     * @param {Vector} pos
+     * @param {Entity[]} allm
+     */
+    _updateGround(pos, allm) {
+        const tr = this.probe.traceGround(pos, allm);
+        this.wasOnGround = this.onGround;
+        this.ground.hit = false;
+        if (!tr.hit || !tr.hitPos) { this.onGround = false; return; }
+        if (tr.normal.z < 0.5) { this.onGround = false; return; }
+        this.onGround = true;
+        this.ground.hit = true;
+        this.ground.normal = vec$1.clone(tr.normal);
+        this.ground.point = vec$1.clone(tr.hitPos);
+    }
+
+    /**
+     * 卡死检测 + 解卡
+     * @param {Vector} pos
+     * @param {number} dt
+     */
+    _updateStuck(pos, dt) {
+        const moved = vec$1.lengthsq(vec$1.sub(pos, this._stuckLastPos));
+        if (moved < moveEpsilon*moveEpsilon) { this._stuckTime += dt; } else { this._stuckTime = 0; }
+        this._stuckLastPos = vec$1.clone(pos);
+        // 不做自动解卡，由外层处理
+    }
+}
+
+/**
+ * @module 实体移动/路径跟随器
+ */
+
+/**
+ * 路径游标：维护 {pos, mode}[] 路径数组与当前 cursor，
+ * 提供 setPath / getMoveGoal / advanceIfReached 等接口。
+ */
+class PathFollower {
+    constructor() {
+        /** @type {{ pos: import("cs_script/point_script").Vector; mode: number }[]} */
+        this.path = [];
+        this.cursor = 0;
+    }
+
+    /** @param {{ pos: import("cs_script/point_script").Vector; mode: number }[]} path */
+    setPath(path) {
+        this.path = path.map(n => ({ pos: vec$1.clone(n.pos), mode: n.mode }));
+        this.cursor = 0;
+    }
+
+    isFinished() {
+        return this.path.length === 0 || this.cursor >= this.path.length;
+    }
+
+    clear() {
+        this.path = [];
+        this.cursor = 0;
+    }
+
+    /** 获取当前目标节点（可能为 null） */
+    getMoveGoal() {
+        if (this.isFinished()) return null;
+        return this.path[this.cursor];
+    }
+
+    /**
+     * 如果足够接近当前目标节点则推进 cursor
+     * @param {import("cs_script/point_script").Vector} currentPos
+     * @param {number} [tolerance]
+     */
+    advanceIfReached(currentPos, tolerance = goalTolerance) {
+        while (!this.isFinished()) {
+            const goal = this.getMoveGoal();
+            if (!goal) return;
+            if (vec$1.lengthsq(vec$1.sub(currentPos, goal.pos)) <= tolerance * tolerance) {
+                this.cursor++;
+                continue;
+            }
+            break;
+        }
+    }
+
+    /** PORTAL 节点专用推进 */
+    advancePortal() {
+        if (!this.isFinished()) this.cursor++;
+    }
+}
+
+/**
+ * @module 实体移动/运动模式
+ */
+
+/**
+ * @typedef {import("./motor").Motor} Motor
+ * @typedef {import("./path_follower").PathFollower} PathFollower
+ * @typedef {import("cs_script/point_script").Entity} Entity
+ * @typedef {import("cs_script/point_script").Vector} Vector
+ */
+
+/**
+ * @typedef {object} LocoContext
+ * @property {Motor}        motor
+ * @property {PathFollower} pathFollower
+ * @property {Vector}       wishDir
+ * @property {number}       wishSpeed
+ * @property {number}       maxSpeed
+ * @property {() => Vector} getPos        获取当前实体位置
+ * @property {(name: string, arg?: any) => void} requestModeSwitch  请求切换模式（由 controller 处理）
+ */
+
+// ─────────────────── 基类 ───────────────────────────────────
+class MoveMode {
+    /** @param {LocoContext} ctx */
+    enter(ctx) {}
+    /** @param {LocoContext} ctx */
+    leave(ctx) {}
+    /**
+     * @param {LocoContext} ctx
+     * @param {number} dt
+     * @param {{entities: Entity[], positions: Vector[]}} sepCtx
+     * @returns {Vector}
+     */
+    update(ctx, dt, sepCtx) {return {x:0,y:0,z:0};}
+}
+
+// ─────────────────── Walk ───────────────────────────────────
+class MoveWalk extends MoveMode {
+    /**
+     * @param {LocoContext} ctx
+     * @param {number} dt
+     * @param {{entities: Entity[], positions: Vector[]}} sepCtx
+     * @return {Vector}
+     */
+    update(ctx, dt, sepCtx) {
+        const pos = ctx.getPos();
+
+        // 路径推进
+        ctx.pathFollower.advanceIfReached(pos);
+        const goal = ctx.pathFollower.getMoveGoal();
+
+        // 路径节点驱动的模式切换请求
+        if (goal?.mode === PathState$1.JUMP) {
+            ctx.motor.velocity.z = 500;
+            ctx.requestModeSwitch("air");
+            return pos;
+        }
+        if (goal?.mode === PathState$1.LADDER) {
+            ctx.motor.velocity.x = 0;
+            ctx.motor.velocity.y = 0;
+            ctx.motor.velocity.z = 0;
+            ctx.requestModeSwitch("ladder");
+            return pos;
+        }
+
+        computeWish(ctx, goal);
+
+        // 物理推进
+        const newPos = ctx.motor.moveGround(pos, ctx.wishDir, ctx.wishSpeed, dt, sepCtx);
+
+        // 离地 → 请求切换到 air
+        if (!ctx.motor.isOnGround()) {
+            ctx.requestModeSwitch("air");
+        }
+
+        return newPos;
+    }
+}
+
+// ─────────────────── Air ────────────────────────────────────
+class MoveAir extends MoveMode {
+    /**
+     * @param {LocoContext} ctx
+     * @param {number} dt
+     * @param {{entities: Entity[], positions: Vector[]}} sepCtx
+     * @return {Vector}
+     */
+    update(ctx, dt, sepCtx) {
+        const pos = ctx.getPos();
+
+        ctx.pathFollower.advanceIfReached(pos);
+        const goal = ctx.pathFollower.getMoveGoal();
+        computeWish(ctx, goal);
+
+        const newPos = ctx.motor.moveAir(pos, ctx.wishDir, ctx.wishSpeed, dt, sepCtx);
+
+        // 落地 → 请求切换回 walk
+        if (ctx.motor.isOnGround()) {
+            ctx.motor.velocity.z = 0;
+            ctx.requestModeSwitch("walk");
+        }
+
+        return newPos;
+    }
+}
+
+// ─────────────────── Fly ────────────────────────────────────
+class MoveFly extends MoveMode {
+    /**
+     * @param {LocoContext} ctx
+     * @param {number} dt
+     * @param {{entities: Entity[], positions: Vector[]}} sepCtx
+     * @return {Vector}
+     */
+    update(ctx, dt, sepCtx) {
+        const pos = ctx.getPos();
+
+        ctx.pathFollower.advanceIfReached(pos, 200);
+        const goal = ctx.pathFollower.getMoveGoal();
+
+        if (!goal) {
+            ctx.motor.velocity = vec$1.get(0, 0, 0);
+            return pos;
+        }
+
+        // 飞行模式：3D 方向
+        const dir = vec$1.normalize(vec$1.sub(goal.pos, pos));
+        ctx.wishDir = dir;
+        ctx.wishSpeed = ctx.maxSpeed;
+
+        const newPos = ctx.motor.moveFly(pos, dir, ctx.maxSpeed, dt, sepCtx);
+        return newPos;
+    }
+}
+
+// ─────────────────── Ladder ─────────────────────────────
+class MoveLadder extends MoveMode {
+    /**
+     * @param {LocoContext} ctx
+     * @param {number} dt
+     * @param {{entities: Entity[], positions: Vector[]}} sepCtx
+     * @return {Vector}
+     */
+    update(ctx, dt, sepCtx) {
+        const goal = ctx.pathFollower.getMoveGoal();
+        const pos = ctx.getPos();
+
+        if (!goal) {
+            ctx.motor.velocity = vec$1.get(0, 0, 0);
+            return pos;
+        }
+        if (goal.mode !== PathState$1.LADDER) {
+            ctx.motor.velocity.z = 200;
+            ctx.requestModeSwitch("air");
+            return pos;
+        }
+
+        const newPos = ctx.motor.moveLadder(pos, goal.pos, ctx.maxSpeed, dt, sepCtx);
+        ctx.pathFollower.advanceIfReached(newPos);
+        return newPos;
+    }
+}
+
+// ─────────────────── 期望方向计算（共用）─────────────────────
+/**
+ * @param {LocoContext} ctx
+ * @param {{ pos: Vector; mode: number } | null} goal
+ */
+function computeWish(ctx, goal) {
+    if (!goal) {
+        ctx.wishDir = vec$1.get(0, 0, 0);
+        ctx.wishSpeed = ctx.maxSpeed;
+        return;
+    }
+    const pos = ctx.getPos();
+    const toGoal = vec$1.sub(goal.pos, pos);
+    const dist = vec$1.lengthsq(toGoal);
+
+    if (goal.mode === PathState$1.JUMP) {
+        if (dist <= arriveDistance * arriveDistance) {
+            ctx.wishDir = vec$1.get(0, 0, 0);
+            ctx.wishSpeed = ctx.maxSpeed;
+            return;
+        }
+        ctx.wishDir = vec$1.normalize(toGoal);
+        ctx.wishSpeed = 800;
+    } else {
+        if (dist <= arriveDistance * arriveDistance) {
+            ctx.wishDir = vec$1.get(0, 0, 0);
+            ctx.wishSpeed = ctx.maxSpeed;
+            return;
+        }
+        ctx.wishDir = vec$1.normalize2D(toGoal);
+        ctx.wishSpeed = ctx.maxSpeed;
+    }
+}
+
+/**
+ * @module 实体移动/运动模式控制器
+ */
+
+/**
+ * @typedef {import("./move_mode").MoveMode} MoveMode
+ * @typedef {import("./move_mode").LocoContext} LocoContext
+ * @typedef {import("cs_script/point_script").Entity} Entity
+ */
+
+/**
+ * 运动模式控制器：管理 walk / air / fly 三种模式的注册、切换和每帧更新。
+ *
+ * 支持 `autoSwitch` 开关：
+ * - true（默认）：MoveMode 内部可通过 ctx.requestModeSwitch 请求切换
+ * - false：requestModeSwitch 被屏蔽，只有外部调用 setMode 才能切换
+ */
+class MovementController {
+    /**
+     * @param {LocoContext} ctx
+     */
+    constructor(ctx) {
+        ctx.requestModeSwitch = this.setMode.bind(this);
+        this.ctx = ctx;
+
+        /** @type {Record<string, MoveMode>} */
+        this.modes = {
+            walk: new MoveWalk(),
+            air: new MoveAir(),
+            fly: new MoveFly(),
+            ladder: new MoveLadder(),
+        };
+
+        /** @type {MoveMode | null} */
+        this.current = null;
+        /** @type {string} */
+        this.currentName = "";
+    }
+
+    /**
+     * 外部强制切换模式
+     * @param {string} name
+     * @param {any} [arg]
+     */
+    setMode(name, arg) {
+        if (this.currentName === name) return;
+        if (this.current) this.current.leave(this.ctx);
+
+        this.current = this.modes[name] ?? null;
+        this.currentName = name;
+        if (this.current) this.current.enter(this.ctx);
+    }
+
+    /**
+     * 运行时注册自定义模式
+     * @param {string} name
+     * @param {MoveMode} mode
+     */
+    registerMode(name, mode) {
+        this.modes[name] = mode;
+    }
+
+    /**
+     * @param {number} dt
+     * @param {{entities: Entity[], positions: import("cs_script/point_script").Vector[]}} sepCtx
+     * @returns {import("cs_script/point_script").Vector | undefined}
+     */
+    update(dt, sepCtx) {
+        if (this.current) {
+            return this.current.update(this.ctx, dt, sepCtx);
+        }
+    }
+}
+
+/**
+ * @module 实体移动/运动类
+ */
+
+/** @typedef {import("cs_script/point_script").Entity} Entity */
+/** @typedef {import("cs_script/point_script").Vector} Vector */
+
+/**
+ * @typedef {object} MovementConfig
+ * @property {Entity}   entity                             移动实体
+ * @property {number}   [speed=120]                        默认移动速度
+ * @property {string}   [mode="walk"]                      默认运动模式（walk / air / fly / ladder）
+ * @property {boolean}  [usePathfinding=true]              本实例默认是否使用寻路
+ * @property {((start: Vector, end: Vector) => {pos: Vector, mode: number}[] | null) | null} [requestPath=null]
+ *   寻路回调：接收起终点，返回 {pos, mode}[] 路径数组或 null
+ * @property {{ gravity?: number; friction?: number; stepHeight?: number; turnSpeed?: number;
+ *   mins?: Vector; maxs?: Vector }} [physics]             可选物理常量覆盖
+ */
+
+/**
+ * @typedef {object} MoveTask
+ * @property {Vector}   target          终点坐标
+ * @property {boolean}  [usePathfinding] 本次任务是否使用寻路（覆盖默认值）
+ * @property {boolean}  [accelerate]    是否加速（预留，默认 true）
+ * @property {number}   [speed]         本次任务速度（覆盖默认）
+ * @property {Vector}   [initialVelocity] 本次任务起始速度；可用于飞扑/投掷等锁定 air 段
+ * @property {string}   [mode]          本次任务初始模式（覆盖默认，可传 walk / air / fly / ladder）
+ */
+
+/**
+ * 独立运动门面类。
+ *
+ * 职责：
+ * 1. 管理实体的移动生命周期（startMove → update → stop）
+ * 2. 内聚 Motor / PathFollower / MovementController，对外只暴露简洁 API
+ * 3. 寻路解耦：通过 requestPath 回调获取路径，不直接依赖 navmesh
+ *
+ * 用法示例：
+ * ```js
+ * const mv = new Movement({
+ *     entity: myEntity,
+ *     speed: 150,
+ *     requestPath: (start, end) => myNavmesh.findPath(start, end)
+ * });
+ * mv.startMove({ target: { x: 100, y: 200, z: 0 } });
+ * // 每帧
+ * mv.update(dt, sepCtx);
+ * ```
+ */
+class Movement {
+    /**
+     * @param {MovementConfig} config
+     */
+    constructor(config) {
+        this.entity = config.entity;
+
+        // ── 默认配置 ──
+        this._defaultSpeed = config.speed ?? 120;
+        this._defaultMode = config.mode ?? "walk";
+        this._defaultUsePathfinding = config.usePathfinding ?? true;
+        this._requestPath = config.requestPath ?? null;
+
+        // ── 当前任务状态 ──
+        /** @type {Vector | null} */
+        this._target = null;
+        this._usePathfinding = this._defaultUsePathfinding;
+        this._isStopped = true;
+        this._currentYaw = 0;
+
+        // ── 内部组件 ──
+        const physicsConf = config.physics ?? {};
+        this._probe = new MoveProbe({ mins: physicsConf.mins, maxs: physicsConf.maxs });
+        this._motor = new Motor({
+            gravity: physicsConf.gravity,
+            friction: physicsConf.friction,
+            stepHeight: physicsConf.stepHeight,
+            turnSpeed: physicsConf.turnSpeed,
+            probe: this._probe
+        });
+        this._pathFollower = new PathFollower();
+
+        // ── LocoContext（由 controller & modes 共享）──
+        /** @type {import("./move_mode").LocoContext} */
+        this._ctx = {
+            motor: this._motor,
+            pathFollower: this._pathFollower,
+            wishDir: vec$1.get(0, 0, 0),
+            wishSpeed: 0,
+            maxSpeed: this._defaultSpeed,
+            getPos: () => vec$1.clone(this.entity.GetAbsOrigin()),
+            requestModeSwitch: () => {} // 由 controller 绑定
+        };
+
+        this._controller = new MovementController(this._ctx);
+        this._controller.setMode(this._defaultMode);
+
+        // portal 防重入
+        this._lastPortalAt = -999;
+    }
+
+    // ═══════════════════ 公共 API ═══════════════════════════
+
+    /**
+     * 开始一个移动任务
+     * @param {MoveTask} task
+     */
+    startMove(task) {
+        this._target = vec$1.clone(task.target);
+        this._isStopped = false;
+        this._ctx.maxSpeed = task.speed ?? this._defaultSpeed;
+        this._usePathfinding = task.usePathfinding ?? this._defaultUsePathfinding;
+        if (task.initialVelocity) {
+            this._motor.velocity = vec$1.clone(task.initialVelocity);
+        }
+
+        if (task.mode) {
+            this._controller.setMode(task.mode);
+        }
+
+        // 如果启用寻路，立即请求一次路径
+        if (this._usePathfinding) {
+            this.refreshPath();
+        } else {
+            // 不寻路：建一条直达路径（单节点，WALK 模式）
+            this._pathFollower.setPath([{ pos: this._target, mode: PathState$1.WALK }]);
+        }
+    }
+
+    /**
+     * 每帧更新（唯一驱动入口）
+     * @param {number} dt         帧间隔（秒）
+     * @param {{entities: Entity[], positions: Vector[]}} sepCtx 分离上下文
+     */
+    update(dt, sepCtx) {
+        if (this._isStopped) return;
+
+        // PORTAL 特殊处理（在常规 controller 之前）
+        if (this._handlePortal()) return;
+
+        // 更新 maxSpeed（支持运行时改速度后生效）
+        // controller → mode → motor
+        const newPos = this._controller.update(dt, sepCtx);
+
+        // 传送实体到新位置
+        if (newPos) {
+            const facingDir = vec$1.length2Dsq(this._ctx.wishDir) > 0.1
+                ? this._ctx.wishDir
+                : vec$1.normalize2D(this._motor.getVelocity());
+
+            this._currentYaw = this._motor.computeYaw(facingDir, this._currentYaw, dt);
+            this.entity.Teleport({
+                position: newPos,
+                angles: { pitch: 0, yaw: this._currentYaw, roll: 0 }
+            });
+        }
+    }
+
+    /**
+     * 刷新路径（外部决定调用时机）。
+     * 调用时会用当前实体位置和 _target 向 requestPath 回调请求新路径。
+     * @returns {boolean} 是否成功刷新
+     */
+    refreshPath() {
+        if (!this._requestPath || !this._target) return false;
+        if (this._motor.isStuck()) return false; // 卡死时不刷新（可选策略）
+        const start = this.entity.GetAbsOrigin();
+        const path = this._requestPath(start, this._target);
+        if (!path) return false;
+        // 确保终点在路径末尾
+        path.push({ pos: vec$1.clone(this._target), mode: PathState$1.WALK });
+        this._pathFollower.setPath(path);
+        return true;
+    }
+
+    /**
+     * 直接设置路径（跳过 requestPath 回调）
+     * @param {{ pos: Vector; mode: number }[]} path
+     */
+    setPath(path) {
+        this._pathFollower.setPath(path);
+    }
+
+    /** 获取当前路径快照（返回拷贝，外部修改后需重新 setPath） */
+    getPath() {
+        return this._pathFollower.path.map(node => ({
+            pos: vec$1.clone(node.pos),
+            mode: node.mode
+        }));
+    }
+
+    /**
+     * 更新目标坐标（不自动重算路径，需外部调用 refreshPath）
+     * @param {Vector} target
+     */
+    setTarget(target) {
+        this._target = vec$1.clone(target);
+    }
+
+    /**
+     * 设置移动速度
+     * @param {number} speed
+     */
+    setSpeed(speed) {
+        this._ctx.maxSpeed = speed;
+    }
+
+    /**
+     * 直接设置当前速度；飞扑/投掷等锁定 air 段使用这个接口
+     * @param {Vector} velocity
+     */
+    setVelocity(velocity) {
+        this._motor.velocity = vec$1.clone(velocity);
+    }
+
+    /** 获取当前速度快照 */
+    getVelocity() {
+        return this._motor.getVelocity();
+    }
+
+    /**
+     * 外部强制切换运动模式
+     * @param {string} name  "walk" | "air" | "fly" 或自定义注册名
+     * @param {any} [arg]
+     */
+    setMode(name, arg) {
+        this._controller.setMode(name, arg);
+    }
+
+    /**
+     * 运行时注册自定义模式
+     * @param {string} name
+     * @param {import("./move_mode").MoveMode} mode
+     */
+    registerMode(name, mode) {
+        this._controller.registerMode(name, mode);
+    }
+
+    /** 停止移动 */
+    stop() {
+        this._isStopped = true;
+        this._ctx.wishDir = vec$1.get(0, 0, 0);
+        this._ctx.wishSpeed = 0;
+        this._motor.stop();
+    }
+
+    /** 恢复移动 */
+    resume() {
+        this._isStopped = false;
+    }
+
+    /** 清空路径 */
+    clearPath() {
+        this._pathFollower.clear();
+    }
+
+    /** 获取当前状态快照 */
+    getState() {
+        const currentGoal = this._pathFollower.getMoveGoal();
+        return {
+            mode: this._controller.currentName,
+            onGround: this._motor.isOnGround(),
+            currentGoalMode: currentGoal?.mode ?? null
+        };
+    }
+
+    /** 路径是否走完 */
+    isPathFinished() {
+        return this._pathFollower.isFinished();
+    }
+
+    /** 是否在地面 */
+    isOnGround() {
+        return this._motor.isOnGround();
+    }
+
+    /** 是否正在移动 */
+    isMoving() {
+        return !this._isStopped && this._ctx.wishSpeed > 0;
+    }
+
+    // ═══════════════════ 内部方法 ═══════════════════════════
+
+    /**
+     * PORTAL 节点处理（在 controller.update 之前调用）
+     * @returns {boolean} true 表示本帧跳过常规移动
+     */
+    _handlePortal() {
+        const goal = this._pathFollower.getMoveGoal();
+        if (!goal || goal.mode !== PathState$1.PORTAL) return false;
+
+        const now = Instance.GetGameTime();
+        if (now - this._lastPortalAt < 0.5) {
+            this._pathFollower.advancePortal();
+            return true;
+        }
+        this._lastPortalAt = now;
+
+        this.entity.Teleport({ position: goal.pos, velocity: { x: 0, y: 0, z: 0 } });
+        this._motor.velocity = vec$1.get(0, 0, 0);
+        this._pathFollower.advancePortal();
+        return true;
+    }
+}
+
+/**
+ * @module 实体移动/移动管理器
+ */
+/**
+ * 通用实体 Movement 管理器。
+ * 由 main 持有，负责注册/注销任意实体的 Movement 实例，
+ * 维护内部请求队列并在 tick 内统一消费，
+ * 通过内部路径调度队列按频率驱动路径重算。
+ * 寻路依赖（findPath）由 main 装配注入。
+ */
+
+/** @typedef {import("cs_script/point_script").Entity} Entity */
+/** @typedef {import("cs_script/point_script").Vector} Vector */
+
+/**
+ * @typedef {object} MovementEntry
+ * @property {Movement} movement        Movement 实例
+ * @property {Entity}   entity          引擎实体引用
+ * @property {object}   config          注册时的配置快照
+ * @property {Entity|null} ignoreEntity 传给 move_probe 的忽略实体
+ * @property {boolean}  useNPCSeparation 当前是否启用分离速度
+ * @property {boolean}  usePathRefresh  当前任务是否允许刷新路径
+ * @property {Entity|null}  targetEntity  追击目标实体（来自最后一次 Move 请求）
+ * @property {Vector|null}  targetPosition  目标坐标（来自最后一次 Move 请求）
+ */
+
+/**
+ * 通用实体 MovementManager。
+ *
+ * 以 entity 为键管理 Movement 实例，路径调度堆中也直接存储 entity。
+ * 外部系统通过 submitRequest 提交 MovementRequest，manager 在 tick 开头统一按优先级
+ * 合并并消费。tick 内部依次执行：消费请求 → 路径刷新 → 批量 update。
+ *
+ * 路径刷新逻辑完全基于 entry 自身字段（usePathRefresh、targetEntity、
+ * skillMotion），不依赖外部实例方法。
+ */
+class MovementManager {
+    constructor() {
+        /** @type {Map<Entity, MovementEntry>} */
+        this._entries = new Map();
+        /** @type {Entity[]} 提供给 move_probe 的忽略实体列表。 */
+        this.ignoreEntity = [];
+
+        /** 路径调度最小堆，按上次更新时间排序。 */
+        this._pathHeap = new _MinHeap(1000);
+        /**
+         * 寻路函数，由 main 通过 initPathScheduler 注入。
+         * @type {((start: Vector, end: Vector) => {pos: Vector, mode: number}[] | null) | null}
+         */
+        this._findPath = null;
+        /** @type {import("../util/definition").MovementRequest[]} */
+        this._pendingRequests = [];
+    }
+
+    /**
+     * 注入路径调度依赖。必须在使用 tick 前调用。
+     * @param {(start: Vector, end: Vector) => {pos: Vector, mode: number}[]} findPath 寻路函数
+     */
+    initPathScheduler(findPath) {
+        this._findPath = findPath;
+    }
+
+    /**
+     * 提交一条移动请求到内部队列。
+     * 在下一次 tick 开头按 entity 合并后统一消费。
+     * @param {import("../util/definition").MovementRequest} req
+     */
+    submitRequest(req) {
+        this._pendingRequests.push(req);
+    }
+
+    /**
+     * 注册一个移动实体的 Movement 实例。
+     * @param {Entity} key
+     * @param {{ speed?: number, mode?: string, physics?: object, useSeparation?: boolean, ignoreEntity?: Entity | null }} config
+     */
+    register(key, config) {
+        if (this._entries.has(key)) return;
+        const movement = new Movement({
+            entity: key,
+            speed: config.speed ?? 120,
+            mode: config.mode ?? "walk",
+            usePathfinding: false,
+            requestPath: null,
+            physics: config.physics,
+        });
+        this._entries.set(key, {
+            movement,
+            entity: key,
+            config,
+            ignoreEntity: config.ignoreEntity ?? null,
+            useNPCSeparation: config.useSeparation ?? true,
+            usePathRefresh: false,
+            targetEntity: null,
+            targetPosition: null,
+        });
+        this._addIgnoreEntity(config.ignoreEntity ?? null);
+        this._pathHeap.push(key, 0);
+    }
+
+    /**
+     * 注销一个 Movement。
+     * @param {Entity} key
+     */
+    unregister(key) {
+        const entry = this._entries.get(key);
+        if (!entry) return;
+        entry.movement.stop();
+        this._entries.delete(key);
+        this._removeIgnoreEntity(entry.ignoreEntity);
+        this._pathHeap.remove(key);
+    }
+
+    /** @param {any} key */
+    has(key) {
+        return this._entries.has(key);
+    }
+
+    /**
+     * 获取所有实体的移动状态摘要。
+     * 用于将 movement 层状态回写给 monster 侧。
+     * @returns {Map<Entity, {mode: string, onGround: boolean, currentGoalMode: number|null}>}
+     */
+    getAllStates() {
+        const result = new Map();
+        for (const [key, entry] of this._entries) {
+            const s = entry.movement.getState();
+            result.set(key, s);
+        }
+        return result;
+    }
+
+    setSpeed(key, speed) {
+        const entry = this._entries.get(key);
+        if (!entry) return false;
+        entry.movement.setSpeed(speed);
+        return true;
+    }
+
+    // ═══════════════════════════════════════════════
+    // 统一 tick 入口
+    // ═══════════════════════════════════════════════
+
+    /**
+     * 每帧由 main 调用的唯一入口。依次执行：
+     * 1. 消费并合并请求队列
+     * 2. 路径刷新调度
+     * 3. 批量 movement.update
+     * @param {number} now 当前游戏时间
+     * @param {number} dt 帧间隔
+     * @param {Vector[]} separationPositions
+     */
+    tick(now,dt, separationPositions) {
+        this._consumeRequests();
+        this._tickPathRefresh(now);
+        this._updateAll(dt, separationPositions);
+    }
+
+    /**
+     * 向 ignoreEntity 追加一个外部提供的忽略实体。
+        * @param {Entity|null} entity
+     */
+    _addIgnoreEntity(entity) {
+        if (!entity) return;
+        if (this.ignoreEntity.indexOf(entity) !== -1) return;
+        this.ignoreEntity.push(entity);
+    }
+
+    /**
+     * 从 ignoreEntity 中移除一个忽略实体。
+        * @param {Entity|null} entity
+     */
+    _removeIgnoreEntity(entity) {
+        if (!entity) return;
+        const idx = this.ignoreEntity.indexOf(entity);
+        if (idx === -1) return;
+        const last = this.ignoreEntity.length - 1;
+        if (idx !== last) {
+            this.ignoreEntity[idx] = this.ignoreEntity[last];
+        }
+        this.ignoreEntity.pop();
+    }
+
+    // ═══════════════════════════════════════════════
+    // 内部：请求消费
+    // ═══════════════════════════════════════════════
+
+    /** 按 entity 合并队列中的请求（保留最高优先级），然后逐条应用。 */
+    _consumeRequests() {
+        if (this._pendingRequests.length === 0) return;
+        const merged = new Map();
+        for (const req of this._pendingRequests) {
+            const prev = merged.get(req.entity);
+            if (!prev || req.priority <= prev.priority) {
+                merged.set(req.entity, req);
+            }
+        }
+        this._pendingRequests.length = 0;
+        for (const [, req] of merged) {
+            this._applyRequest(req);
+        }
+    }
+
+    /**
+     * 应用单条移动请求（Move / Stop / Remove）。
+     * 内部按请求字段映射到具体 Movement API，同时更新 entry 长期任务状态。
+     * @param {import("../util/definition").MovementRequest} req
+     */
+    _applyRequest(req) {
+        let key = req.entity;
+        if (!this._entries.has(key) && req.type === "Move") {
+            this.register(key, {
+                mode: req.Mode,
+                useSeparation: req.useNPCSeparation ?? false,
+            });
+        }
+        if (!this._entries.has(key)) return;
+
+        if (req.type === "Remove") {
+            this.unregister(key);
+            return;
+        }
+
+        const entry = this._entries.get(key);
+        if (!entry) return;
+
+        if (req.type === "Stop") {
+            entry.movement.stop();
+            if (req.clearPath) entry.movement.clearPath();
+            entry.usePathRefresh = false;
+            entry.targetEntity = null;
+            entry.targetPosition = null;
+            return;
+        }
+
+        // type === "Move"
+        entry.targetEntity = req.targetEntity ?? null;
+        entry.targetPosition = req.targetPosition ?? null;
+
+        if (req.useNPCSeparation !== undefined) entry.useNPCSeparation = req.useNPCSeparation;
+        if (req.usePathRefresh !== undefined) entry.usePathRefresh = req.usePathRefresh;
+
+        if (req.Mode) entry.movement.setMode(req.Mode);
+        if (req.Velocity) entry.movement.setVelocity(req.Velocity);
+        if (req.maxSpeed !== undefined) entry.movement.setSpeed(req.maxSpeed);
+        if (req.clearPath) entry.movement.clearPath();
+
+        if (req.targetEntity) {
+            const pos = req.targetEntity.GetAbsOrigin();
+            if (pos) entry.movement.setTarget(pos);
+        } else if (req.targetPosition) {
+            if (req.usePathRefresh) {
+                entry.movement.setTarget(req.targetPosition);
+            } else {
+                entry.movement.startMove({
+                    target: req.targetPosition,
+                    usePathfinding: false,
+                    mode: req.Mode,
+                    initialVelocity: req.Velocity,
+                });
+            }
+        }
+
+        entry.movement.resume();
+    }
+
+    // ═══════════════════════════════════════════════
+    // 内部：路径刷新调度
+    // ═══════════════════════════════════════════════
+
+    /**
+     * 从最小堆中取出最久未更新的实体，按 entry 字段判断是否允许刷新，
+     * 通过注入的 findPath 重算路径。每帧最多成功更新一个。
+     * @param {number} now
+     */
+    _tickPathRefresh(now) {
+        if (!this._findPath) return;
+
+        /** @type {Entity|null} */
+        let first = null;
+        while (!this._pathHeap.isEmpty()) {
+            const current = this._pathHeap.pop();
+            if (!current.node) break;
+
+            if (current.node === first || now - current.cost <= 0.5) {
+                this._pathHeap.push(current.node, current.cost);
+                break;
+            }
+            if (!first) first = current.node;
+
+            const key = current.node;
+            if (!key) continue;
+            const entry = this._entries.get(key);
+            if (!entry) continue;
+
+            if (!this._canRefreshPath(entry)) {
+                this._pathHeap.push(current.node, now);
+                continue;
+            }
+
+            const start = entry.entity.GetAbsOrigin();
+            const target = entry.targetEntity;
+            const end = (target&&target.IsAlive()) ? target.GetAbsOrigin() : entry.targetPosition;
+            if (!start || !end) {
+                this._pathHeap.push(current.node, now);
+                continue;
+            }
+
+            const path = this._findPath(start, end);
+            if (path && path.length > 0) {
+                entry.movement.setPath(path);
+            }
+
+            this._pathHeap.push(current.node, now);
+            break;
+        }
+    }
+
+    /**
+     * 判断 entry 是否允许执行路径刷新。
+     * @param {MovementEntry} entry
+     * @returns {boolean}
+     */
+    _canRefreshPath(entry) {
+        if (!entry.usePathRefresh) return false;
+        if (!entry.targetEntity && !entry.targetPosition) return false;
+        const s = entry.movement.getState();
+        if (s.currentGoalMode === PathState$1.JUMP ||
+            s.currentGoalMode === PathState$1.LADDER ||
+            s.currentGoalMode === PathState$1.PORTAL) return false;
+        return true;
+    }
+
+    // ═══════════════════════════════════════════════
+    // 内部：批量更新
+    // ═══════════════════════════════════════════════
+
+    /**
+     * @param {number} dt
+     * @param {Vector[]} separationPositions
+     */
+    _updateAll(dt, separationPositions) {
+        for (const [key, entry] of this._entries) {
+            const sepCtx = entry.useNPCSeparation
+                ? { entities: this.ignoreEntity, positions: separationPositions }
+                : { entities: [], positions: []};
+            entry.movement.update(dt, sepCtx);
+        }
+    }
+
+    // ═══════════════════════════════════════════════
+    // 生命周期
+    // ═══════════════════════════════════════════════
+
+    /**
+     * 释放全部 Movement 实例与路径调度队列。
+     */
+    cleanup() {
+        for (const [, entry] of this._entries) {
+            entry.movement.stop();
+        }
+        this._entries.clear();
+        this.ignoreEntity.length = 0;
+        this._pathHeap.clear();
+        this._pendingRequests.length = 0;
+    }
+}
+
+/**
+ * 路径调度内部最小堆。
+ * 按 cost（上次更新时间）排序，每次 pop 取出最久未更新的怪物。
+ * @private
+ */
+class _MinHeap {
+    /** @param {number} capacity 固定容量 */
+    constructor(capacity) {
+        this.capacity = capacity;
+        /** @type {Entity[]} */
+        this.nodes = [];
+        /** @type {number[]} */
+        this.costs = [];
+        /** @type {Map<Entity, number>} */
+        this.index = new Map();
+        this.size = 0;
+    }
+    clear() {
+        this.nodes.length = 0;
+        this.costs.length = 0;
+        this.index.clear();
+        this.size = 0;
+    }
+    isEmpty() { return this.size === 0; }
+    /** @param {Entity} node @param {number} cost @returns {boolean} */
+    push(node, cost) {
+        if (!node) return false;
+        if (this.size >= this.capacity) return false;
+        let i = this.size++;
+        this.nodes[i] = node;
+        this.costs[i] = cost;
+        this.index.set(node, i);
+        this._up(i);
+        return true;
+    }
+    /** @param {Entity} node @returns {boolean} */
+    remove(node) {
+        const idx = this.index.get(node);
+        if (idx === undefined) return false;
+
+        this.index.delete(node);
+        this.size--;
+
+        if (idx === this.size) {
+            this.nodes.length = this.size;
+            this.costs.length = this.size;
+            return true;
+        }
+
+        this.nodes[idx] = this.nodes[this.size];
+        this.costs[idx] = this.costs[this.size];
+        this.nodes.length = this.size;
+        this.costs.length = this.size;
+        this.index.set(this.nodes[idx], idx);
+
+        const parent = (idx - 1) >> 1;
+        if (idx > 0 && this.costs[idx] < this.costs[parent]) this._up(idx);
+        else this._down(idx);
+        return true;
+    }
+    /** @returns {{node: Entity | null, cost: number}} */
+    pop() {
+        if (this.size === 0) return { node: null, cost: -1 };
+        const n = this.nodes[0], c = this.costs[0];
+        this.index.delete(n);
+        this.size--;
+        if (this.size > 0) {
+            this.nodes[0] = this.nodes[this.size];
+            this.costs[0] = this.costs[this.size];
+            this.nodes.length = this.size;
+            this.costs.length = this.size;
+            this.index.set(this.nodes[0], 0);
+            this._down(0);
+        } else {
+            this.nodes.length = 0;
+            this.costs.length = 0;
+        }
+        return { node: n, cost: c };
+    }
+    /** @param {number} i */
+    _up(i) {
+        while (i > 0) {
+            const p = (i - 1) >> 1;
+            if (this.costs[p] <= this.costs[i]) break;
+            this._swap(i, p); i = p;
+        }
+    }
+    /** @param {number} i */
+    _down(i) {
+        const n = this.size;
+        while (true) {
+            let l = i * 2 + 1, r = l + 1, m = i;
+            if (l < n && this.costs[l] < this.costs[m]) m = l;
+            if (r < n && this.costs[r] < this.costs[m]) m = r;
+            if (m === i) break;
+            this._swap(i, m); i = m;
+        }
+    }
+    /** @param {number} a @param {number} b */
+    _swap(a, b) {
+        const ca = this.costs[a], na = this.nodes[a];
+        this.costs[a] = this.costs[b]; this.costs[b] = ca;
+        this.nodes[a] = this.nodes[b]; this.nodes[b] = na;
+        this.index.set(na, b);
+        this.index.set(this.nodes[a], a);
+    }
+}
+
+/**
+ * @module 导航网格/常量与工具
+ */
+/** @typedef {import("cs_script/point_script").Vector} Vector */
+/** @typedef {import("cs_script/point_script").Color} Color */
+/**
+ * 导航路径节点状态枚举，表示到达下一个点时应采用的移动方式。
+ * - `WALK(1)`：直线行走
+ * - `JUMP(2)`：跳跃
+ * - `LADDER(3)`：爬梯子（持续到下一个非梯子点）
+ * - `PORTAL(4)`：传送门瞬移
+ *
+ * NavMesh 寻路结果数组中每个节点的 `mode` 字段即为此类型。
+ */
+const PathState = {
+    WALK: 1,
+    JUMP: 2,
+    LADDER: 3,
+    PORTAL: 4
+};
+//==============================世界相关设置=====================================
+/** NavMesh 世界原点坐标（体素空间的 (0,0,0) 对应的世界坐标）。 */
+const origin = { x: -1400, y: -4510, z: 220 };
+/** 体素水平方向尺寸（单位）。越小精度越高，构建越慢。 */
+const MESH_CELL_SIZE_XY = 8;
+/** 体素垂直方向尺寸（单位）。 */
+const MESH_CELL_SIZE_Z = 1;
+/** 体素化射线方块高度（单位）。设置过高会忽略竖直方向的空隙。 */
+const MESH_TRACE_SIZE_Z = 32;
+/** NavMesh 世界水平范围大小（单位）。 */
+const MESH_WORLD_SIZE_XY = 3200;
+/** NavMesh 世界垂直范围大小（单位）。 */
+const MESH_WORLD_SIZE_Z = 1100;
+//==============================数据结构设置=====================================
+/** 多边形最大数量，受 16 位索引限制（不超过 65535）。 */
+const MAX_POLYS = 65535;
+/** 顶点最大数量。 */
+const MAX_VERTS = 65535;
+/** 三角形最大数量。 */
+const MAX_TRIS = 65535;
+/** 特殊连接点（跳点 / 梯子 / 传送门）的最大数量。 */
+const MAX_LINKS = 4096;
+//==============================Recast设置======================================
+//其他参数
+/** 最大可行走坡度（度），超过此角度的斜面视为不可行走。 */
+const MAX_SLOPE = 65;
+/** 怪物最大可行走台阶高度（体素单位）。 */
+const MAX_WALK_HEIGHT = 13 / MESH_CELL_SIZE_Z;
+/** 怪物最大可跳跃高度（体素单位）。 */
+const MAX_JUMP_HEIGHT = 65 / MESH_CELL_SIZE_Z;
+/** Agent 半径（体素单位），汽化时用于腐蚀和空间判定。 */
+const AGENT_RADIUS = 8 / MESH_CELL_SIZE_XY;
+/** Agent 高度（体素单位），用于可行走 span 高度筛选。 */
+const AGENT_HEIGHT = 40 / MESH_CELL_SIZE_Z;
+//TILE参数
+/** 瓦片边长（体素单位）。每个 tile 包含 `TILE_SIZE×TILE_SIZE` 个体素，过大影响性能，过小增加内存开销。 */
+const TILE_SIZE = 512 / MESH_CELL_SIZE_XY;
+/** 瓦片边界填充体素数，防止边缘寻路穿模。必须大于 `MESH_ERODE_RADIUS`。 */
+const TILE_PADDING = AGENT_RADIUS + 1;
+/** 优化1：是否修剪 `info_target{name:navmesh}` 无法到达的平台。 */
+const TILE_OPTIMIZATION_1 = true;
+//体素化参数
+/** 开放高度场腐蚀半径（体素单位），用于收缩可行走区域以避开墙壁。 */
+const MESH_ERODE_RADIUS = AGENT_RADIUS;
+//区域生成参数
+/** 小于此面积的相邻区域会被合并（体素单位）。 */
+const REGION_MERGE_AREA = 128;
+/** 小于此面积的区域将被丢弃（体素单位），0 表示不丢弃。 */
+const REGION_MIN_AREA = 0;
+//轮廓生成参数
+/** 轮廓简化时原始点到简化边的最大偏离距离（体素距离）。 */
+const CONT_MAX_ERROR = 1.5;
+/** 每个多边形的最大顶点数。 */
+const POLY_MAX_VERTS_PER_POLY = 6;
+/** 多边形合并时是否优先合并最长公共边。 */
+const POLY_MERGE_LONGEST_EDGE_FIRST = true;
+/** 细节网格采样间距，值越小精度越高但耗时越多，推荐 3。 */
+const POLY_DETAIL_SAMPLE_DIST = 3;
+/** 细节网格采样点与计算点的高度差小于此阈值时跳过采样。 */
+const POLY_DETAIL_HEIGHT_ERROR = 5;
+//==============================Detour设置======================================
+//A*寻路参数
+/** 特殊连接点的寻路代价系数，越大越不倾向使用特殊点。 */
+const OFF_MESH_LINK_COST_SCALE=1;
+/** A* 启发式估价缩放系数，推荐 1.0–1.5。 */
+const ASTAR_HEURISTIC_SCALE = 1.2;
+//Funnel参数
+/** Funnel 路径拉直时距多边形边缘的最小距离百分比（0–100，100% 表示只能走边的中点）。 */
+const FUNNEL_DISTANCE = 0;
+/** 高度修正时每隔此距离插入一个采样点（单位）。 */
+const ADJUST_HEIGHT_DISTANCE = 50;
+/**
+ * 点p到线段ab距离的平方
+ * @param {Vector} p
+ * @param {Vector} a
+ * @param {Vector} b
+ */
+function distPtSegSq(p, a, b) {
+    // 向量 ab 和 ap
+    const abX = b.x - a.x;
+    const abY = b.y - a.y;
+    const apX = p.x - a.x;
+    const apY = p.y - a.y;
+
+    // 计算 ab 向量的平方长度
+    const abSq = abX * abX + abY * abY;
+
+    // 如果线段的起点和终点重合（abSq 为 0），直接计算点到起点的距离
+    if (abSq === 0) {
+        return apX * apX + apY * apY;
+    }
+
+    // 计算点p在ab上的投影 t
+    const t = (apX * abX + apY * abY) / abSq;
+
+    // 计算投影点的位置
+    let nearestX, nearestY;
+
+    if (t < 0) {
+        // 投影点在a点左侧，最近点是a
+        nearestX = a.x;
+        nearestY = a.y;
+    } else if (t > 1) {
+        // 投影点在b点右侧，最近点是b
+        nearestX = b.x;
+        nearestY = b.y;
+    } else {
+        // 投影点在线段上，最近点是投影点
+        nearestX = a.x + t * abX;
+        nearestY = a.y + t * abY;
+    }
+
+    // 计算点p到最近点的距离的平方
+    const dx = p.x - nearestX;
+    const dy = p.y - nearestY;
+
+    return dx * dx + dy * dy;
+}
+/**
+ * xy平面上点abc构成的三角形面积的两倍，>0表示ABC逆时针，<0表示顺时针
+ * @param {Vector} a
+ * @param {Vector} b
+ * @param {Vector} c
+ */
+function area(a, b, c) {
+    const ab = { x: b.x - a.x, y: b.y - a.y };
+    const ac = { x: c.x - a.x, y: c.y - a.y };
+    const s2 = (ab.x * ac.y - ac.x * ab.y);
+    return s2;
+}
+/**
+ * 返回cur在多边形中是否是锐角
+ * @param {Vector} prev
+ * @param {Vector} cur
+ * @param {Vector} next
+ */
+function isConvex(prev, cur, next) {
+    return area(prev, cur, next) > 0;
+}
+/**
+ * xy平面上点p是否在abc构成的三角形内（不包括边上）
+ * @param {Vector} p
+ * @param {Vector} a
+ * @param {Vector} b
+ * @param {Vector} c
+ */
+function pointInTri(p, a, b, c) {
+    const ab = area(a, b, p);
+    const bc = area(b, c, p);
+    const ca = area(c, a, p);
+    //内轮廓与外轮廓那里会有顶点位置相同的时候
+    return ab > 0 && bc > 0 && ca > 0;
+}
+/**
+ * 点到线段最近点
+ * @param {Vector} p
+ * @param {Vector} a
+ * @param {Vector} b
+ */
+function closestPointOnSegment(p, a, b) {
+    const abx = b.x - a.x;
+    const aby = b.y - a.y;
+    const abz = b.z - a.z;
+
+    const apx = p.x - a.x;
+    const apy = p.y - a.y;
+    const apz = p.z - a.z;
+
+    const d = abx * abx + aby * aby + abz * abz;
+    let t = d > 0 ? (apx * abx + apy * aby + apz * abz) / d : 0;
+    t = Math.max(0, Math.min(1, t));
+
+    return {
+        x: a.x + abx * t,
+        y: a.y + aby * t,
+        z: a.z + abz * t,
+    };
+}
+/**
+ * 点是否在凸多边形内(xy投影)
+ * @param {Vector} p
+ * @param {Float32Array} verts
+ * @param {number} start
+ * @param {number} end
+ */
+function pointInConvexPolyXY(p, verts, start, end) {
+    for (let i = start; i <= end; i++) {
+        const a = { x: verts[i * 3], y: verts[i * 3 + 1]};
+        const b = { x: verts[((i < end) ? (i + 1) : start) * 3], y: verts[((i < end) ? (i + 1) : start) * 3 + 1]};
+        if (area(a, b, p) < 0) return false;
+    }
+    return true;
+}
+/**
+ * 点到 polygon 最近点(xy投影)
+ * @param {Vector} pos
+ * @param {Float32Array} verts
+ * @param {number} start
+ * @param {number} end
+ */
+function closestPointOnPoly(pos, verts, start, end) {
+    // 1. 如果在多边形内部（XY），直接投影到平面
+    if (pointInConvexPolyXY(pos, verts, start, end)) {
+        // 用平均高度（你也可以用平面方程）
+        let maxz = -Infinity, minz = Infinity;
+        start*=3;
+        end*=3;
+        for (let i = start; i <= end; i+=3) {
+            const z = verts[i + 2];
+            if (z > maxz) maxz = z;
+            if (z < minz) minz = z;
+        }
+        return { x: pos.x, y: pos.y, z: (maxz + minz) >>1, in: true };
+    }
+    // 2. 否则，找最近边
+    let best = null;
+    let bestDist = Infinity;
+    for (let i = start; i <= end; i++) {
+        const ia = i;
+        const ib = (i < end) ? (i + 1) : start;
+        const a = { x: verts[ia * 3], y: verts[ia * 3 + 1], z: verts[ia * 3 + 2] };
+        const b = { x: verts[ib * 3], y: verts[ib * 3 + 1], z: verts[ib * 3 + 2] };
+        const c = closestPointOnSegment(pos, a, b);
+        const dx = c.x - pos.x;
+        const dy = c.y - pos.y;
+        const dz = c.z - pos.z;
+        const d = dx * dx + dy * dy + dz * dz;
+        if (d < bestDist) {
+            bestDist = d;
+            best = { x: c.x, y: c.y, z: c.z, in: false };
+        }
+    }
+    return best;
+}
+
+/**
+ * @module 导航网格/漏斗高度修正
+ */
+
+/** @typedef {import("./path_manager").NavMeshMesh} NavMeshMesh */
+/** @typedef {import("./path_manager").NavMeshDetail} NavMeshDetail */
+
+/**
+ * 路径高度修正器。
+ *
+ * 通过在 Detail Mesh 上采样，使用重心坐标插值
+ * 对 Funnel 输出的 2D 路径点进行 Z 坐标修正。
+ * 确保路径点精确贴合地形高度。
+ *
+ * @navigationTitle 高度修正器
+ */
+class FunnelHeightFixer {
+    /**
+     * 初始化高度修正器，绑定导航网格与细节网格。
+    * @param {NavMeshMesh} navMesh
+    * @param {NavMeshDetail} detailMesh
+     * @param {number} stepSize
+     */
+    constructor(navMesh, detailMesh, stepSize = 0.5) {
+        /** @type {NavMeshMesh} 导航网格数据引用 */
+        this.navMesh = navMesh;
+        /** @type {NavMeshDetail} 细节三角网数据引用 */
+        this.detailMesh = detailMesh;
+        /** @type {number} 分段采样步长（单位） */
+        this.stepSize = stepSize;
+        const polyCount = this.navMesh.polyslength;
+        this.polyTriStart = new Uint16Array(polyCount);
+        this.polyTriEnd   = new Uint16Array(polyCount);
+        this.polyHasDetail = new Uint8Array(polyCount);
+        for (let i = 0; i < polyCount; i++) {
+            const baseTri  = detailMesh.baseTri[i];
+            const triCount = detailMesh.triCount[i];
+            this.polyHasDetail[i] = (triCount > 0) ? 1 : 0;
+            this.polyTriStart[i] = baseTri;
+            this.polyTriEnd[i]   = baseTri + triCount; // [start, end)
+        }
+        this.triAabbMinX = new Float32Array(detailMesh.trislength);
+        this.triAabbMinY = new Float32Array(detailMesh.trislength);
+        this.triAabbMaxX = new Float32Array(detailMesh.trislength);
+        this.triAabbMaxY = new Float32Array(detailMesh.trislength);
+        this.vert=new Array();
+        this.tris=new Array();
+        const { verts, tris } = detailMesh;
+        for(let i=0;i<detailMesh.vertslength;i++)
+        {
+            this.vert[i]={x: verts[i * 3], y: verts[i * 3 + 1], z: verts[i * 3 + 2]};
+        }
+        for (let i = 0; i < detailMesh.trislength; i++) {
+            this.tris[i] = { a: tris[i * 3], b: tris[i * 3 + 1], c: tris[i * 3 + 2] };
+
+            const { a, b, c } = this.tris[i];
+            const minX = Math.min(this.vert[a].x, this.vert[b].x, this.vert[c].x);
+            const minY = Math.min(this.vert[a].y, this.vert[b].y, this.vert[c].y);
+            const maxX = Math.max(this.vert[a].x, this.vert[b].x, this.vert[c].x);
+            const maxY = Math.max(this.vert[a].y, this.vert[b].y, this.vert[c].y);
+
+            this.triAabbMinX[i] = minX;
+            this.triAabbMinY[i] = minY;
+            this.triAabbMaxX[i] = maxX;
+            this.triAabbMaxY[i] = maxY;
+        }
+
+    }
+
+    /* ===============================
+       Public API
+    =============================== */
+    
+    /**
+     * 添加一个高度修正后的采样点。
+     *
+     * 将点投射到当前多边形的 Detail Mesh 上获取精确高度，
+     * 并追加到输出路径。
+     *
+     * @param {{ x: number; y: number; z: number; }} pos 采样点
+     * @param {number} polyid 当前多边形索引
+     * @param {{ id: number; mode: number; }[]} polyPath 多边形序列
+     * @param {{ pos: { x: number; y: number; z: number; }; mode: number; }[]} out 输出路径数组
+     */
+    addpoint(pos,polyid,polyPath,out)
+    {
+        polyid = this._advancePolyIndex(pos, polyid, polyPath);
+
+        if (polyid >= polyPath.length) return;
+        const h = this._getHeightOnDetail(polyPath[polyid].id, pos);
+        out.push({
+            pos: { x: pos.x, y: pos.y, z: h },
+            mode: PathState.WALK
+        });
+        //Instance.DebugSphere({center:{ x: pos.x, y: pos.y, z: h },radius:1,duration:1/32,color:{r:0,g:255,b:0}});
+                
+    }
+    /**
+     * 对整条 Funnel 路径进行高度修正。
+     *
+     * 将相邻航路点分段采样，将每个采样点投射到
+     * Detail Mesh 获取精确 Z 坐标。跳跃/梯子点保留原坐标。
+     *
+     * @param {{pos:{x:number,y:number,z:number},mode:number}[]} funnelPath Funnel 输出的原始路径
+     * @param {{id:number,mode:number}[]} polyPath 多边形序列
+     * @returns {{pos:{x:number,y:number,z:number},mode:number}[]}
+     */
+    fixHeight(funnelPath,polyPath) {
+        if (funnelPath.length === 0) return [];
+        /** @type {{pos:{x:number,y:number,z:number},mode:number}[]} */
+        const result = [];
+        let polyIndex = 0;
+        
+        for (let i = 0; i < funnelPath.length - 1; i++) {
+            const curr = funnelPath[i];
+            const next = funnelPath[i + 1];
+
+            // 梯子点：始终原样保留，不参与地面采样。
+            // 否则会把 LADDER 点重写成 WALK，出现“梯子被跳过”的现象。
+            if (curr.mode == PathState.LADDER) {
+                result.push(curr);
+                continue;
+            }
+            // 跳跃落点(next=JUMP)：前一段不做插值，等待下一轮由 curr=JUMP 处理落地点。
+            if (next.mode == PathState.JUMP) {
+                result.push(curr);
+                continue;
+            }
+            if (curr.mode == PathState.JUMP) result.push(curr);
+            // 分段采样
+            const samples = this._subdivide(curr.pos, next.pos);
+            //Instance.Msg(samples.length);
+            //let preh=curr.pos.z;
+            //let prep=curr;
+            for (let j = (curr.mode == PathState.JUMP)?1:0; j < samples.length; j++) {
+                const p = samples[j];
+                // 跳过重复首点
+                //if (result.length > 0) {
+                //    const last = result[result.length - 1].pos;
+                //    if (posDistance2Dsqr(last, p) < 1e-4) continue;
+                //}
+                //const preid=polyIndex;
+                // 推进 poly corridor
+                polyIndex = this._advancePolyIndex(p, polyIndex, polyPath);
+
+                if (polyIndex >= polyPath.length) break;
+                const polyId = polyPath[polyIndex].id;
+                const h = this._getHeightOnDetail(polyId, p);
+                //如果这个样本点比前一个点高度发生足够变化，就在中间加入一个样本点
+                //if(j>0&&Math.abs(preh-h)>5)
+                //{
+                //    const mid={x:(p.x+prep.pos.x)/2,y:(p.y+prep.pos.y)/2,z:p.z};
+                //    this.addpoint(mid,preid,polyPath,result);
+                //}
+                result.push({
+                    pos: { x: p.x, y: p.y, z: h },
+                    mode: PathState.WALK
+                });
+                //Instance.DebugSphere({center:{ x: p.x, y: p.y, z: h },radius:1,duration:1/32,color:{r:255,g:0,b:0}});
+                //preh=p.z;
+                //prep=result[result.length - 1];
+            }
+        }
+
+        const last = funnelPath[funnelPath.length - 1];
+        if (result.length === 0 || result[result.length - 1].pos.x !== last.pos.x || result[result.length - 1].pos.y !== last.pos.y || result[result.length - 1].pos.z !== last.pos.z || result[result.length - 1].mode !== last.mode) {
+            result.push(last);
+        }
+
+        return result;
+    }
+
+    /* ===============================
+       Subdivide
+    =============================== */
+
+    /**
+     * 将线段分割为等距采样点。
+     *
+     * 根据 stepSize 将 a→b 划分为等间距点列，
+     * 若距离小于 stepSize 则只返回起点。
+     *
+     * @param {{ x: any; y: any; z: any; }} a 起点
+     * @param {{ x: any; y: any; z?: number; }} b 终点
+     * @returns {import("cs_script/point_script").Vector[]} 采样点数组
+     */
+    _subdivide(a, b) {
+        const out = [];
+        const dx = b.x - a.x;
+        const dy = b.y - a.y;
+        const dist = Math.hypot(dx, dy);
+
+        if (dist <= this.stepSize) {
+            out.push(a);
+            return out;
+        }
+
+        const n = Math.floor(dist / this.stepSize);
+        for (let i = 0; i < n; i++) {
+            const t = i / n;
+            out.push({
+                x: a.x + dx * t,
+                y: a.y + dy * t,
+                z: a.z
+            });
+        }
+        return out;
+    }
+
+    /* ===============================
+       Height Query
+    =============================== */
+
+    /**
+     * 查询点在指定多边形 Detail Mesh 上的高度。
+     *
+     * 遍历该多边形对应的 Detail 三角形，找到包含该点
+     * 的三角形并用重心坐标插值 Z 值。
+     *
+     * @param {number} polyId 多边形 ID
+     * @param {{ z: number; y: number; x: number; }} p 查询点
+     * @returns {number} 插值后的高度
+     */
+    _getHeightOnDetail(polyId, p) {
+        const vert=this.vert;
+        const tri=this.tris;
+        const start = this.polyTriStart[polyId];
+        const end   = this.polyTriEnd[polyId];
+        if (this.polyHasDetail[polyId] === 0) return p.z;
+        for (let i = start; i < end; i++) {
+            if (
+                p.x < this.triAabbMinX[i] || p.x > this.triAabbMaxX[i] ||
+                p.y < this.triAabbMinY[i] || p.y > this.triAabbMaxY[i]
+            ) {
+                continue;
+            }
+            if (this._pointInTriXY(p, vert[tri[i].a], vert[tri[i].b], vert[tri[i].c])) {
+                return this._baryHeight(p, vert[tri[i].a], vert[tri[i].b], vert[tri[i].c]);
+            }
+        }
+        // fallback（极少发生）
+        return p.z;
+    }
+    /**
+     * 三角形内插高度
+     * @param {{ x: number; y: number; }} p
+     * @param {{ x: any; y: any; z: any; }} a
+     * @param {{ x: any; y: any; z: any; }} b
+     * @param {{ x: any; y: any; z: any; }} c
+     */
+    _baryHeight(p, a, b, c) {
+        const v0x = b.x - a.x, v0y = b.y - a.y;
+        const v1x = c.x - a.x, v1y = c.y - a.y;
+        const v2x = p.x - a.x, v2y = p.y - a.y;
+
+        const d00 = v0x * v0x + v0y * v0y;
+        const d01 = v0x * v1x + v0y * v1y;
+        const d11 = v1x * v1x + v1y * v1y;
+        const d20 = v2x * v0x + v2y * v0y;
+        const d21 = v2x * v1x + v2y * v1y;
+
+        const denom = d00 * d11 - d01 * d01;
+        const v = (d11 * d20 - d01 * d21) / denom;
+        const w = (d00 * d21 - d01 * d20) / denom;
+        const u = 1.0 - v - w;
+
+        return u * a.z + v * b.z + w * c.z;
+    }
+
+    /* ===============================
+       Geometry helpers
+    =============================== */
+
+    /**
+     * 判断点 p 在 XY 平面上是否位于指定凸多边形内。
+     * @param {{ y: number; x: number; z:number}} p
+     * @param {number} polyId
+     */
+    _pointInPolyXY(p, polyId) {
+        const start = this.navMesh.polys[polyId * 2];
+        const end = this.navMesh.polys[polyId * 2 + 1];
+        return pointInConvexPolyXY(p, this.navMesh.verts, start, end);
+    }
+    /**
+     * 判断点 p 在 XY 平面上是否位于三角形 abc 内（含边界）。
+     * @param {{ y: number; x: number; }} p
+     * @param {{ x: number; y: number;}} a
+     * @param {{ x: number; y: number;}} b
+     * @param {{ x: number; y: number;}} c
+     */
+    _pointInTriXY(p, a, b, c) {
+        const s = (a.x - c.x) * (p.y - c.y) - (a.y - c.y) * (p.x - c.x);
+        const t = (b.x - a.x) * (p.y - a.y) - (b.y - a.y) * (p.x - a.x);
+        const u = (c.x - b.x) * (p.y - b.y) - (c.y - b.y) * (p.x - b.x);
+        return (s >= 0 && t >= 0 && u >= 0) || (s <= 0 && t <= 0 && u <= 0);
+    }
+
+    /**
+     * 沿多边形序列推进 corridor 索引。
+     *
+     * 从 startIndex 开始向前扫描，找到第一个包含点 p
+     * 的多边形并返回其索引。
+     *
+     * @param {{x:number,y:number,z:number}} p 查询点
+     * @param {number} startIndex 起始索引
+     * @param {{id:number,mode:number}[]} polyPath 多边形序列
+     * @returns {number} 包含点 p 的多边形索引
+     */
+    _advancePolyIndex(p, startIndex, polyPath) {
+
+        let bestIndex = startIndex;
+
+        for (let i = startIndex; i <= polyPath.length-1; i++) {
+            const polyId2 = polyPath[i].id<<1;
+            const start = this.navMesh.polys[polyId2];
+            const end = this.navMesh.polys[polyId2 + 1];
+            const cp = closestPointOnPoly(p, this.navMesh.verts, start, end);
+            if (!cp||!cp.in) continue;
+            return i;
+            //cp.z = cp.z;
+            //const dx = cp.x - p.x;
+            //const dy = cp.y - p.y;
+            //const dz = cp.z - p.z;
+            //const d = dx * dx + dy * dy + dz * dz;
+            //if (d < bestDistSq) {
+            //    bestDistSq = d;
+            //    bestIndex = i;
+            //    return i; // 直接返回第一个找到的点，因为点一定在多边形投影内，不需要继续找了
+            //}
+        }
+        return bestIndex;
+    }
+}
+
+/**
+ * @module 导航网格/工具函数
+ */
+/** @typedef {import("cs_script/point_script").Vector} Vector */
+/** @typedef {import("../path_manager").NavMeshMesh} NavMeshMesh */
+// 查询所在多边形优化
+let spatialCellSize = 128;
+
+// 压缩网格（CSR）
+let gridMinX = 0;
+let gridMinY = 0;
+let gridW = 0;
+let gridH = 0;
+
+// 长度 = gridW * gridH
+let cellStart = new Uint32Array(0); // 建议长度 N+1，便于取区间
+let cellItems = new Int32Array(0);  // 扁平候选 poly 列表
+/**
+ * NavMesh 与路径模块共享的纯工具函数集合（无状态静态方法）。
+ *
+ * 包含：
+ * - 数值工具：`clamp`、`lerpVector`、`orderedPairKey`。
+ * - 空间索引：`buildSpatialIndex`、`findNearestPoly`。
+ * - 数据压缩：`_compactTileData`、`toTypedMesh`、`toTypedDetail`、`toTypedLinks`。
+ *
+ * @navigationTitle NavMesh 工具集
+ */
+class Tool {
+    /**
+        * 数值夹取。
+     *
+     * @param {number} value
+     * @param {number} min
+     * @param {number} max
+     * @returns {number}
+     */
+    static clamp(value, min, max) {
+        return Math.max(min, Math.min(max, value));
+    }
+
+    /**
+        * 三维向量线性插值。
+        * t=0 返回 a，t=1 返回 b。
+     *
+     * @param {Vector} a
+     * @param {Vector} b
+     * @param {number} t
+     * @returns {Vector}
+     */
+    static lerpVector(a, b, t) {
+        return {
+            x: a.x + (b.x - a.x) * t,
+            y: a.y + (b.y - a.y) * t,
+            z: a.z + (b.z - a.z) * t
+        };
+    }
+
+    /**
+        * 生成“无序点对”稳定 key。
+        * (a,b) 与 (b,a) 会得到相同 key。
+     *
+     * @param {number} a
+     * @param {number} b
+     * @param {string} [separator]
+     * @returns {string}
+     */
+    static orderedPairKey(a, b, separator = "-") {
+        const lo = Math.min(a, b);
+        const hi = Math.max(a, b);
+        return `${lo}${separator}${hi}`;
+    }
+
+    /**
+        * 生成二维网格索引 key（x,y）。
+     *
+     * @param {number} x
+     * @param {number} y
+     * @param {string} [separator]
+     * @returns {string}
+     */
+    static gridKey2(x, y, separator = "_") {
+        return `${x}${separator}${y}`;
+    }
+
+    /**
+        * Map<string, T[]> 的“取或建”辅助。
+        * key 不存在时自动创建空数组并返回。
+     *
+     * @template T
+     * @param {Map<string, T[]>} map
+     * @param {string} key
+     * @returns {T[]}
+     */
+    static getOrCreateArray(map, key) {
+        let list = map.get(key);
+        if (!list) {
+            list = [];
+            map.set(key, list);
+        }
+        return list;
+    }
+
+    /**
+        * 点是否在线段上（XY 平面）。
+        * - includeEndpoints=true: 端点算在线段上
+        * - includeEndpoints=false: 端点不算在线段上（严格在线段内部）
+     *
+     * @param {number} px
+     * @param {number} py
+     * @param {number} x1
+     * @param {number} y1
+     * @param {number} x2
+     * @param {number} y2
+     * @param {{includeEndpoints?: boolean, epsilon?: number}} [options]
+     * @returns {boolean}
+     */
+    static pointOnSegment2D(px, py, x1, y1, x2, y2, options) {
+        const epsilon = options?.epsilon ?? 1e-6;
+        const includeEndpoints = options?.includeEndpoints ?? true;
+
+        const cross = (px - x1) * (y2 - y1) - (py - y1) * (x2 - x1);
+        if (Math.abs(cross) > epsilon) return false;
+
+        const dot = (px - x1) * (px - x2) + (py - y1) * (py - y2);
+        return includeEndpoints ? dot <= epsilon : dot < -epsilon;
+    }
+    /**
+     * 为多边形网格构建二维空间网格索引（CSR 压缩格式），加速最近多边形查询。
+     * @param {NavMeshMesh} mesh
+     */
+    static buildSpatialIndex(mesh) {
+        const polyCount = mesh.polyslength;
+        if (polyCount <= 0) {
+            gridW = gridH = 0;
+            cellStart = new Uint32Array(0);
+            cellItems = new Int32Array(0);
+            return;
+        }
+        // 假设mesh.polys为TypedArray，每个poly用起止索引
+        // mesh.polys: [start0, end0, start1, end1, ...]，verts为flat xyz数组
+        const c0x = new Int32Array(polyCount);
+        const c1x = new Int32Array(polyCount);
+        const c0y = new Int32Array(polyCount);
+        const c1y = new Int32Array(polyCount);
+
+        let minCellX = Infinity;
+        let minCellY = Infinity;
+        let maxCellX = -Infinity;
+        let maxCellY = -Infinity;
+        // pass1: 每个 poly 的 cell AABB + 全局边界
+        for (let i = 0; i < polyCount; i++) {
+            const start = mesh.polys[i << 1];
+            const end = mesh.polys[(i << 1) + 1];
+
+            let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+            for (let vi = start; vi <= end; vi++) {
+                const v3 = vi * 3;
+                const x = mesh.verts[v3];
+                const y = mesh.verts[v3 + 1];
+                if (x < minX) minX = x;
+                if (y < minY) minY = y;
+                if (x > maxX) maxX = x;
+                if (y > maxY) maxY = y;
+            }
+
+            const x0 = Math.floor(minX / spatialCellSize);
+            const x1 = Math.floor(maxX / spatialCellSize);
+            const y0 = Math.floor(minY / spatialCellSize);
+            const y1 = Math.floor(maxY / spatialCellSize);
+
+            c0x[i] = x0; c1x[i] = x1;
+            c0y[i] = y0; c1y[i] = y1;
+
+            if (x0 < minCellX) minCellX = x0;
+            if (y0 < minCellY) minCellY = y0;
+            if (x1 > maxCellX) maxCellX = x1;
+            if (y1 > maxCellY) maxCellY = y1;
+        }
+
+        gridMinX = minCellX;
+        gridMinY = minCellY;
+        gridW = (maxCellX - minCellX + 1) | 0;
+        gridH = (maxCellY - minCellY + 1) | 0;
+
+        const N = gridW * gridH;
+        const cellCount = new Uint32Array(N);
+
+        // pass2: 统计每个 cell 的候选数量
+        for (let i = 0; i < polyCount; i++) {
+            for (let y = c0y[i]; y <= c1y[i]; y++) {
+                const row = (y - gridMinY) * gridW;
+                for (let x = c0x[i]; x <= c1x[i]; x++) {
+                    const idx = row + (x - gridMinX);
+                    cellCount[idx]++;
+                }
+            }
+        }
+
+        // prefix sum -> cellStart (N+1)
+        cellStart = new Uint32Array(N + 1);
+        for (let i = 0; i < N; i++) {
+            cellStart[i + 1] = cellStart[i] + cellCount[i];
+        }
+
+        cellItems = new Int32Array(cellStart[N]);
+        const writePtr = new Uint32Array(cellStart.subarray(0, N));
+
+        // pass3: 写入 poly 索引
+        for (let i = 0; i < polyCount; i++) {
+            for (let y = c0y[i]; y <= c1y[i]; y++) {
+                const row = (y - gridMinY) * gridW;
+                for (let x = c0x[i]; x <= c1x[i]; x++) {
+                    const idx = row + (x - gridMinX);
+                    const w = writePtr[idx]++;
+                    cellItems[w] = i;
+                }
+            }
+        }
+    }
+    /**
+     * 返回包含点的 poly index，找不到返回 -1
+     * @param {Vector} p
+     * @param {NavMeshMesh} mesh
+     * @param {FunnelHeightFixer}[heightfixer]
+     * @param {boolean} [findall=false] 
+     */
+    static findNearestPoly(p, mesh, heightfixer,findall=false) {
+        //Instance.DebugSphere({center:{x:p.x,y:p.y,z:p.z},radius:2,duration:30,color:{r:255,g:255,b:255}});
+        if (gridW <= 0 || gridH <= 0 || cellStart.length === 0) {
+            return { pos: p, poly: -1 };
+        }
+        let bestPoly = -1;
+        let bestDist = Infinity;
+        let bestPos = p;
+        const cx = Math.floor(p.x / spatialCellSize);
+        const cy = Math.floor(p.y / spatialCellSize);
+        for(let ring=0;ring<=1;ring++)
+        {
+            let inpoly=false;
+            for (let i = -ring; i <= ring; i++)
+            {
+                const x = cx + i;
+                if (x < gridMinX || x >= gridMinX + gridW) continue;
+                for (let j = -ring; j <= ring; j++) {
+                    if(i+j<ring)continue;
+                    const y = cy + j;
+                    if (y < gridMinY || y >= gridMinY + gridH) continue;
+                    const idx = (y - gridMinY) * gridW + (x - gridMinX);
+                    const begin = cellStart[idx];
+                    const end = cellStart[idx + 1];
+                    for (let it = begin; it < end; it++) {
+                        const polyIdx = cellItems[it];
+                        // TypedArray结构：每个poly用起止索引
+                        const start = mesh.polys[polyIdx * 2];
+                        const end = mesh.polys[polyIdx * 2 + 1];
+                        // 传递顶点索引区间给closestPointOnPoly
+                        const cp = closestPointOnPoly(p, mesh.verts, start, end);
+                        if (!cp) continue;
+                        if (cp.in === true) {
+                            const h = heightfixer?._getHeightOnDetail(polyIdx, p);
+                            cp.z = h ?? cp.z;
+                            inpoly=true;
+                        }
+                        const dx = cp.x - p.x;
+                        const dy = cp.y - p.y;
+                        const dz = cp.z - p.z;
+                        const d = dx * dx + dy * dy + dz * dz;
+                        if (d < bestDist) {
+                            bestDist = d;
+                            bestPoly = polyIdx;
+                            bestPos = cp;
+                        }
+                    }
+                }
+            }
+            if(inpoly && !findall)break;
+        }
+        return { pos: bestPos, poly: bestPoly };
+    }
+    /**
+     * 导出时只保留已使用长度，避免打印大量尾部 0。
+     * @param {import("../path_tilemanager").TileData} td
+     */
+    static _compactTileData(td) {
+        return {
+            tileId: td.tileId,
+            tx: td.tx,
+            ty: td.ty,
+            mesh: this._compactMesh(td.mesh),
+            detail: this._compactDetail(td.detail, td.mesh?.polyslength ?? 0),
+            links: this._compactLinks(td.links)
+        };
+    }
+
+    /**
+     * 将多边形网格的 TypedArray 按有效长度切片压缩为普通数组，用于 JSON 序列化。
+     * @param {import("../path_manager").NavMeshMesh} mesh
+     */
+    static _compactMesh(mesh) {
+        const polyslength = mesh.polyslength;
+        const vertslength = mesh.vertslength;
+        const polys = this._typedSlice(mesh.polys, polyslength * 2);
+        const verts = this._typedSlice(mesh.verts, vertslength * 3);
+        const regions = this._typedSlice(mesh.regions, polyslength);
+        /** @type {number[][][]} */
+        const neighbors = new Array(polyslength);
+        for (let p = 0; p < polyslength; p++) {
+            const start = polys[p * 2];
+            const end = polys[p * 2 + 1];
+            const edgeCount = Math.max(0, end - start + 1);
+            const edgeLists = new Array(edgeCount);
+            const srcEdges = mesh.neighbors[p];
+            for (let e = 0; e < edgeCount; e++) {
+                const list = srcEdges[e];
+                const count = list[0];
+                const used = Math.max(1, count + 1);
+                edgeLists[e] = this._typedSlice(list, used);
+            }
+            neighbors[p] = edgeLists;
+        }
+        return { verts, vertslength, polys, polyslength, regions, neighbors };
+    }
+
+    /**
+     * 将细节网格的 TypedArray 按有效长度切片压缩为普通数组，用于 JSON 序列化。
+     * @param {import("../path_manager").NavMeshDetail} detail
+     * @param {number} polyCount
+     */
+    static _compactDetail(detail, polyCount) {
+        const vertslength = detail.vertslength;
+        const trislength = detail.trislength;
+        return {
+            verts: this._typedSlice(detail.verts, vertslength * 3),
+            vertslength,
+            tris: this._typedSlice(detail.tris, trislength * 3),
+            trislength,
+            triTopoly: this._typedSlice(detail.triTopoly, trislength),
+            baseVert: this._typedSlice(detail.baseVert, polyCount),
+            vertsCount: this._typedSlice(detail.vertsCount, polyCount),
+            baseTri: this._typedSlice(detail.baseTri, polyCount),
+            triCount: this._typedSlice(detail.triCount, polyCount)
+        };
+    }
+
+    /**
+     * 将特殊连接点数据的 TypedArray 按有效长度切片压缩为普通数组，用于 JSON 序列化。
+     * @param {import("../path_manager").NavMeshLink} links
+     */
+    static _compactLinks(links) {
+        const len = links.length;
+        return {
+            poly: this._typedSlice(links.poly, len * 2),
+            cost: this._typedSlice(links.cost, len),
+            type: this._typedSlice(links.type, len),
+            pos: this._typedSlice(links.pos, len * 6),
+            length: len
+        };
+    }
+
+    /**
+     * TypedArray / Array 按有效长度切片并转普通数组，便于 JSON 紧凑输出。
+     * @param {number} usedLen
+     * @param {Uint16Array<ArrayBufferLike> | Float32Array<ArrayBufferLike> | Int32Array<ArrayBufferLike> | Int16Array<ArrayBufferLike> | Uint8Array<ArrayBufferLike>} arr
+     */
+    static _typedSlice(arr, usedLen) {
+        const n = Math.max(0, usedLen | 0);
+        if (!arr) return [];
+        return Array.from(arr.subarray(0, n));
+    }
+
+    /**
+     * 把导出的普通对象 mesh 恢复为 TypedArray 结构。
+     * @param {{
+     *  verts: number[],
+     *  vertslength: number,
+     *  polys: number[],
+     *  polyslength: number,
+     *  regions?: number[],
+     *  neighbors?: number[][][]
+     * }} mesh
+     * @returns {import("../path_manager").NavMeshMesh}
+     */
+    static toTypedMesh(mesh) {
+        const polyslength = mesh?.polyslength ?? ((mesh?.polys?.length ?? 0) >> 1);
+        const vertslength = mesh?.vertslength ?? Math.floor((mesh?.verts?.length ?? 0) / 3);
+
+        const typedPolys = new Int32Array(mesh?.polys ?? []);
+        const typedVerts = new Float32Array(mesh?.verts ?? []);
+        const typedRegions = new Int16Array(
+            (mesh?.regions && mesh.regions.length > 0) ? mesh.regions : new Array(polyslength).fill(0)
+        );
+
+        /** @type {Int16Array[][]} */
+        const typedNeighbors = new Array(polyslength);
+        for (let p = 0; p < polyslength; p++) {
+            const start = typedPolys[p << 1];
+            const end = typedPolys[(p << 1) + 1];
+            const edgeCount = Math.max(0, end - start + 1);
+            const srcEdges = mesh?.neighbors?.[p] ?? [];
+            const edgeLists = new Array(edgeCount);
+
+            for (let e = 0; e < edgeCount; e++) {
+                const srcList = srcEdges[e] ?? [0];
+                const count = Math.max(0, srcList[0] | 0);
+                const len = Math.max(1, count + 1);
+                const out = new Int16Array(len);
+                out[0] = count;
+                for (let i = 1; i < len && i < srcList.length; i++) {
+                    out[i] = srcList[i] | 0;
+                }
+                edgeLists[e] = out;
+            }
+
+            typedNeighbors[p] = edgeLists;
+        }
+
+        return {
+            verts: typedVerts,
+            vertslength,
+            polys: typedPolys,
+            polyslength,
+            regions: typedRegions,
+            neighbors: typedNeighbors
+        };
+    }
+
+    /**
+     * 把导出的普通对象 detail 恢复为 TypedArray 结构。
+     * @param {{
+     *  verts: number[],
+     *  vertslength: number,
+     *  tris: number[],
+     *  trislength: number,
+     *  triTopoly: number[],
+     *  baseVert: number[],
+     *  vertsCount: number[],
+     *  baseTri: number[],
+     *  triCount: number[]
+     * }} detail
+     * @returns {import("../path_manager").NavMeshDetail}
+     */
+    static toTypedDetail(detail) {
+        const vertslength = detail?.vertslength ?? Math.floor((detail?.verts?.length ?? 0) / 3);
+        const trislength = detail?.trislength ?? Math.floor((detail?.tris?.length ?? 0) / 3);
+        return {
+            verts: new Float32Array(detail?.verts ?? []),
+            vertslength,
+            tris: new Uint16Array(detail?.tris ?? []),
+            trislength,
+            triTopoly: new Uint16Array(detail?.triTopoly ?? []),
+            baseVert: new Uint16Array(detail?.baseVert ?? []),
+            vertsCount: new Uint16Array(detail?.vertsCount ?? []),
+            baseTri: new Uint16Array(detail?.baseTri ?? []),
+            triCount: new Uint16Array(detail?.triCount ?? [])
+        };
+    }
+
+    /**
+     * 把导出的普通对象 links 恢复为 TypedArray 结构。
+     * @param {{
+     *  poly: number[],
+     *  cost: number[],
+     *  type: number[],
+     *  pos: number[],
+     *  length: number
+     * }} links
+     * @returns {import("../path_manager").NavMeshLink}
+     */
+    static toTypedLinks(links) {
+        const length = links?.length ?? Math.min(
+            Math.floor((links?.poly?.length ?? 0) / 2),
+            links?.cost?.length ?? 0,
+            links?.type?.length ?? 0,
+            Math.floor((links?.pos?.length ?? 0) / 6)
+        );
+        return {
+            poly: new Uint16Array(links?.poly ?? []),
+            cost: new Float32Array(links?.cost ?? []),
+            type: new Uint8Array(links?.type ?? []),
+            pos: new Float32Array(links?.pos ?? []),
+            length
+        };
+    }
+}
+
+/**
+ * @module 导航网格/A星寻路
+ */
+
+/** @typedef {import("./path_manager").NavMeshMesh} NavMeshMesh */
+/** @typedef {import("./path_manager").NavMeshLink} NavMeshLink */
+/** @typedef {import("cs_script/point_script").Vector} Vector */
+
+/**
+ * A* 多边形图寻路器。
+ *
+ * 在多边形邻接图上使用启发式距离执行 A* 搜索，
+ * 返回起点到终点的多边形序列路径。
+ * 内部使用 MinHeap 作为优先队列，支持跨 Tile 的 Link 连接。
+ *
+ * @navigationTitle A* 寻路器
+ */
+class PolyGraphAStar {
+    /**
+     * 初始化 A* 寻路器，绑定网格数据、链接映射和高度修正器。
+    * @param {NavMeshMesh} polys
+    * @param {Map<number,import("./path_manager").NavMeshLinkARRAY[]>} links
+     * @param {FunnelHeightFixer} heightfixer
+     */
+    constructor(polys, links, heightfixer) {
+        /** @type {NavMeshMesh} 导航网格数据引用 */
+        this.mesh = polys;
+        /** @type {number} 多边形总数 */
+        this.polyCount = polys.polyslength;
+        /**@type {Map<number,import("./path_manager").NavMeshLinkARRAY[]>} 特殊连接点映射（跳点/梯子/传送门） */
+        this.links = links;
+        /** @type {FunnelHeightFixer} 高度修正器引用 */
+        this.heightfixer = heightfixer;
+        //预计算中心点
+        this.centers = new Array(this.polyCount);
+        for (let i = 0; i < this.polyCount; i++) {
+            const startVert = this.mesh.polys[i * 2];
+            const endVert = this.mesh.polys[i * 2 + 1];
+            let x = 0, y = 0, z = 0;
+            for (let vi = startVert; vi <= endVert; vi++) {
+                const base = vi * 3;
+                x += this.mesh.verts[base];
+                y += this.mesh.verts[base + 1];
+                z += this.mesh.verts[base + 2];
+            }
+            const n = endVert - startVert + 1;
+            this.centers[i] = {
+                x: x / n,
+                y: y / n,
+                z: z / n
+            };
+        }
+        /** @type {number} 启发式估价缩放系数的平方 */
+        this.heuristicScale = ASTAR_HEURISTIC_SCALE*ASTAR_HEURISTIC_SCALE;
+        /** @type {MinHeap} A* 内部优先队列 */
+        this.open = new MinHeap(this.polyCount);
+    }
+
+    /**
+     * 从世界坐标寻路。
+     *
+     * 将起点/终点投射到最近多边形，然后调用 {@link findPolyPath}
+     * 执行 A* 搜索。若起终点在同一多边形则直接返回。
+     *
+     * @param {import("cs_script/point_script").Vector} start 起点世界坐标
+     * @param {import("cs_script/point_script").Vector} end 终点世界坐标
+     * @returns {{start: Vector, end: Vector, path: {id: number, mode: number}[]}} 投影后的起终点及多边形序列路径
+     */
+    findPath(start, end) {
+        const startPoly = Tool.findNearestPoly(start, this.mesh,this.heightfixer,true);
+        const endPoly = Tool.findNearestPoly(end, this.mesh,this.heightfixer,true);
+        //Instance.Msg(startPoly.poly+"   "+endPoly.poly);
+        if (startPoly.poly < 0 || endPoly.poly < 0) {
+            Instance.Msg(`跑那里去了?`);
+            return { start: startPoly.pos, end: endPoly.pos, path: [] };
+        }
+
+        if (startPoly.poly == endPoly.poly) {
+            return { start: startPoly.pos, end: endPoly.pos, path: [{ id: endPoly.poly, mode: PathState.WALK }] };
+        }
+        return { start: startPoly.pos, end: endPoly.pos, path: this.findPolyPath(startPoly.poly, endPoly.poly) };
+    }
+    /**
+     * A* 多边形图搜索。
+     *
+     * 在多边形邻接图上执行带启发式的 A* 搜索，同时考虑
+     * 普通邻接边和特殊连接点（跳点/梯子/传送门）。
+     * 若未找到终点则返回距终点最近的可达多边形路径。
+     *
+     * @param {number} start 起始多边形 ID
+     * @param {number} end 目标多边形 ID
+     * @returns {{id: number, mode: number}[]} 多边形序列路径，每项包含多边形 ID 和移动模式
+     */
+    findPolyPath(start, end) {
+        const open = this.open;
+        const g = new Float32Array(this.polyCount);
+        const parent = new Int32Array(this.polyCount);
+        const walkMode = new Uint8Array(this.polyCount);// 0=none,1=walk,2=jump,//待更新3=climb
+        const state = new Uint8Array(this.polyCount); // 0=none,1=open,2=closed
+        g.fill(Infinity);
+        parent.fill(-1);
+        open.clear();
+        g[start] = 0;
+        open.push(start, this.distsqr(start, end) * this.heuristicScale);
+        state[start] = 1;
+
+        let closestNode = start;
+        let minH = Infinity;
+
+        while (!open.isEmpty()) {
+            const current = open.pop();
+
+            if (current === end) return this.reconstruct(parent, walkMode, end);
+            state[current] = 2;
+
+            const hToTarget = this.distsqr(current, end);
+            if (hToTarget < minH) {
+                minH = hToTarget;
+                closestNode = current;
+            }
+
+            const neighbors = this.mesh.neighbors[current];
+            if (neighbors)
+            {
+                for (let i = 0; i < neighbors.length; i++) {
+                    const entry = neighbors[i];
+                    if (!entry) continue;
+                    const count = entry[0];
+                    if (count <= 0) continue;
+                    for (let k = 1; k <= count; k++) {
+                        const n = entry[k];
+                        if (state[n] == 2) continue;
+                        const tentative = g[current] + this.distsqr(current, n);
+                        if (tentative < g[n]) {
+                            parent[n] = current;
+                            walkMode[n] = PathState.WALK;
+                            g[n] = tentative;
+                            const f = tentative + this.distsqr(n, end) * this.heuristicScale;
+                            if (state[n] != 1) {
+                                open.push(n, f);
+                                state[n] = 1;
+                            } else open.update(n, f);
+                        }
+                    }
+                }
+            }
+            const linkSet = this.links.get(current);
+            if (!linkSet) continue;
+            for (const link of linkSet) {
+                let v = -1;
+                if (link.PolyA == current) v = link.PolyB;
+                else if (link.PolyB == current) v = link.PolyA;
+                if (v == -1 || state[v] == 2) continue;
+                const moveCost = link.cost;
+                if (g[current] + moveCost < g[v]) {
+                    g[v] = g[current] + moveCost;
+
+                    const f = g[v] + this.distsqr(v, end) * this.heuristicScale;
+                    parent[v] = current;
+                    walkMode[v] = link.type;
+                    if (state[v] != 1) {
+                        open.push(v, f);
+                        state[v] = 1;
+                    }
+                    else open.update(v, f);
+                }
+            }
+            //for (let li = 0; li < linkSet.length; li++) {
+            //    let v = -1;
+            //    const a = linkSet.poly[li * 2];
+            //    const b = linkSet.poly[li * 2 + 1];
+            //    if (a === current) v = b;
+            //    else if (b === current) v = a;
+            //    if (state[v] == 2) continue;
+            //    const moveCost = linkSet.cost[li];
+            //    if (g[current] + moveCost < g[v]) {
+            //        g[v] = g[current] + moveCost;
+            //        const f = g[v] + this.distsqr(v, end) * this.heuristicScale;
+            //        parent[v] = current;
+            //        walkMode[v] = linkSet.type[li];
+            //        if (state[v] != 1) {
+            //            open.push(v, f);
+            //            state[v] = 1;
+            //        }
+            //        else open.update(v, f);
+            //    }
+            //}
+        }
+        return this.reconstruct(parent, walkMode, closestNode);
+    }
+    /**
+     * 从 parent 数组重建路径。
+     *
+     * 沿 parent 链回溯并反转，产生从起点到 cur 的多边形序列。
+     *
+     * @param {Int32Array} parent 每个多边形的前驱索引
+     * @param {Uint8Array} walkMode 每个多边形的移动方式
+     * @param {number} cur 终点多边形 ID
+     * @returns {{id: number, mode: number}[]}
+     */
+    reconstruct(parent, walkMode, cur) {
+        const path = [];
+        while (cur !== -1) {
+            path.push({ id: cur, mode: walkMode[cur] });
+            cur = parent[cur];
+        }
+        return path.reverse();
+    }
+
+    /**
+     * 计算两个多边形中心点的欧氏距离（非平方）。
+     *
+     * 用作 A* 的边代价和启发式估价。
+     *
+     * @param {number} a 多边形 ID
+     * @param {number} b 多边形 ID
+     * @returns {number} 两个多边形中心点的欧氏距离
+     */
+    distsqr(a, b) {
+        const pa = this.centers[a];
+        const pb = this.centers[b];
+        const dx = pa.x - pb.x;
+        const dy = pa.y - pb.y;
+        const dz = pa.z - pb.z;
+        //return Math.sqrt(dx * dx + dy * dy + dz * dz);
+        return dx * dx + dy * dy + dz * dz;
+    }
+}
+/**
+ * 二叉最小堆，A* 内部使用的优先队列。
+ */
+class MinHeap {
+    /**
+     * 创建指定容量的二叉最小堆。
+     * @param {number} polyCount
+     */
+    constructor(polyCount) {
+        this.nodes = new Uint16Array(polyCount);
+        this.costs = new Float32Array(polyCount);
+        this.index = new Int16Array(polyCount).fill(-1);
+        this.size = 0;
+    }
+    clear() {
+        this.index.fill(-1);
+        this.size = 0;
+    }
+    isEmpty() {
+        return this.size === 0;
+    }
+
+    /**
+     * 将节点以指定代价插入堆中，并上浮维护堆序。
+     * @param {number} node
+     * @param {number} cost
+     */
+    push(node, cost) {
+        let i = this.size++;
+        this.nodes[i] = node;
+        this.costs[i] = cost;
+        this.index[node] = i;
+        this._up(i);
+    }
+
+    pop() {
+        if (this.size === 0) return -1;
+        const topNode = this.nodes[0];
+        this.index[topNode] = -1;
+        this.size--;
+        if (this.size > 0) {
+            this.nodes[0] = this.nodes[this.size];
+            this.costs[0] = this.costs[this.size];
+            this.index[this.nodes[0]] = 0;
+            this._down(0);
+        }
+        return topNode;
+    }
+
+    /**
+     * 更新已有节点的代价并上浮调整位置。
+     * @param {number} node
+     * @param {number} cost
+     */
+    update(node, cost) {
+        const i = this.index[node];
+        if (i < 0) return;
+        this.costs[i] = cost;
+        this._up(i);
+    }
+
+    /**
+     * 从索引 i 向上冒泡，维护最小堆性质。
+     * @param {number} i
+     */
+    _up(i) {
+        while (i > 0) {
+            const p = (i - 1) >> 1;
+            if (this.costs[p] <= this.costs[i]) break;
+            this._swap(i, p);
+            i = p;
+        }
+    }
+
+    /**
+     * 从索引 i 向下筛选，维护最小堆性质。
+     * @param {number} i
+     */
+    _down(i) {
+        const n = this.size;
+        while (true) {
+            let l = i * 2 + 1;
+            let r = l + 1;
+            let m = i;
+
+            if (l < n && this.costs[l] < this.costs[m]) m = l;
+            if (r < n && this.costs[r] < this.costs[m]) m = r;
+            if (m === i) break;
+
+            this._swap(i, m);
+            i = m;
+        }
+    }
+
+    /**
+     * 交换堆中两个位置的节点、代价及反向索引。
+     * @param {number} a
+     * @param {number} b
+     */
+    _swap(a, b) {
+        const ca = this.costs[a];
+        const cb = this.costs[b];
+        const na = this.nodes[a];
+        const nb = this.nodes[b];
+        this.costs[a] = cb;
+        this.costs[b] = ca;
+        this.nodes[a] = nb;
+        this.nodes[b] = na;
+        this.index[na] = b;
+        this.index[nb] = a;
+    }
+}
+
+/**
+ * @module 导航网格/向量工具
+ */
+/** @typedef {import("cs_script/point_script").Vector} Vector */
+
+/**
+ * 轻量向量工具类（无状态静态方法）。
+ *
+ * 所有方法返回新对象，不修改传入参数。
+ * `2D` 后缀表示仅计算 XY 分量。
+ *
+ * @navigationTitle 向量工具
+ */
+class vec {
+    /**
+     * 三维向量加法。
+     *
+     * @param {Vector} a
+     * @param {Vector} b
+     * @returns {Vector}
+     */
+    static add(a, b) {
+        return { x: a.x + b.x, y: a.y + b.y, z: a.z + b.z };
+    }
+
+    /**
+     * 二维向量加法（仅累加 XY，z 保留 a.z）。
+     *
+     * @param {Vector} a
+     * @param {Vector} b
+     * @returns {Vector}
+     */
+    static add2D(a, b) {
+        return { x: a.x + b.x, y: a.y + b.y, z: a.z };
+    }
+
+    /**
+     * 三维向量减法。
+     *
+     * @param {Vector} a
+     * @param {Vector} b
+     * @returns {Vector}
+     */
+    static sub(a, b) {
+        return { x: a.x - b.x, y: a.y - b.y, z: a.z - b.z };
+    }
+
+    /**
+     * 三维向量按标量缩放。
+     *
+     * @param {Vector} a
+     * @param {number} s
+     * @returns {Vector}
+     */
+    static scale(a, s) {
+        return { x: a.x * s, y: a.y * s, z: a.z * s };
+    }
+
+    /**
+     * 二维向量按标量缩放（仅缩放 XY，z 保留 a.z）。
+     *
+     * @param {Vector} a
+     * @param {number} s
+     * @returns {Vector}
+     */
+    static scale2D(a, s) {
+        return {
+            x: a.x * s,
+            y: a.y * s,
+            z: a.z
+        };
+    }
+
+    /**
+     * 构造一个向量对象。
+     *
+     * @param {number} [x]
+     * @param {number} [y]
+     * @param {number} [z]
+     * @returns {Vector}
+     */
+    static get(x = 0, y = 0, z = 0) {
+        return { x, y, z };
+    }
+
+    /**
+     * 克隆向量。
+     *
+     * @param {Vector} a
+     * @returns {Vector}
+     */
+    static clone(a) {
+        return { x: a.x, y: a.y, z: a.z };
+    }
+
+    /**
+     * 计算三维欧氏距离。
+     * b 缺省时按原点处理。
+     *
+     * @param {Vector} a
+     * @param {Vector} [b]
+     * @returns {number}
+     */
+    static length(a, b = { x: 0, y: 0, z: 0 }) {
+        const dx = a.x - b.x;
+        const dy = a.y - b.y;
+        const dz = a.z - b.z;
+        return Math.sqrt(dx * dx + dy * dy + dz * dz);
+    }
+    /**
+     * 计算三维欧氏距离平方。
+     * b 缺省时按原点处理。
+     *
+     * @param {Vector} a
+     * @param {Vector} [b]
+     * @returns {number}
+     */
+    static lengthsq(a, b = { x: 0, y: 0, z: 0 }) {
+        const dx = a.x - b.x;
+        const dy = a.y - b.y;
+        const dz = a.z - b.z;
+        return dx * dx + dy * dy + dz * dz;
+    }
+    /**
+     * 计算二维欧氏距离（仅 XY）。
+     * b 缺省时按原点处理。
+     *
+     * @param {Vector} a
+     * @param {Vector} [b]
+     * @returns {number}
+     */
+    static length2D(a, b = { x: 0, y: 0, z: 0 }) {
+        const dx = a.x - b.x;
+        const dy = a.y - b.y;
+        return Math.sqrt(dx * dx + dy * dy);
+    }
+    /**
+     * 计算二维欧氏距离平方（仅 XY）。
+     * b 缺省时按原点处理。
+     *
+     * @param {Vector} a
+     * @param {Vector} [b]
+     * @returns {number}
+     */
+    static length2Dsq(a, b = { x: 0, y: 0, z: 0 }) {
+        const dx = a.x - b.x;
+        const dy = a.y - b.y;
+        return dx * dx + dy * dy;
+    }
+    /**
+     * 返回点在 Z 轴上偏移后的新坐标。
+     *
+     * @param {Vector} pos
+     * @param {number} height
+     * @returns {Vector}
+     */
+    static Zfly(pos, height) {
+        return { x: pos.x, y: pos.y, z: pos.z + height };
+    }
+
+    /**
+     * 输出向量坐标到游戏消息。
+     *
+     * @param {Vector} pos
+     */
+    static msg(pos) {
+        Instance.Msg(`{${pos.x} ${pos.y} ${pos.z}}`);
+    }
+
+    /**
+     * 三维点积。
+     *
+     * @param {Vector} a
+     * @param {Vector} b
+     * @returns {number}
+     */
+    static dot(a, b) {
+        return a.x * b.x + a.y * b.y + a.z * b.z;
+    }
+
+    /**
+     * 二维点积（仅 XY）。
+     *
+     * @param {Vector} a
+     * @param {Vector} b
+     * @returns {number}
+     */
+    static dot2D(a, b) {
+        return a.x * b.x + a.y * b.y;
+    }
+
+    /**
+     * 三维叉积。
+     *
+     * @param {Vector} a
+     * @param {Vector} b
+     * @returns {Vector}
+     */
+    static cross(a, b) {
+        return {
+            x: a.y * b.z - a.z * b.y,
+            y: a.z * b.x - a.x * b.z,
+            z: a.x * b.y - a.y * b.x
+        };
+    }
+
+    /**
+     * 三维单位化。
+     * 当长度过小（<1e-6）时返回零向量，避免除零。
+     *
+     * @param {Vector} a
+     * @returns {Vector}
+     */
+    static normalize(a) {
+        const len = this.length(a);
+        if (len < 1e-6) {
+            return { x: 0, y: 0, z: 0 };
+        }
+        return this.scale(a, 1 / len);
+    }
+
+    /**
+     * 二维单位化（仅 XY，返回 z=0）。
+     * 当长度过小（<1e-6）时返回零向量。
+     *
+     * @param {Vector} a
+     * @returns {Vector}
+     */
+    static normalize2D(a) {
+        const len = this.length2D(a);
+        if (len < 1e-6) {
+            return { x: 0, y: 0, z: 0 };
+        }
+        return {
+            x: a.x / len,
+            y: a.y / len,
+            z: 0
+        };
+    }
+
+    /**
+     * 判断是否为近似零向量。
+     *
+     * @param {Vector} a
+     * @returns {boolean}
+     */
+    static isZero(a) {
+        return (
+            Math.abs(a.x) < 1e-6 &&
+            Math.abs(a.y) < 1e-6 &&
+            Math.abs(a.z) < 1e-6
+        );
+    }
+}
+
+/**
+ * @module 导航网格/漏斗算法
+ */
+/** @typedef {import("cs_script/point_script").Vector} Vector */
+/** @typedef {import("./path_manager").NavMeshMesh} NavMeshMesh */
+/** @typedef {import("./path_manager").NavMeshLink} NavMeshLink */
+/**
+ * 漏斗路径平滑器。
+ *
+ * 将 A* 返回的多边形序列转换为平滑的航路点列表。
+ * 使用字符串拉扯算法（String Pulling）在 Portal 序列上
+ * 求出最短路径，支持 Link（跳跃/梯子/传送门）穿越。
+ *
+ * @navigationTitle 漏斗路径平滑
+ */
+class FunnelPath {
+    /**
+     * 初始化漏斗路径平滑器，绑定网格、多边形中心点和链接数据。
+    * @param {NavMeshMesh} mesh
+     * @param {Vector[]} centers
+     * @param {Map<number,import("./path_manager").NavMeshLinkARRAY[]>} links 每个poly映射到typed link容器
+     */
+    constructor(mesh, centers, links) {
+        /** @type {NavMeshMesh} 导航网格数据引用 */
+        this.mesh = mesh;
+        /** @type {Vector[]} 每个多边形的中心点数组 */
+        this.centers = centers;
+        /**@type {Map<number,import("./path_manager").NavMeshLinkARRAY[]>} 特殊连接点映射 */
+        this.links = links;
+        //Instance.Msg(this.links.size);
+    }
+    /**
+     * 查找两个多边形之间的特殊连接点。
+     *
+     * 返回从 polyA 到 polyB 的跳点/梯子/传送门坐标对。
+     *
+     * @param {number} polyA 起始多边形 ID
+     * @param {number} polyB 目标多边形 ID
+     * @returns {{start: Vector, end: Vector}|undefined} 连接点坐标对
+     */
+    getlink(polyA, polyB) {
+        const linkSet = this.links.get(polyA);
+        if (!linkSet) return;
+        for (const link of linkSet) {
+            if (link.PolyB == polyB) return { start: link.PosB, end: link.PosA };
+            if(link.PolyA == polyB)return { start: link.PosA, end: link.PosB };
+        }
+        //for (let i = 0; i < linkSet.length; i++) {
+        //    const a = linkSet.poly[i<<1];
+        //    const b = linkSet.poly[(i<<1) + 1];
+        //    const posBase = i * 6;
+        //    if (a === polyA && b === polyB) {
+        //        return {
+        //            start: {
+        //                x: linkSet.pos[posBase + 3],
+        //                y: linkSet.pos[posBase + 4],
+        //                z: linkSet.pos[posBase + 5]
+        //            },
+        //            end: {
+        //                x: linkSet.pos[posBase],
+        //                y: linkSet.pos[posBase + 1],
+        //                z: linkSet.pos[posBase + 2]
+        //            }
+        //        };
+        //    }
+        //    if (a === polyB && b === polyA) {
+        //        return {
+        //            start: {
+        //                x: linkSet.pos[posBase],
+        //                y: linkSet.pos[posBase + 1],
+        //                z: linkSet.pos[posBase + 2]
+        //            },
+        //            end: {
+        //                x: linkSet.pos[posBase + 3],
+        //                y: linkSet.pos[posBase + 4],
+        //                z: linkSet.pos[posBase + 5]
+        //            }
+        //        };
+        //    }
+        //}
+    }
+    /**
+     * 构建平滑路径。
+     *
+     * 将 A* 返回的多边形序列转换为世界坐标航路点列表。
+     * 遇到特殊连接点（JUMP/LADDER/PORTAL）时分段处理，
+     * 每段通过 Portal 构建 + String Pull 进行路径平滑。
+     *
+     * @param {{id:number,mode:number}[]} polyPath 多边形序列路径
+     * @param {Vector} startPos 起点世界坐标
+     * @param {Vector} endPos 终点世界坐标
+     * @returns {{pos:Vector,mode:number}[]} 平滑后的航路点列表
+     */
+    build(polyPath, startPos, endPos) {
+        if (!polyPath || polyPath.length === 0) return [];
+        if (polyPath.length === 1) return [{pos:startPos,mode:PathState.WALK}, {pos:endPos,mode:PathState.WALK}];
+        const ans = [];
+        // 当前这一段行走路径的起点坐标
+        let currentSegmentStartPos = startPos;
+        // 当前这一段行走路径在 polyPath 中的起始索引
+        let segmentStartIndex = 0;
+        for (let i = 1; i < polyPath.length; i++) {
+            const prevPoly = polyPath[i - 1];
+            const currPoly = polyPath[i];
+            if (currPoly.mode !=PathState.WALK)// 到第 i 个多边形需要特殊过渡（跳跃/梯子/传送）
+            {
+                // 1. 获取跳点坐标信息
+                const linkInfo = this.getlink(currPoly.id,prevPoly.id);
+                if (!linkInfo)continue;
+                const portals = this.buildPortals(polyPath,segmentStartIndex,i-1, currentSegmentStartPos, linkInfo.start, FUNNEL_DISTANCE);
+                const smoothedWalk = this.stringPull(portals);
+                for (const p of smoothedWalk) ans.push({pos:p,mode:PathState.WALK});
+                ans.push({pos:linkInfo.end,mode:currPoly.mode});
+                currentSegmentStartPos = linkInfo.end; // 下一段从落地点开始
+                segmentStartIndex = i; // 下一段多边形从 currPoly 开始
+            }
+        }
+        const lastPortals = this.buildPortals(polyPath, segmentStartIndex, polyPath.length-1, currentSegmentStartPos, endPos, FUNNEL_DISTANCE);
+        const lastSmoothed = this.stringPull(lastPortals);
+
+        for (const p of lastSmoothed) ans.push({pos:p,mode:PathState.WALK});
+        return this.removeDuplicates(ans);
+    }
+    /**
+     * 移除相邻重复点。
+     *
+     * 防止相邻航路点坐标完全一致，使用平方距离容差 > 1 进行判定。
+     *
+     * @param {{pos:Vector,mode:number}[]} path 原始路径
+     * @returns {{pos:Vector,mode:number}[]} 去重后的路径
+     */
+    removeDuplicates(path) {
+        if (path.length < 2) return path;
+        const res = [path[0]];
+        for (let i = 1; i < path.length; i++) {
+            const last = res[res.length - 1];
+            const curr = path[i];
+            const d = (last.pos.x - curr.pos.x) ** 2 + (last.pos.y - curr.pos.y) ** 2 + (last.pos.z - curr.pos.z) ** 2;
+            // 容差阈值
+            if (d > 1) {
+                res.push(curr);
+            }
+        }
+        return res;
+    }
+    /* ===============================
+       Portal Construction
+    =============================== */
+
+    /**
+     * 构建 Portal 序列。
+     *
+     * 为多边形序列中每对相邻多边形查找公共边（Portal），
+     * 首尾加入起终点作为退化 Portal，供 String Pull 使用。
+     *
+     * @param {{id:number,mode:number}[]} polyPath 多边形序列
+     * @param {number} start 起始索引
+     * @param {number} end 结束索引
+     * @param {Vector} startPos 起点坐标
+     * @param {Vector} endPos 终点坐标
+     * @param {number} funnelDistance 收缩比例
+     * @returns {{left:Vector,right:Vector}[]} Portal 序列
+     */
+    buildPortals(polyPath, start, end, startPos, endPos, funnelDistance) {
+        const portals = [];
+
+        // 起点
+        portals.push({ left: startPos, right: startPos });
+        for (let i = start; i < end; i++) {
+            const a = polyPath[i].id;
+            const b = polyPath[i + 1].id;
+            const por = this.findPortal(a, b, funnelDistance);
+            if (!por) continue;
+            //Instance.DebugLine({start:vec.Zfly(por.left,5),end:vec.Zfly(por.right,5),color:{r:0,g:0,b:255},duration:1/32});
+            portals.push(por);
+        }
+        // 终点
+        portals.push({ left: endPos, right: endPos });
+        return portals;
+    }
+
+    /**
+     * 查找两个多边形的公共边（Portal）。
+     *
+     * 通过邻接表找到连接边，计算重叠段，
+     * 并根据多边形中心方向稳定排序左右端点。
+     *
+     * @param {number} pa 多边形 A 的 ID
+     * @param {number} pb 多边形 B 的 ID
+     * @param {number} funnelDistance 收缩比例
+     * @returns {{left:Vector,right:Vector}|undefined} 公共边的左右端点
+     */
+    findPortal(pa, pb, funnelDistance) {
+        const startA = this.mesh.polys[pa * 2];
+        const endA = this.mesh.polys[pa * 2 + 1];
+        const countA = endA - startA + 1;
+        if (countA <= 0) return;
+
+        const startB = this.mesh.polys[pb * 2];
+        const endB = this.mesh.polys[pb * 2 + 1];
+        const countB = endB - startB + 1;
+        if (countB <= 0) return;
+
+        const neighA = this.mesh.neighbors[pa];
+        const neighB = this.mesh.neighbors[pb];
+        if (!neighA || !neighB) return;
+
+        // 1) 在 pa 找到通向 pb 的边（找到即用）
+        let a0, a1;
+        for (let ea = 0; ea < countA; ea++) {
+            const entry = neighA[ea];
+            if (!entry) continue;
+            const n = entry[0] | 0;
+            let hit = false;
+            for (let k = 1; k <= n; k++) {
+                if (entry[k] === pb) { hit = true; break; }
+            }
+            if (!hit) continue;
+
+            const va0 = startA + ea;
+            const va1 = startA + ((ea + 1) % countA);
+            a0 = { x: this.mesh.verts[va0 * 3], y: this.mesh.verts[va0 * 3 + 1], z: this.mesh.verts[va0 * 3 + 2] };
+            a1 = { x: this.mesh.verts[va1 * 3], y: this.mesh.verts[va1 * 3 + 1], z: this.mesh.verts[va1 * 3 + 2] };
+            break;
+        }
+        if (!a0 || !a1) return;
+
+        // 2) 只从 pb 里“通向 pa”的边里找共线重叠段
+        const abx = a1.x - a0.x;
+        const aby = a1.y - a0.y;
+        const abLen2 = abx * abx + aby * aby;
+        if (abLen2 < 1e-6) return;
+
+        let best = null;
+        //Instance.DebugLine({start:vec.Zfly(a0,5),end:vec.Zfly(a1,15),color:{r:255,g:255,b:0},duration:1/32});
+        
+        for (let eb = 0; eb < countB; eb++) {
+            const entryB = neighB[eb];
+            if (!entryB) continue;
+            const nb = entryB[0] | 0;
+
+            let bConnectedToA = false;
+            for (let k = 1; k <= nb; k++) {
+                if (entryB[k] === pa) { bConnectedToA = true; break; }
+            }
+            if (!bConnectedToA) continue;
+
+            const vb0 = startB + eb;
+            const vb1 = startB + ((eb + 1) % countB);
+            const b0 = { x: this.mesh.verts[vb0 * 3], y: this.mesh.verts[vb0 * 3 + 1], z: this.mesh.verts[vb0 * 3 + 2] };
+            const b1 = { x: this.mesh.verts[vb1 * 3], y: this.mesh.verts[vb1 * 3 + 1], z: this.mesh.verts[vb1 * 3 + 2] };
+            //Instance.DebugLine({start:vec.Zfly(b0,5),end:vec.Zfly(b1,15),color:{r:255,g:255,b:0},duration:1/32});
+        
+
+            const tb0 = ((b0.x - a0.x) * abx + (b0.y - a0.y) * aby) / abLen2;
+            const tb1 = ((b1.x - a0.x) * abx + (b1.y - a0.y) * aby) / abLen2;
+
+            const tMin = Math.max(0, Math.min(tb0, tb1));
+            const tMax = Math.min(1, Math.max(tb0, tb1));
+            if (tMax - tMin <= 1e-4) continue;
+
+            const p0 = {
+                x: a0.x + abx * tMin,
+                y: a0.y + aby * tMin,
+                z: a0.z + (a1.z - a0.z) * tMin
+            };
+            const p1 = {
+                x: a0.x + abx * tMax,
+                y: a0.y + aby * tMax,
+                z: a0.z + (a1.z - a0.z) * tMax
+            };
+
+            const dx = p1.x - p0.x;
+            const dy = p1.y - p0.y;
+            const len2 = dx * dx + dy * dy;
+            if (!best || len2 > best.len2) best = { p0, p1, len2 };
+        }
+        
+        // 没找到重叠段就退化
+        const v0 = best ? best.p0 : a0;
+        const v1 = best ? best.p1 : a1;
+
+        // 左右稳定排序（不要只看一个点）
+        const ca = this.centers[pa];
+        const cb = this.centers[pb];
+        const s0 = area(ca, cb, v0);
+        const s1 = area(ca, cb, v1);
+        const left = s0 >= s1 ? v0 : v1;
+        const right = s0 >= s1 ? v1 : v0;
+
+        return this._applyFunnelDistance(right, left, funnelDistance);
+        
+    }
+    /**
+     * 点到直线（ab）在 XY 上距离平方
+     * @param {Vector} p
+     * @param {Vector} a
+     * @param {Vector} b
+     */
+    _pointLineDistSq2D(p, a, b) {
+        const abx = b.x - a.x;
+        const aby = b.y - a.y;
+        const apx = p.x - a.x;
+        const apy = p.y - a.y;
+        const den = abx * abx + aby * aby;
+        if (den < 1e-6) return Infinity;
+        const cross = abx * apy - aby * apx;
+        return (cross * cross) / den;
+    }
+    /**
+     * 根据 funnelDistance 收缩 Portal 宽度。
+     *
+     * 将左右端点向中点插值，t=0 保持原样，t=100% 变为中点。
+     *
+     * @param {Vector} left 左端点
+     * @param {Vector} right 右端点
+     * @param {number} distance 收缩比例 0-100
+     * @returns {{left:Vector,right:Vector}} 收缩后的端点对
+     */
+    _applyFunnelDistance(left, right, distance) {
+        // 限制在 0-100
+        const t = Tool.clamp(distance, 0, 100) / 100.0;
+
+        // 若 t 为 0，保持原样
+        if (t === 0) return { left, right };
+
+        // 计算中点
+        const midX = (left.x + right.x) * 0.5;
+        const midY = (left.y + right.y) * 0.5;
+        const midZ = (left.z + right.z) * 0.5;
+        const mid = { x: midX, y: midY, z: midZ };
+
+        // 使用线性插值将端点向中点移动
+        // t=0 保持端点, t=1 变成中点
+        const newLeft = Tool.lerpVector(left, mid, t);
+        const newRight = Tool.lerpVector(right, mid, t);
+
+        return { left: newLeft, right: newRight };
+    }
+    /* ===============================
+       Funnel (String Pull)
+    =============================== */
+
+    /**
+     * 字符串拉扯算法（String Pulling）。
+     *
+     * 在 Portal 序列上执行漏斗算法，产生最短路径点序列。
+     * 通过维护左右边界并在交叉时插入拐点。
+     *
+     * @param {{left:Vector,right:Vector}[]} portals Portal 序列
+     * @returns {Vector[]} 平滑后的路径点序列
+     */
+    stringPull(portals) {
+        const path = [];
+
+        let apex = portals[0].left;
+        let left = portals[0].left;
+        let right = portals[0].right;
+
+        let apexIndex = 0;
+        let leftIndex = 0;
+        let rightIndex = 0;
+
+        path.push(apex);
+
+        for (let i = 1; i < portals.length; i++) {
+            const pLeft = portals[i].left;
+            const pRight = portals[i].right;
+
+            // 更新右边
+            if (area(apex, right, pRight) <= 0) {
+                if (apex === right || area(apex, left, pRight) > 0) {
+                    right = pRight;
+                    rightIndex = i;
+                } else {
+                    path.push(left);
+                    apex = left;
+                    apexIndex = leftIndex;
+                    left = apex;
+                    right = apex;
+                    leftIndex = apexIndex;
+                    rightIndex = apexIndex;
+                    i = apexIndex;
+                    continue;
+                }
+            }
+
+            // 更新左边
+            if (area(apex, left, pLeft) >= 0) {
+                if (apex === left || area(apex, right, pLeft) < 0) {
+                    left = pLeft;
+                    leftIndex = i;
+                } else {
+                    path.push(right);
+                    apex = right;
+                    apexIndex = rightIndex;
+                    left = apex;
+                    right = apex;
+                    leftIndex = apexIndex;
+                    rightIndex = apexIndex;
+                    i = apexIndex;
+                    continue;
+                }
+            }
+        }
+
+        path.push(portals[portals.length - 1].left);
+        return path;
+    }
+}
+
+/**
+ * @module 导航网格/静态导航数据
+ */
+
+/**
+ * 预生成的静态导航数据容器。
+ *
+ * 内含压缩的 49 个 Tile 数据（tileId 0_0 – 6_6），
+ * 可快速加载而无需实时构建。
+ *
+ * @navigationTitle 静态导航数据
+ */
+class StaticData
+{
+    constructor()
+    {
+        this.Data = ``+`{"tiles":[["0_0",{"tileId":"0_0","tx":0,"ty":0,"mesh":{"verts":[-1392,-4494,406,-888,-4494,404,-888,-3998,288,-1392,-3998,406],"vertslength":4,"polys":[0,3],"polyslength":1,"regions":[1],"neighbors":[[[0],[0],[0],[0]]]},"detail":{"verts":[-1392,-4494,403,-888,-4494,402,-888,-3998,288,-1025.45458984375,-3998,290,-1392,-3998,403],"vertslength":5,"tris":[1,2,3,3,4,0,0,1,3],"trislength":3,"triTopoly":[0,0,0],"baseVert":[0],"vertsCount":[5],"baseTri":[0],"triCount":[3]},"links":{"poly":[],"cost":[],"`
++`type":[],"pos":[],"length":0}}],["1_0",{"tileId":"1_0","tx":1,"ty":0,"mesh":{"verts":[-888,-3998,288,-888,-4494,404,-376,-4494,404,-376,-3998,288],"vertslength":4,"polys":[0,3],"polyslength":1,"regions":[1],"neighbors":[[[0],[0],[0],[0]]]},"detail":{"verts":[-888,-3998,288,-888,-4494,402,-376,-4494,402,-376,-3998,288],"vertslength":4,"tris":[3,0,1,1,2,3],"trislength":2,"triTopoly":[0,0],"baseVert":[0],"vertsCount":[4],"baseTri":[0],"triCount":[2]},"links":{"poly":[],"cost":[],"type":[],"pos":[],`
++`"length":0}}],["2_0",{"tileId":"2_0","tx":2,"ty":0,"mesh":{"verts":[-376,-3998,288,-376,-4494,404,136,-4494,404,136,-3998,288],"vertslength":4,"polys":[0,3],"polyslength":1,"regions":[1],"neighbors":[[[0],[0],[0],[0]]]},"detail":{"verts":[-376,-3998,288,-376,-4494,402,136,-4494,402,136,-3998,288],"vertslength":4,"tris":[3,0,1,1,2,3],"trislength":2,"triTopoly":[0,0],"baseVert":[0],"vertsCount":[4],"baseTri":[0],"triCount":[2]},"links":{"poly":[],"cost":[],"type":[],"pos":[],"length":0}}],["3_0",{`
++`"tileId":"3_0","tx":3,"ty":0,"mesh":{"verts":[136,-3998,288,136,-4494,404,648,-4494,404,648,-3998,288],"vertslength":4,"polys":[0,3],"polyslength":1,"regions":[1],"neighbors":[[[0],[0],[0],[0]]]},"detail":{"verts":[136,-3998,288,136,-4494,402,648,-4494,402,648,-3998,288],"vertslength":4,"tris":[3,0,1,1,2,3],"trislength":2,"triTopoly":[0,0],"baseVert":[0],"vertsCount":[4],"baseTri":[0],"triCount":[2]},"links":{"poly":[],"cost":[],"type":[],"pos":[],"length":0}}],["4_0",{"tileId":"4_0","tx":4,"ty"`
++`:0,"mesh":{"verts":[824,-4014,292,816,-3998,288,648,-3998,288,648,-4494,404,1160,-3998,354,968,-3998,296,960,-4014,294,1160,-4494,404,960,-4014,294,824,-4014,292,648,-4494,404,1160,-4494,404],"vertslength":12,"polys":[0,3,4,7,8,11],"polyslength":3,"regions":[1,1,1],"neighbors":[[[0],[0],[0],[1,2]],[[0],[0],[1,2],[0]],[[0],[1,0],[0],[1,1]]]},"detail":{"verts":[824,-4014,292,816,-3998,288,648,-3998,288,648,-4494,402,1160,-3998,354,968,-3998,299,960,-4014,296,996.3636474609375,-4101.27294921875,309`
++`,1160,-4494,402,1160,-4281.4287109375,354,960,-4014,296,824,-4014,292,648,-4494,402,1160,-4494,402,996.3636474609375,-4101.27294921875,309,948,-4026,292],"vertslength":16,"tris":[0,1,2,0,2,3,5,6,7,4,5,7,9,4,7,7,8,9,13,14,11,11,12,13,14,10,15,10,11,15,11,14,15],"trislength":11,"triTopoly":[0,0,1,1,1,1,2,2,2,2,2],"baseVert":[0,4,10],"vertsCount":[4,6,6],"baseTri":[0,2,6],"triCount":[2,4,5]},"links":{"poly":[],"cost":[],"type":[],"pos":[],"length":0}}],["5_0",{"tileId":"5_0","tx":5,"ty":0,"mesh":{"`
++`verts":[1160,-3998,357,1160,-4494,404,1320,-4494,404,1320,-3998,404],"vertslength":4,"polys":[0,3],"polyslength":1,"regions":[1],"neighbors":[[[0],[0],[0],[0]]]},"detail":{"verts":[1160,-3998,359,1160,-4305.0478515625,359,1160,-4494,402,1320,-4494,404,1320,-3998,404],"vertslength":5,"tris":[1,2,3,4,0,1,1,3,4],"trislength":3,"triTopoly":[0,0,0],"baseVert":[0],"vertsCount":[5],"baseTri":[0],"triCount":[3]},"links":{"poly":[],"cost":[],"type":[],"pos":[],"length":0}}],["6_0",{"tileId":"6_0","tx":6,`
++`"ty":0,"mesh":{"verts":[],"vertslength":0,"polys":[],"polyslength":0,"regions":[],"neighbors":[]},"detail":{"verts":[],"vertslength":0,"tris":[],"trislength":0,"triTopoly":[],"baseVert":[],"vertsCount":[],"baseTri":[],"triCount":[]},"links":{"poly":[],"cost":[],"type":[],"pos":[],"length":0}}],["0_1",{"tileId":"0_1","tx":0,"ty":1,"mesh":{"verts":[-1392,-3486,406,-1392,-3998,406,-888,-3998,286,-888,-3486,250,-1048,-3486,897,-1048,-3998,897,-888,-3998,897,-888,-3486,897],"vertslength":8,"polys":[0`
++`,3,4,7],"polyslength":2,"regions":[1,2],"neighbors":[[[0],[0],[0],[0]],[[0],[0],[0],[0]]]},"detail":{"verts":[-1392,-3486,403,-1392,-3998,403,-1002.5454711914062,-3998,284,-888,-3998,284,-888,-3835.0908203125,250,-888,-3486,250,-1048,-3486,897,-1048,-3998,897,-888,-3998,897,-888,-3486,897],"vertslength":10,"tris":[2,3,4,2,4,5,0,1,2,0,2,5,9,6,7,7,8,9],"trislength":6,"triTopoly":[0,0,0,0,1,1],"baseVert":[0,6],"vertsCount":[6,4],"baseTri":[0,4],"triCount":[4,2]},"links":{"poly":[],"cost":[],"type":`
++`[],"pos":[],"length":0}}],["1_1",{"tileId":"1_1","tx":1,"ty":1,"mesh":{"verts":[-744,-3590,236,-752,-3486,236,-888,-3486,247,-888,-3998,286,-376,-3998,286,-376,-3590,236,-744,-3590,236,-888,-3998,286,-888,-3486,897,-888,-3998,897,-376,-3998,897,-376,-3486,897,-736,-3574,606,-376,-3574,606,-376,-3486,606,-736,-3486,606,-728,-3566,250,-376,-3566,251,-376,-3486,313,-728,-3486,250,-376,-3494,236,-376,-3486,236,-656,-3486,236],"vertslength":23,"polys":[0,3,4,7,8,11,12,15,16,19,20,22],"polyslength":6,`
++`"regions":[2,2,1,3,4,5],"neighbors":[[[0],[0],[0],[1,1]],[[0],[0],[1,0],[0]],[[0],[0],[0],[0]],[[0],[0],[0],[0]],[[0],[0],[0],[0]],[[0],[0],[0]]]},"detail":{"verts":[-744,-3590,236,-752,-3486,236,-842.6666870117188,-3486,236,-888,-3486,245,-888,-3835.0908203125,246,-888,-3998,284,-819.7894897460938,-3804.73681640625,238,-852,-3770,236,-852,-3530,236,-376,-3998,284,-376,-3794,236,-376,-3590,236,-744,-3590,236,-819.7894897460938,-3804.73681640625,238,-888,-3998,284,-888,-3486,897,-888,-3998,897,-3`
++`76,-3998,897,-376,-3486,897,-736,-3574,606,-376,-3574,606,-376,-3486,606,-736,-3486,606,-728,-3566,257,-376,-3566,258,-376,-3506,306,-376,-3486,313,-634.1333618164062,-3486,313,-657.5999755859375,-3486,307,-728,-3486,257,-644,-3506,306,-548,-3506,306,-376,-3494,236,-376,-3486,236,-656,-3486,236],"vertslength":35,"tris":[4,5,6,3,4,7,4,6,7,0,6,7,3,7,8,7,0,8,3,2,8,0,1,8,2,1,8,10,11,12,10,12,13,9,10,13,9,13,14,18,15,16,16,17,18,22,19,20,20,21,22,27,28,30,23,29,30,28,29,30,24,25,31,25,26,31,27,26,31,`
++`27,30,31,24,23,31,30,23,31,32,33,34],"trislength":27,"triTopoly":[0,0,0,0,0,0,0,0,0,1,1,1,1,2,2,3,3,4,4,4,4,4,4,4,4,4,5],"baseVert":[0,9,15,19,23,32],"vertsCount":[9,6,4,4,9,3],"baseTri":[0,9,13,15,17,26],"triCount":[9,4,2,2,9,1]},"links":{"poly":[4,5],"cost":[1084.3148193359375],"type":[2],"pos":[-656,-3486,262.8863525390625,-656,-3486,236],"length":1}}],["2_1",{"tileId":"2_1","tx":2,"ty":1,"mesh":{"verts":[64,-3582,237,64,-3486,313,-160,-3486,313,-168,-3590,236,136,-3590,236,64,-3582,237,-168,`
++`-3590,236,-168,-3590,236,-376,-3590,236,-376,-3998,286,136,-3998,286,136,-3590,236,-376,-3486,897,-376,-3998,897,136,-3998,897,136,-3486,897,-376,-3486,606,-376,-3574,606,136,-3574,606,136,-3486,606,-376,-3486,313,-376,-3566,251,-184,-3566,251,-184,-3486,313,-376,-3494,236,-184,-3486,236,-376,-3486,236,88,-3566,251,136,-3566,251,136,-3486,313,88,-3486,313,136,-3494,236,136,-3486,236,88,-3486,236],"vertslength":34,"polys":[0,3,4,6,7,11,12,15,16,19,20,23,24,26,27,30,31,33],"polyslength":9,"regions`
++`":[2,2,2,1,3,4,6,5,8],"neighbors":[[[0],[0],[0],[1,1]],[[0],[1,0],[1,2]],[[0],[0],[0],[0],[1,1]],[[0],[0],[0],[0]],[[0],[0],[0],[0]],[[0],[0],[0],[0]],[[0],[0],[0]],[[0],[0],[0],[0]],[[0],[0],[0]]]},"detail":{"verts":[64,-3582,244,64,-3505.199951171875,306,64,-3486,313,-160,-3486,313,-161.60000610351562,-3506.800048828125,306,-168,-3590,237,40.79999923706055,-3582.800048828125,237,36,-3506,306,136,-3590,236,82,-3584,236,64,-3582,244,40.79999923706055,-3582.800048828125,237,-168,-3590,237,-168,-3`
++`590,237,-376,-3590,236,-376,-3794,236,-376,-3998,284,136,-3998,284,136,-3794,236,136,-3590,236,-268,-3794,236,-376,-3486,897,-376,-3998,897,136,-3998,897,136,-3486,897,-376,-3486,606,-376,-3574,606,136,-3574,606,136,-3486,606,-376,-3486,313,-376,-3506,306,-376,-3566,258,-184,-3566,258,-184,-3506,306,-184,-3486,313,-376,-3494,236,-184,-3486,236,-376,-3486,236,88,-3566,258,136,-3566,258,136,-3506,306,136,-3486,313,88,-3486,313,88,-3506,306,136,-3494,236,136,-3486,236,88,-3486,236],"vertslength":47`
++`,"tris":[4,5,6,4,6,7,2,3,7,4,3,7,2,1,7,6,0,7,1,0,7,9,10,11,8,9,11,8,11,12,18,19,13,16,17,20,16,15,20,13,14,20,15,14,20,17,18,20,13,18,20,24,21,22,22,23,24,28,25,26,26,27,28,34,29,30,33,34,30,33,30,31,31,32,33,35,36,37,40,41,42,40,42,43,43,38,39,39,40,43,44,45,46],"trislength":31,"triTopoly":[0,0,0,0,0,0,0,1,1,1,2,2,2,2,2,2,2,3,3,4,4,5,5,5,5,6,7,7,7,7,8],"baseVert":[0,8,13,21,25,29,35,38,44],"vertsCount":[8,5,8,4,4,6,3,6,3],"baseTri":[0,7,10,17,19,21,25,26,30],"triCount":[7,3,7,2,2,4,1,4,1]},"lin`
++`ks":{"poly":[],"cost":[],"type":[],"pos":[],"length":0}}],["3_1",{"tileId":"3_1","tx":3,"ty":1,"mesh":{"verts":[136,-3590,236,136,-3998,286,648,-3998,286,648,-3590,236,136,-3486,897,136,-3998,897,648,-3998,897,648,-3486,897,136,-3486,606,136,-3574,606,640,-3574,606,640,-3486,606,136,-3486,313,136,-3566,251,632,-3566,251,632,-3486,253,136,-3494,236,560,-3486,236,136,-3486,236],"vertslength":19,"polys":[0,3,4,7,8,11,12,15,16,18],"polyslength":5,"regions":[2,1,3,4,5],"neighbors":[[[0],[0],[0],[0]],`
++`[[0],[0],[0],[0]],[[0],[0],[0],[0]],[[0],[0],[0],[0]],[[0],[0],[0]]]},"detail":{"verts":[136,-3590,236,136,-3794,236,136,-3998,284,648,-3998,284,648,-3794,236,648,-3590,236,136,-3486,897,136,-3998,897,648,-3998,897,648,-3486,897,136,-3486,606,136,-3574,606,640,-3574,606,640,-3486,606,136,-3486,313,136,-3506,306,136,-3566,258,632,-3566,253,632,-3486,253,608.3809814453125,-3486,260,537.5238037109375,-3486,313,532,-3506,306,556,-3506,304,136,-3494,236,560,-3486,236,136,-3486,236],"vertslength":26,"`
++`tris":[5,0,1,1,2,3,1,3,4,1,4,5,9,6,7,7,8,9,13,10,11,11,12,13,17,18,19,16,17,21,16,15,21,20,14,21,15,14,21,17,19,22,21,17,22,19,20,22,21,20,22,23,24,25],"trislength":18,"triTopoly":[0,0,0,0,1,1,2,2,3,3,3,3,3,3,3,3,3,4],"baseVert":[0,6,10,14,23],"vertsCount":[6,4,4,9,3],"baseTri":[0,4,6,8,17],"triCount":[4,2,2,9,1]},"links":{"poly":[3,4],"cost":[991.4812622070312],"type":[2],"pos":[560,-3486,261.7096862792969,560,-3486,236],"length":1}}],["4_1",{"tileId":"4_1","tx":4,"ty":1,"mesh":{"verts":[648,-3`
++`998,286,816,-3998,286,824,-3854,253,648,-3582,236,960,-3854,294,968,-3998,296,1160,-3998,354,1160,-3486,354,656,-3486,236,648,-3582,236,824,-3854,253,960,-3854,294,1160,-3486,354,648,-3486,897,648,-3998,897,952,-3998,897,952,-3486,897,840,-3886,265,840,-3982,282,944,-3982,286,944,-3886,286],"vertslength":21,"polys":[0,3,4,7,8,12,13,16,17,20],"polyslength":5,"regions":[1,1,1,2,3],"neighbors":[[[0],[0],[1,2],[0]],[[0],[0],[0],[1,2]],[[0],[1,0],[0],[1,1],[0]],[[0],[0],[0],[0]],[[0],[0],[0],[0]]]},"`
++`detail":{"verts":[648,-3998,284,816,-3998,284,822.8571166992188,-3874.571533203125,252,824,-3854,253,773.7142944335938,-3776.28564453125,236,648,-3582,236,648,-3790,236,960,-3854,296,968,-3998,299,1160,-3998,354,1160,-3486,354,656,-3486,236,648,-3582,236,773.7142944335938,-3776.28564453125,236,824,-3854,253,960,-3854,296,1160,-3486,354,770.5454711914062,-3486,236,648,-3486,897,648,-3998,897,952,-3998,897,952,-3486,897,840,-3886,265,840,-3982,280,944,-3982,286,944,-3886,286,876,-3922,268],"vertsl`
++`ength":27,"tris":[2,3,4,1,2,4,4,5,6,4,6,0,0,1,4,7,8,9,7,9,10,17,11,12,13,14,15,17,12,13,17,13,15,15,16,17,21,18,19,19,20,21,25,22,26,22,23,26,23,24,26,25,24,26],"trislength":18,"triTopoly":[0,0,0,0,0,1,1,2,2,2,2,2,3,3,4,4,4,4],"baseVert":[0,7,11,18,22],"vertsCount":[7,4,7,4,5],"baseTri":[0,5,7,12,14],"triCount":[5,2,5,2,4]},"links":{"poly":[],"cost":[],"type":[],"pos":[],"length":0}}],["5_1",{"tileId":"5_1","tx":5,"ty":1,"mesh":{"verts":[1160,-3486,357,1160,-3998,357,1320,-3998,404,1320,-3486,40`
++`4],"vertslength":4,"polys":[0,3],"polyslength":1,"regions":[1],"neighbors":[[[0],[0],[0],[0]]]},"detail":{"verts":[1160,-3486,359,1160,-3998,359,1320,-3998,404,1320,-3486,404],"vertslength":4,"tris":[3,0,1,1,2,3],"trislength":2,"triTopoly":[0,0],"baseVert":[0],"vertsCount":[4],"baseTri":[0],"triCount":[2]},"links":{"poly":[],"cost":[],"type":[],"pos":[],"length":0}}],["6_1",{"tileId":"6_1","tx":6,"ty":1,"mesh":{"verts":[],"vertslength":0,"polys":[],"polyslength":0,"regions":[],"neighbors":[]},"d`
++`etail":{"verts":[],"vertslength":0,"tris":[],"trislength":0,"triTopoly":[],"baseVert":[],"vertsCount":[],"baseTri":[],"triCount":[]},"links":{"poly":[],"cost":[],"type":[],"pos":[],"length":0}}],["0_2",{"tileId":"0_2","tx":0,"ty":2,"mesh":{"verts":[-1392,-2974,406,-1392,-3486,406,-888,-3486,250,-888,-2974,250,-1048,-2974,897,-1048,-3486,897,-888,-3486,897,-888,-2974,897],"vertslength":8,"polys":[0,3,4,7],"polyslength":2,"regions":[1,2],"neighbors":[[[0],[0],[0],[0]],[[0],[0],[0],[0]]]},"detail":`
++`{"verts":[-1392,-2974,403,-1392,-3486,403,-888,-3486,250,-888,-2974,250,-1048,-2974,897,-1048,-3486,897,-888,-3486,897,-888,-2974,897],"vertslength":8,"tris":[3,0,1,1,2,3,7,4,5,5,6,7],"trislength":4,"triTopoly":[0,0,1,1],"baseVert":[0,4],"vertsCount":[4,4],"baseTri":[0,2],"triCount":[2,2]},"links":{"poly":[],"cost":[],"type":[],"pos":[],"length":0}}],["1_2",{"tileId":"1_2","tx":1,"ty":2,"mesh":{"verts":[-752,-3046,236,-376,-3038,523,-376,-2974,523,-888,-2974,247,-888,-3486,247,-752,-3486,236,-75`
++`2,-3046,236,-888,-2974,247,-888,-2974,897,-888,-3486,897,-376,-3486,897,-376,-2974,897,-632,-3054,606,-640,-2974,606,-736,-2974,606,-736,-3486,606,-376,-3486,606,-376,-3054,606,-632,-3054,606,-736,-3486,606,-728,-3062,250,-728,-3486,250,-376,-3486,320,-376,-3062,523,-656,-3062,236,-656,-3486,236,-376,-3486,236,-376,-3062,236,-656,-3038,236,-376,-3038,236,-376,-2974,236,-656,-2974,236],"vertslength":32,"polys":[0,3,4,7,8,11,12,15,16,19,20,23,24,27,28,31],"polyslength":8,"regions":[5,5,1,2,2,3,4,6`
++`],"neighbors":[[[0],[0],[0],[1,1]],[[0],[0],[1,0],[0]],[[0],[0],[0],[0]],[[0],[0],[0],[1,4]],[[0],[0],[1,3],[0]],[[0],[0],[0],[0]],[[0],[0],[0],[0]],[[0],[0],[0],[0]]]},"detail":{"verts":[-752,-3046,238,-728.5,-3045.5,250,-399.5,-3038.5,517,-376,-3038,523,-376,-2974,523,-399.2727355957031,-2974,517,-748.3636474609375,-2974,238,-841.4545288085938,-2974,236,-888,-2974,245,-849.1428833007812,-2994.571533203125,236,-756,-3010,236,-888,-3486,245,-842.6666870117188,-3486,236,-752,-3486,236,-752,-3046,`
++`238,-849.1428833007812,-2994.571533203125,236,-888,-2974,245,-852,-3234,236,-888,-2974,897,-888,-3486,897,-376,-3486,897,-376,-2974,897,-632,-3054,606,-640,-2974,606,-736,-2974,606,-736,-3486,606,-376,-3486,606,-376,-3054,606,-632,-3054,606,-736,-3486,606,-728,-3062,257,-728,-3486,257,-704.5333251953125,-3486,269,-634.1333618164062,-3486,326,-376,-3486,327,-376,-3462.4443359375,341,-376,-3250.4443359375,523,-376,-3062,523,-399.4666748046875,-3062,517,-704.5333251953125,-3062,269,-476,-3330,453,-`
++`452,-3330,459,-656,-3062,236,-656,-3486,236,-376,-3486,236,-376,-3062,236,-656,-3038,236,-376,-3038,236,-376,-2974,236,-656,-2974,236],"vertslength":50,"tris":[7,8,9,3,4,5,2,3,5,1,2,5,1,5,6,1,6,10,6,7,10,9,7,10,9,0,10,1,0,10,16,11,17,11,12,17,14,13,17,12,13,17,14,15,17,16,15,17,21,18,19,19,20,21,22,23,24,22,24,25,26,27,28,26,28,29,36,37,38,33,34,35,39,30,31,38,39,40,38,36,40,39,31,40,31,32,40,35,33,40,32,33,40,35,36,41,36,40,41,40,35,41,45,42,43,43,44,45,49,46,47,47,48,49],"trislength":38,"triTo`
++`poly":[0,0,0,0,0,0,0,0,0,0,1,1,1,1,1,1,2,2,3,3,4,4,5,5,5,5,5,5,5,5,5,5,5,5,6,6,7,7],"baseVert":[0,11,18,22,26,30,42,46],"vertsCount":[11,7,4,4,4,12,4,4],"baseTri":[0,10,16,18,20,22,34,36],"triCount":[10,6,2,2,2,12,2,2]},"links":{"poly":[5,6],"cost":[1202.879150390625],"type":[2],"pos":[-656,-3486,264.31817626953125,-656,-3486,236],"length":1}}],["2_2",{"tileId":"2_2","tx":2,"ty":2,"mesh":{"verts":[-376,-3062,236,-376,-3486,236,-184,-3486,236,-184,-3062,236,-328,-3206,561,-336,-3062,555,-376,-306`
++`2,529,-376,-3486,320,-184,-3486,320,-184,-3206,556,-328,-3206,561,-376,-3486,320,-168,-3166,606,-168,-3158,606,-304,-3054,606,-376,-3054,606,-376,-3486,606,-176,-3470,606,88,-3486,606,80,-3470,606,-176,-3470,606,-376,-3486,606,-376,-2974,897,-376,-3486,897,136,-3486,897,136,-2974,897,64,-3046,236,136,-3038,236,136,-2974,236,-376,-2974,236,-376,-3038,236,-160,-3046,236,64,-3046,236,-160,-3046,236,-160,-3486,236,64,-3486,236,-376,-2974,529,-376,-3038,529,-296,-3038,593,-160,-2974,607,-296,-3038,59`
++`3,-304,-3054,606,-168,-3158,606,-160,-2974,607,80,-3470,606,88,-3486,606,136,-3486,606,136,-2974,607,80,-3166,606,-160,-2974,607,-168,-3158,606,-168,-3166,606,64,-3166,598,80,-3166,606,136,-2974,607,-160,-3486,320,64,-3486,320,64,-3166,598,-168,-3166,606,88,-3062,236,88,-3486,236,136,-3486,236,136,-3062,236,88,-3206,556,88,-3486,320,136,-3486,320,136,-3206,556],"vertslength":67,"polys":[0,3,4,7,8,11,12,17,18,21,22,25,26,31,32,35,36,39,40,43,44,48,49,54,55,58,59,62,63,66],"polyslength":15,"region`
++`s":[6,7,7,4,4,1,3,3,5,5,2,2,2,8,9],"neighbors":[[[0],[0],[0],[0]],[[0],[0],[0],[1,2]],[[0],[0],[1,1],[0]],[[1,11],[1,9],[0],[0],[1,4],[0]],[[1,10],[0],[1,3],[0]],[[0],[0],[0],[0]],[[0],[0],[0],[0],[0],[1,7]],[[1,6],[0],[0],[0]],[[0],[0],[1,9],[0]],[[0],[1,3],[1,11],[1,8]],[[1,4],[0],[0],[1,11],[0]],[[1,9],[1,3],[1,12],[0],[1,10],[0]],[[0],[0],[1,11],[0]],[[0],[0],[0],[0]],[[0],[0],[0],[0]]]},"detail":{"verts":[-376,-3062,236,-376,-3486,236,-184,-3486,236,-184,-3062,236,-328,-3206,556,-336,-3062,`
++`555,-376,-3062,536,-376,-3226.888916015625,536,-376,-3250.4443359375,528,-376,-3462.4443359375,341,-376,-3486,327,-372,-3462.666748046875,341,-332,-3229.333251953125,549,-340,-3210,561,-184,-3486,327,-184,-3462.666748046875,341,-184,-3229.333251953125,549,-184,-3206,556,-328,-3206,556,-332,-3229.333251953125,549,-372,-3462.666748046875,341,-376,-3486,327,-168,-3166,606,-168,-3158,606,-304,-3054,606,-376,-3054,606,-376,-3486,606,-176,-3470,606,88,-3486,606,80,-3470,606,-176,-3470,606,-376,-3486,6`
++`06,-376,-2974,897,-376,-3486,897,136,-3486,897,136,-2974,897,64,-3046,236,136,-3038,236,136,-2974,236,-376,-2974,236,-376,-3038,236,-160,-3046,236,64,-3046,236,-160,-3046,236,-160,-3486,236,64,-3486,236,-376,-2974,536,-376,-3038,536,-296,-3038,599,-276.5714416503906,-3028.857177734375,607,-160,-2974,607,-268,-2974,607,-311.20001220703125,-2974,586,-296,-3038,599,-304,-3054,593,-287,-3067,606,-168,-3158,607,-160,-2974,607,-276.5714416503906,-3028.857177734375,607,80,-3470,606,88,-3486,606,136,-34`
++`86,606,136,-2974,607,80,-3166,606,-160,-2974,607,-168,-3158,607,-168,-3166,604,64,-3166,606,80,-3166,606,136,-2974,607,-160,-3486,327,41.599998474121094,-3486,327,64,-3486,606,64,-3166,606,-168,-3166,604,-160.57142639160156,-3463.142822265625,341,60,-3474,334,88,-3062,236,88,-3486,236,136,-3486,236,136,-3062,236,88,-3206,556,88,-3229.333251953125,549,88,-3462.666748046875,341,88,-3486,327,136,-3486,327,136,-3462.666748046875,341,136,-3229.333251953125,549,136,-3206,556],"vertslength":89,"tris":[`
++`3,0,1,1,2,3,9,10,11,12,7,8,8,9,11,8,11,12,7,12,13,12,4,13,5,4,13,5,6,13,7,6,13,16,17,18,16,18,19,20,21,14,20,14,15,15,16,19,15,19,20,22,23,24,22,24,25,26,27,22,22,25,26,28,29,30,28,30,31,35,32,33,33,34,35,36,37,38,39,40,41,41,36,38,38,39,41,45,42,43,43,44,45,47,48,49,52,46,47,52,47,49,51,52,49,49,50,51,53,54,55,58,53,55,57,58,55,55,56,57,59,60,61,63,59,61,61,62,63,64,65,66,67,68,69,64,66,67,64,67,69,75,70,71,73,74,75,72,73,76,73,75,76,75,71,76,72,71,76,80,77,78,78,79,80,88,81,82,83,84,85,83,85,8`
++`6,87,88,82,87,82,83,83,86,87],"trislength":61,"triTopoly":[0,0,1,1,1,1,1,1,1,1,1,2,2,2,2,2,2,3,3,3,3,4,4,5,5,6,6,6,6,7,7,8,8,8,8,8,9,9,9,9,10,10,10,11,11,11,11,12,12,12,12,12,12,13,13,14,14,14,14,14,14],"baseVert":[0,4,14,22,28,32,36,42,46,53,59,64,70,77,81],"vertsCount":[4,10,8,6,4,4,6,4,7,6,5,6,7,4,8],"baseTri":[0,2,11,17,21,23,25,29,31,36,40,43,47,53,55],"triCount":[2,9,6,4,2,2,4,2,5,4,3,4,6,2,6]},"links":{"poly":[],"cost":[],"type":[],"pos":[],"length":0}}],["3_2",{"tileId":"3_2","tx":3,"ty"`
++`:2,"mesh":{"verts":[136,-3062,236,136,-3486,236,560,-3486,236,560,-3062,236,240,-3198,563,136,-3206,556,136,-3486,320,632,-3062,253,240,-3062,558,240,-3198,563,240,-3198,563,136,-3486,320,632,-3486,253,632,-3062,253,640,-2974,606,552,-2974,606,544,-3054,606,640,-3486,606,200,-3046,606,136,-3038,607,136,-3486,606,544,-3054,606,200,-3046,606,136,-3486,606,640,-3486,606,136,-2974,897,136,-3486,897,648,-3486,897,648,-2974,897,136,-2974,236,136,-3038,236,560,-3038,236,560,-2974,236,136,-2974,607,136,`
++`-3038,607,200,-3046,606,648,-3038,241,648,-2974,241],"vertslength":38,"polys":[0,3,4,6,7,9,10,13,14,17,18,20,21,24,25,28,29,32,33,37],"polyslength":10,"regions":[3,4,4,4,2,2,2,1,6,5],"neighbors":[[[0],[0],[0],[0]],[[0],[0],[1,3]],[[0],[0],[1,3]],[[1,1],[0],[0],[1,2]],[[0],[0],[1,6],[0]],[[1,9],[0],[1,6]],[[0],[1,5],[0],[1,4]],[[0],[0],[0],[0]],[[0],[0],[0],[0]],[[0],[1,5],[0],[0],[0]]]},"detail":{"verts":[136,-3062,236,136,-3486,236,560,-3486,236,560,-3062,236,240,-3198,552,219.1999969482422,-31`
++`99.60009765625,558,136,-3206,556,136,-3229.333251953125,549,136,-3462.666748046875,341,136,-3486,327,176,-3375.230712890625,417,200,-3308.769287109375,480,208,-3286.615478515625,493,232,-3220.15380859375,556,220,-3210,563,632,-3062,253,608.941162109375,-3062,260,447.5294189453125,-3062,393,240,-3062,552,240,-3198,552,610.2222290039062,-3069.5556640625,260,240,-3198,552,232,-3220.15380859375,556,208,-3286.615478515625,493,200,-3308.769287109375,480,176,-3375.230712890625,417,136,-3486,327,513.904`
++`78515625,-3486,327,537.5238037109375,-3486,317,608.3809814453125,-3486,260,632,-3486,253,632,-3062,253,610.2222290039062,-3069.5556640625,260,604,-3090,266,484,-3450,355,640,-2974,606,552,-2974,606,544,-3054,606,640,-3486,606,200,-3046,606,136,-3038,607,136,-3486,606,544,-3054,606,200,-3046,606,136,-3486,606,640,-3486,606,136,-2974,897,136,-3486,897,648,-3486,897,648,-2974,897,136,-2974,236,136,-3038,236,560,-3038,236,560,-2974,236,136,-2974,607,136,-3038,607,178.6666717529297,-3043.333251953125`
++`,602,200,-3046,583,223.57894897460938,-3045.578857421875,571,624.4210815429688,-3038.421142578125,247,648,-3038,241,648,-2974,241,624.727294921875,-2974,247,182.5454559326172,-2974,602,172,-3034,607],"vertslength":65,"tris":[3,0,1,1,2,3,10,11,12,8,9,10,10,12,7,7,8,10,12,13,14,13,4,14,5,4,14,12,7,14,5,6,14,7,6,14,20,15,16,20,16,17,17,18,19,17,19,20,31,30,33,29,30,33,31,32,33,32,21,33,22,23,34,28,27,34,23,24,34,27,26,34,24,25,34,26,25,34,28,29,34,33,29,34,22,21,34,33,21,34,35,36,37,35,37,38,39,40,`
++`41,42,43,44,42,44,45,49,46,47,47,48,49,53,50,51,51,52,53,60,61,62,59,60,62,58,59,62,58,62,63,58,63,64,63,54,64,55,54,64,55,56,64,58,57,64,56,57,64],"trislength":49,"triTopoly":[0,0,1,1,1,1,1,1,1,1,1,1,2,2,2,2,3,3,3,3,3,3,3,3,3,3,3,3,3,3,4,4,5,6,6,7,7,8,8,9,9,9,9,9,9,9,9,9,9],"baseVert":[0,4,15,21,35,39,42,46,50,54],"vertsCount":[4,11,6,14,4,3,4,4,4,11],"baseTri":[0,2,12,16,30,32,33,35,37,39],"triCount":[2,10,4,14,2,1,2,2,2,10]},"links":{"poly":[0,3],"cost":[1071.403076171875],"type":[2],"pos":[5`
++`60,-3486,236,560,-3486,262.7257995605469],"length":1}}],["4_2",{"tileId":"4_2","tx":4,"ty":2,"mesh":{"verts":[648,-2974,897,648,-3486,897,952,-3486,897,952,-2974,897,648,-2974,236,648,-3046,236,656,-3486,236,1160,-3486,354,1160,-2974,354],"vertslength":9,"polys":[0,3,4,8],"polyslength":2,"regions":[2,1],"neighbors":[[[0],[0],[0],[0]],[[0],[0],[0],[0],[0]]]},"detail":{"verts":[648,-2974,897,648,-3486,897,952,-3486,897,952,-2974,897,648,-2974,236,648,-3046,236,656,-3486,236,770.5454711914062,-3486`
++`,236,1160,-3486,354,1160,-2974,354,1136.727294921875,-2974,352,787.6363525390625,-2974,241,780,-3138,238],"vertslength":13,"tris":[3,0,1,1,2,3,11,4,5,8,9,12,8,7,12,5,6,12,7,6,12,9,10,12,5,11,12,10,11,12],"trislength":10,"triTopoly":[0,0,1,1,1,1,1,1,1,1],"baseVert":[0,4],"vertsCount":[4,9],"baseTri":[0,2],"triCount":[2,8]},"links":{"poly":[],"cost":[],"type":[],"pos":[],"length":0}}],["5_2",{"tileId":"5_2","tx":5,"ty":2,"mesh":{"verts":[1160,-2974,357,1160,-3486,357,1320,-3486,404,1320,-2974,404]`
++`,"vertslength":4,"polys":[0,3],"polyslength":1,"regions":[1],"neighbors":[[[0],[0],[0],[0]]]},"detail":{"verts":[1160,-2974,359,1160,-3486,359,1320,-3486,404,1320,-2974,404],"vertslength":4,"tris":[3,0,1,1,2,3],"trislength":2,"triTopoly":[0,0],"baseVert":[0],"vertsCount":[4],"baseTri":[0],"triCount":[2]},"links":{"poly":[],"cost":[],"type":[],"pos":[],"length":0}}],["6_2",{"tileId":"6_2","tx":6,"ty":2,"mesh":{"verts":[],"vertslength":0,"polys":[],"polyslength":0,"regions":[],"neighbors":[]},"det`
++`ail":{"verts":[],"vertslength":0,"tris":[],"trislength":0,"triTopoly":[],"baseVert":[],"vertsCount":[],"baseTri":[],"triCount":[]},"links":{"poly":[],"cost":[],"type":[],"pos":[],"length":0}}],["0_3",{"tileId":"0_3","tx":0,"ty":3,"mesh":{"verts":[-1392,-2462,406,-1392,-2974,406,-888,-2974,250,-888,-2462,250,-1048,-2462,897,-1048,-2974,897,-888,-2974,897,-888,-2462,897],"vertslength":8,"polys":[0,3,4,7],"polyslength":2,"regions":[1,2],"neighbors":[[[0],[0],[0],[0]],[[0],[0],[0],[0]]]},"detail":{"`
++`verts":[-1392,-2462,403,-1392,-2974,403,-888,-2974,250,-888,-2462,250,-1048,-2462,897,-1048,-2974,897,-888,-2974,897,-888,-2462,897],"vertslength":8,"tris":[3,0,1,1,2,3,7,4,5,5,6,7],"trislength":4,"triTopoly":[0,0,1,1],"baseVert":[0,4],"vertsCount":[4,4],"baseTri":[0,2],"triCount":[2,2]},"links":{"poly":[],"cost":[],"type":[],"pos":[],"length":0}}],["1_3",{"tileId":"1_3","tx":1,"ty":3,"mesh":{"verts":[-744,-2830,238,-752,-2462,236,-888,-2462,247,-888,-2974,247,-376,-2974,523,-376,-2830,523,-744,`
++`-2830,238,-888,-2974,247,-888,-2462,897,-888,-2974,897,-376,-2974,897,-376,-2462,897,-736,-2974,606,-640,-2974,606,-632,-2814,606,-736,-2462,606,-632,-2814,606,-376,-2814,606,-376,-2462,606,-736,-2462,606,-728,-2806,250,-376,-2806,523,-376,-2462,391,-728,-2462,250,-656,-2830,236,-656,-2974,236,-376,-2974,236,-376,-2830,236,-656,-2806,236,-376,-2806,236,-376,-2462,236,-656,-2462,236],"vertslength":32,"polys":[0,3,4,7,8,11,12,15,16,19,20,23,24,27,28,31],"polyslength":8,"regions":[5,5,1,2,2,3,6,4],`
++`"neighbors":[[[0],[0],[0],[1,1]],[[0],[0],[1,0],[0]],[[0],[0],[0],[0]],[[0],[0],[1,4],[0]],[[0],[0],[0],[1,3]],[[0],[0],[0],[0]],[[0],[0],[0],[0]],[[0],[0],[0],[0]]]},"detail":{"verts":[-744,-2830,244,-744.5,-2807,236,-752,-2462,236,-842.6666870117188,-2462,236,-888,-2462,245,-888,-2974,245,-856,-2942,236,-760,-2846,236,-852,-2914,236,-852,-2554,236,-376,-2974,523,-376,-2830,523,-399,-2830,517,-721,-2830,257,-744,-2830,244,-760,-2846,236,-856,-2942,236,-888,-2974,245,-841.4545288085938,-2974,236`
++`,-748.3636474609375,-2974,238,-399.2727355957031,-2974,517,-756,-2866,236,-888,-2462,897,-888,-2974,897,-376,-2974,897,-376,-2462,897,-736,-2974,606,-640,-2974,606,-632,-2814,606,-736,-2462,606,-632,-2814,606,-376,-2814,606,-376,-2462,606,-736,-2462,606,-728,-2806,257,-704.5333251953125,-2806,269,-399.4666748046875,-2806,517,-376,-2806,523,-376,-2622.533447265625,523,-376,-2484.933349609375,398,-376,-2462,391,-540.2666625976562,-2462,391,-563.7333374023438,-2462,383,-704.5333251953125,-2462,269,`
++`-728,-2462,257,-404,-2626,510,-656,-2830,236,-656,-2974,236,-376,-2974,236,-376,-2830,236,-656,-2806,236,-376,-2806,236,-376,-2462,236,-656,-2462,236],"vertslength":54,"tris":[7,0,1,5,6,8,1,7,8,6,7,8,8,1,9,4,3,9,1,2,9,3,2,9,4,5,9,8,5,9,16,17,18,16,18,19,10,11,12,20,10,12,20,12,13,13,19,20,16,19,21,19,13,21,16,15,21,13,14,21,15,14,21,25,22,23,23,24,25,26,27,28,26,28,29,30,31,32,30,32,33,39,40,41,44,34,35,43,44,35,43,35,45,35,36,45,38,37,45,36,37,45,43,42,45,38,39,45,42,41,45,39,41,45,49,46,47,47,`
++`48,49,53,50,51,51,52,53],"trislength":42,"triTopoly":[0,0,0,0,0,0,0,0,0,0,1,1,1,1,1,1,1,1,1,1,1,2,2,3,3,4,4,5,5,5,5,5,5,5,5,5,5,5,6,6,7,7],"baseVert":[0,10,22,26,30,34,46,50],"vertsCount":[10,12,4,4,4,12,4,4],"baseTri":[0,10,21,23,25,27,38,40],"triCount":[10,11,2,2,2,11,2,2]},"links":{"poly":[5,7],"cost":[2753.01513671875],"type":[2],"pos":[-656,-2462,278.8409118652344,-656,-2462,236],"length":1}}],["2_3",{"tileId":"2_3","tx":2,"ty":3,"mesh":{"verts":[136,-2974,236,136,-2830,236,64,-2822,236,-16`
++`0,-2822,236,-376,-2830,236,-376,-2974,236,64,-2822,236,64,-2462,236,-160,-2462,236,-160,-2822,236,-296,-2822,606,-376,-2830,529,-376,-2974,529,-144,-2974,607,-144,-2822,607,16,-2806,897,16,-2974,897,136,-2974,897,136,-2462,897,-376,-2974,897,-144,-2974,897,-136,-2798,897,-376,-2462,897,-136,-2798,897,16,-2806,897,136,-2462,897,-376,-2462,897,-144,-2822,607,-128,-2798,607,-168,-2702,606,-296,-2822,606,-376,-2814,606,-296,-2822,606,-168,-2702,606,-176,-2462,606,-376,-2462,606,-376,-2462,236,-376,-`
++`2806,236,-184,-2806,236,-184,-2462,236,-376,-2806,529,-336,-2806,555,-328,-2662,561,-376,-2462,391,-328,-2662,561,-184,-2662,558,-184,-2462,391,-376,-2462,391,8,-2798,607,16,-2814,607,72,-2702,606,-168,-2702,606,-128,-2798,607,8,-2798,607,72,-2702,606,64,-2462,391,-160,-2462,391,-128,-2814,671,-128,-2966,671,0,-2966,671,0,-2814,671,-128,-2814,962,-128,-2966,962,0,-2966,962,0,-2814,962,-120,-2822,607,-120,-2958,607,-8,-2958,607,-8,-2822,607,16,-2814,607,16,-2974,607,136,-2974,607,72,-2702,606,136`
++`,-2462,606,80,-2462,606,72,-2702,606,136,-2974,607,88,-2806,236,136,-2806,236,136,-2462,236,88,-2462,236,88,-2662,558,136,-2662,558,136,-2462,391,88,-2462,391],"vertslength":85,"polys":[0,5,6,9,10,14,15,18,19,22,23,26,27,30,31,35,36,39,40,43,44,47,48,50,51,56,57,60,61,64,65,68,69,72,73,76,77,80,81,84],"polyslength":20,"regions":[2,2,7,1,1,1,4,4,5,6,6,3,3,9,10,11,8,8,12,13],"neighbors":[[[0],[0],[1,1],[0],[0],[0]],[[0],[0],[0],[1,0]],[[0],[0],[0],[0],[1,6]],[[0],[0],[0],[1,5]],[[0],[0],[1,5],[0]]`
++`,[[0],[1,3],[0],[1,4]],[[0],[1,12],[1,7],[1,2]],[[0],[1,6],[0],[0],[0]],[[0],[0],[0],[0]],[[0],[0],[1,10],[0]],[[0],[0],[0],[1,9]],[[0],[1,16],[1,12]],[[1,6],[0],[1,11],[0],[0],[0]],[[0],[0],[0],[0]],[[0],[0],[0],[0]],[[0],[0],[0],[0]],[[0],[0],[1,17],[1,11]],[[0],[0],[1,16],[0]],[[0],[0],[0],[0]],[[0],[0],[0],[0]]]},"detail":{"verts":[136,-2974,236,136,-2830,236,64,-2822,236,-160,-2822,236,-376,-2830,236,-376,-2974,236,64,-2822,236,64,-2462,236,-160,-2462,236,-160,-2822,236,-296,-2822,606,-316,`
++`-2824,580,-376,-2830,536,-376,-2974,536,-352.79998779296875,-2974,548,-283.20001220703125,-2974,605,-144,-2974,607,-144,-2822,607,-268,-2842,607,-292,-2866,599,16,-2806,897,16,-2974,897,136,-2974,897,136,-2462,897,-376,-2974,897,-144,-2974,897,-136,-2798,897,-376,-2462,897,-136,-2798,897,16,-2806,897,136,-2462,897,-376,-2462,897,-144,-2822,607,-128,-2798,607,-168,-2702,606,-296,-2822,606,-376,-2814,606,-296,-2822,606,-168,-2702,606,-176,-2462,606,-376,-2462,606,-376,-2462,236,-376,-2806,236,-184`
++`,-2806,236,-184,-2462,236,-376,-2806,536,-336,-2806,555,-329.1428527832031,-2682.571533203125,558,-328,-2662,551,-354.6666564941406,-2550.888916015625,461,-370.6666564941406,-2484.22216796875,398,-376,-2462,391,-376,-2484.933349609375,398,-376,-2622.533447265625,523,-376,-2645.466552734375,536,-340,-2650,544,-328,-2662,551,-184,-2662,551,-184,-2550.888916015625,461,-184,-2484.22216796875,398,-184,-2462,391,-376,-2462,391,-370.6666564941406,-2484.22216796875,398,-354.6666564941406,-2550.888916015`
++`625,461,-364,-2482,398,8,-2798,607,16,-2814,607,53.33333206176758,-2739.333251953125,607,72,-2702,599,-168,-2702,585,-160,-2721.199951171875,606,-128,-2798,607,8,-2798,607,72,-2702,599,69.81818389892578,-2636.54541015625,530,66.90908813476562,-2549.272705078125,454,64.7272720336914,-2483.818115234375,398,64,-2462,391,-160,-2462,391,-160.72727966308594,-2483.818115234375,398,-165.09091186523438,-2614.727294921875,516,-132,-2714,599,60,-2474,391,60,-2690,578,-108,-2738,607,-128,-2814,671,-128,-296`
++`6,671,0,-2966,671,0,-2814,671,-128,-2814,962,-128,-2966,962,0,-2966,962,0,-2814,962,-120,-2822,607,-120,-2958,607,-8,-2958,607,-8,-2822,607,16,-2814,607,16,-2974,607,136,-2974,607,72,-2702,606,136,-2462,606,80,-2462,606,72,-2702,606,136,-2974,607,88,-2806,236,136,-2806,236,136,-2462,236,88,-2462,236,88,-2662,551,136,-2662,551,136,-2550.888916015625,461,136,-2484.22216796875,398,136,-2462,391,88,-2462,391,88,-2484.22216796875,398,88,-2550.888916015625,461],"vertslength":117,"tris":[0,1,2,3,4,5,0,`
++`2,3,0,3,5,9,6,7,7,8,9,12,13,14,15,16,18,17,16,18,17,10,18,11,12,19,14,12,19,14,15,19,18,15,19,18,10,19,11,10,19,20,21,22,20,22,23,24,25,26,24,26,27,28,29,30,28,30,31,32,33,34,32,34,35,36,37,38,38,39,40,36,38,40,44,41,42,42,43,44,50,51,52,49,50,52,49,52,53,45,46,47,45,47,54,54,47,55,47,48,55,49,48,55,49,53,55,54,53,55,56,57,58,63,56,58,63,58,59,63,59,64,59,60,64,61,60,64,61,62,64,63,62,64,65,66,67,65,67,68,75,79,80,80,75,81,75,74,81,80,69,81,70,69,81,79,75,82,75,76,82,77,76,82,77,78,82,79,78,82,7`
++`3,74,83,74,81,83,73,72,83,71,72,84,72,83,84,81,83,84,81,70,84,71,70,84,88,85,86,86,87,88,92,89,90,90,91,92,96,93,94,94,95,96,97,98,99,97,99,100,101,102,103,101,103,104,108,105,106,106,107,108,112,113,114,112,114,115,111,112,115,111,115,116,116,109,110,110,111,116],"trislength":85,"triTopoly":[0,0,0,0,1,1,2,2,2,2,2,2,2,2,2,2,3,3,4,4,5,5,6,6,7,7,7,8,8,9,9,9,9,9,9,9,9,9,9,10,10,10,10,10,10,10,10,11,11,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12,13,13,14,14,15,15,16,16,17,17,18,18,19,19,19`
++`,19,19,19],"baseVert":[0,6,10,20,24,28,32,36,41,45,56,65,69,85,89,93,97,101,105,109],"vertsCount":[6,4,10,4,4,4,4,5,4,11,9,4,16,4,4,4,4,4,4,8],"baseTri":[0,4,6,16,18,20,22,24,27,29,39,47,49,67,69,71,73,75,77,79],"triCount":[4,2,10,2,2,2,2,3,2,10,8,2,18,2,2,2,2,2,2,6]},"links":{"poly":[2,13,3,14],"cost":[6528,6721.5],"type":[2,2],"pos":[-144,-2966,607,-128,-2966,671,16,-2966,897,0,-2966,962],"length":2}}],["3_3",{"tileId":"3_3","tx":3,"ty":3,"mesh":{"verts":[136,-2830,236,136,-2974,236,560,-2974,`
++`236,560,-2830,236,200,-2822,606,136,-2814,607,136,-2974,607,648,-2974,241,648,-2830,241,200,-2822,606,136,-2974,607,136,-2462,897,136,-2974,897,648,-2974,897,648,-2462,897,544,-2814,606,552,-2974,606,640,-2974,606,640,-2462,606,136,-2462,606,136,-2814,607,200,-2822,606,544,-2814,606,640,-2462,606,136,-2462,236,136,-2806,236,560,-2806,236,560,-2462,236,136,-2462,391,136,-2662,558,240,-2670,564,240,-2670,564,240,-2806,558,632,-2806,253,632,-2462,253,136,-2462,391,240,-2670,564,632,-2806,253],"vert`
++`slength":38,"polys":[0,3,4,6,7,10,11,14,15,18,19,23,24,27,28,30,31,33,34,37],"polyslength":10,"regions":[5,6,6,1,2,2,3,4,4,4],"neighbors":[[[0],[0],[0],[0]],[[1,5],[0],[1,2]],[[0],[0],[1,1],[0]],[[0],[0],[0],[0]],[[0],[0],[0],[1,5]],[[0],[1,1],[0],[1,4],[0]],[[0],[0],[0],[0]],[[0],[0],[1,9]],[[0],[0],[1,9]],[[0],[1,7],[1,8],[0]]]},"detail":{"verts":[136,-2830,236,136,-2974,236,560,-2974,236,560,-2830,236,200,-2822,596,136,-2814,607,136,-2974,607,172.57142639160156,-2887.142822265625,607,648,-297`
++`4,241,648,-2830,241,624.4210815429688,-2829.578857421875,247,223.57894897460938,-2822.421142578125,571,200,-2822,596,172.57142639160156,-2887.142822265625,607,136,-2974,607,182.5454559326172,-2974,602,624.727294921875,-2974,247,136,-2462,897,136,-2974,897,648,-2974,897,648,-2462,897,544,-2814,606,552,-2974,606,640,-2974,606,640,-2462,606,136,-2462,606,136,-2814,607,200,-2822,606,544,-2814,606,640,-2462,606,136,-2462,236,136,-2806,236,560,-2806,236,560,-2462,236,136,-2462,391,136,-2484.2221679687`
++`5,398,136,-2550.888916015625,461,136,-2662,551,156.8000030517578,-2663.60009765625,558,240,-2670,552,229.60000610351562,-2649.199951171875,544,146.39999389648438,-2482.800048828125,398,240,-2670,552,240,-2806,552,263.058837890625,-2806,539,608.941162109375,-2806,260,632,-2806,253,610.2222290039062,-2798.4443359375,260,632,-2462,253,608.3809814453125,-2462,260,443.047607421875,-2462,391,136,-2462,391,146.39999389648438,-2482.800048828125,398,229.60000610351562,-2649.199951171875,544,240,-2670,552`
++`,610.2222290039062,-2798.4443359375,260,632,-2806,253,268,-2482,398],"vertslength":58,"tris":[3,0,1,1,2,3,7,4,5,5,6,7,11,12,13,13,14,15,16,8,9,16,9,10,11,13,15,16,10,11,11,15,16,20,17,18,18,19,20,21,22,23,21,23,24,25,26,27,25,27,28,25,28,29,33,30,31,31,32,33,41,34,35,41,35,36,38,39,40,37,38,40,36,37,40,36,40,41,45,46,47,42,43,44,44,45,47,42,44,47,55,56,48,55,48,49,55,49,50,50,54,55,50,51,57,51,52,57,53,52,57,53,54,57,50,54,57],"trislength":39,"triTopoly":[0,0,1,1,2,2,2,2,2,2,2,3,3,4,4,5,5,5,6,6,`
++`7,7,7,7,7,7,8,8,8,8,9,9,9,9,9,9,9,9,9],"baseVert":[0,4,8,17,21,25,30,34,42,48],"vertsCount":[4,4,9,4,4,5,4,8,6,10],"baseTri":[0,2,4,11,13,15,18,20,26,30],"triCount":[2,2,7,2,2,3,2,6,4,9]},"links":{"poly":[6,9],"cost":[2057.082275390625],"type":[2],"pos":[560,-2462,236,560,-2462,273.0322570800781],"length":1}}],["4_3",{"tileId":"4_3","tx":4,"ty":3,"mesh":{"verts":[656,-2462,236,648,-2822,236,648,-2974,236,1160,-2974,354,1160,-2462,354,648,-2462,897,648,-2974,897,952,-2974,897,952,-2462,897],"vert`
++`slength":9,"polys":[0,4,5,8],"polyslength":2,"regions":[1,2],"neighbors":[[[0],[0],[0],[0],[0]],[[0],[0],[0],[0]]]},"detail":{"verts":[656,-2462,236,648,-2822,236,648,-2974,236,787.6363525390625,-2974,241,1136.727294921875,-2974,352,1160,-2974,354,1160,-2462,354,770.5454711914062,-2462,236,780,-2842,238,648,-2462,897,648,-2974,897,952,-2974,897,952,-2462,897],"vertslength":13,"tris":[7,0,1,4,5,6,4,6,8,4,3,8,1,2,8,3,2,8,6,7,8,1,7,8,12,9,10,10,11,12],"trislength":10,"triTopoly":[0,0,0,0,0,0,0,0,1,`
++`1],"baseVert":[0,9],"vertsCount":[9,4],"baseTri":[0,8],"triCount":[8,2]},"links":{"poly":[],"cost":[],"type":[],"pos":[],"length":0}}],["5_3",{"tileId":"5_3","tx":5,"ty":3,"mesh":{"verts":[1160,-2462,357,1160,-2974,357,1320,-2974,404,1320,-2462,404],"vertslength":4,"polys":[0,3],"polyslength":1,"regions":[1],"neighbors":[[[0],[0],[0],[0]]]},"detail":{"verts":[1160,-2462,359,1160,-2974,359,1320,-2974,404,1320,-2462,404],"vertslength":4,"tris":[3,0,1,1,2,3],"trislength":2,"triTopoly":[0,0],"baseVe`
++`rt":[0],"vertsCount":[4],"baseTri":[0],"triCount":[2]},"links":{"poly":[],"cost":[],"type":[],"pos":[],"length":0}}],["6_3",{"tileId":"6_3","tx":6,"ty":3,"mesh":{"verts":[],"vertslength":0,"polys":[],"polyslength":0,"regions":[],"neighbors":[]},"detail":{"verts":[],"vertslength":0,"tris":[],"trislength":0,"triTopoly":[],"baseVert":[],"vertsCount":[],"baseTri":[],"triCount":[]},"links":{"poly":[],"cost":[],"type":[],"pos":[],"length":0}}],["0_4",{"tileId":"0_4","tx":0,"ty":4,"mesh":{"verts":[-888`
++`,-1950,269,-912,-1950,269,-920,-1990,262,-888,-2462,250,-1056,-1990,302,-1064,-1950,305,-1392,-1950,406,-888,-2462,250,-920,-1990,262,-1056,-1990,302,-1056,-1990,302,-1392,-1950,406,-1392,-2462,406,-888,-2462,250,-1048,-1950,897,-1048,-2462,897,-888,-2462,897,-888,-1950,897,-936,-1966,267,-936,-1950,269,-1040,-1950,295,-1040,-1966,295],"vertslength":22,"polys":[0,3,4,6,7,9,10,13,14,17,18,21],"polyslength":6,"regions":[1,1,1,1,2,3],"neighbors":[[[0],[0],[1,2],[0]],[[0],[0],[1,3]],[[1,0],[0],[1,3]`
++`],[[1,1],[0],[0],[1,2]],[[0],[0],[0],[0]],[[0],[0],[0],[0]]]},"detail":{"verts":[-888,-1950,269,-912,-1950,269,-920,-1990,263,-912,-2108,252,-888,-2462,250,-888,-2043.0909423828125,250,-1056,-1990,297,-1064,-1950,305,-1392,-1950,403,-888,-2462,250,-912,-2108,252,-920,-1990,263,-942.6666870117188,-1990,262,-1056,-1990,297,-1056,-1990,297,-1392,-1950,403,-1392,-2462,403,-888,-2462,250,-1048,-1950,897,-1048,-2462,897,-888,-2462,897,-888,-1950,897,-936,-1966,269,-936,-1950,269,-1040,-1950,292,-1040,`
++`-1966,292],"vertslength":26,"tris":[0,1,2,5,0,2,5,2,3,3,4,5,6,7,8,10,11,12,10,12,13,9,10,13,14,15,16,14,16,17,21,18,19,19,20,21,25,22,23,23,24,25],"trislength":14,"triTopoly":[0,0,0,0,1,2,2,2,3,3,4,4,5,5],"baseVert":[0,6,9,14,18,22],"vertsCount":[6,3,5,4,4,4],"baseTri":[0,4,5,8,10,12],"triCount":[4,1,3,2,2,2]},"links":{"poly":[],"cost":[],"type":[],"pos":[],"length":0}}],["1_4",{"tileId":"1_4","tx":1,"ty":4,"mesh":{"verts":[-888,-2462,247,-752,-2462,236,-744,-2278,236,-888,-1950,269,-744,-2278,2`
++`36,-376,-2278,236,-376,-1950,269,-888,-1950,269,-888,-1950,897,-888,-2462,897,-376,-2462,897,-376,-1950,897,-736,-2294,606,-736,-2462,606,-376,-2462,606,-376,-2294,606,-728,-2302,250,-728,-2462,250,-376,-2462,384,-376,-2302,253,-656,-2366,236,-656,-2462,236,-376,-2462,236,-376,-2366,236],"vertslength":24,"polys":[0,3,4,7,8,11,12,15,16,19,20,23],"polyslength":6,"regions":[2,2,1,3,4,5],"neighbors":[[[0],[0],[1,1],[0]],[[0],[0],[0],[1,0]],[[0],[0],[0],[0]],[[0],[0],[0],[0]],[[0],[0],[0],[0]],[[0],[`
++`0],[0],[0]]]},"detail":{"verts":[-888,-2462,245,-842.6666870117188,-2462,236,-752,-2462,236,-744,-2278,236,-820.7999877929688,-2103.066650390625,236,-888,-1950,269,-888,-2066.363525390625,245,-852,-2402,236,-744,-2278,236,-376,-2278,236,-376,-2114,236,-376,-1950,269,-888,-1950,269,-820.7999877929688,-2103.066650390625,236,-888,-1950,897,-888,-2462,897,-376,-2462,897,-376,-1950,897,-736,-2294,606,-736,-2462,606,-376,-2462,606,-376,-2294,606,-728,-2302,253,-728,-2462,257,-704.5333251953125,-2462,2`
++`69,-563.7333374023438,-2462,377,-376,-2462,377,-376,-2439.142822265625,363,-376,-2324.857177734375,259,-376,-2302,253,-572,-2330,266,-668,-2354,287,-692,-2330,266,-656,-2366,236,-656,-2462,236,-376,-2462,236,-376,-2366,236],"vertslength":37,"tris":[4,5,6,6,0,7,0,1,7,3,2,7,1,2,7,3,4,7,6,4,7,8,9,10,13,8,10,13,10,11,11,12,13,17,14,15,15,16,17,21,18,19,19,20,21,25,26,27,29,22,30,29,28,30,25,27,30,28,27,30,24,23,31,24,25,31,30,25,31,30,22,32,31,30,32,22,23,32,31,23,32,36,33,34,34,35,36],"trislength":`
++`29,"triTopoly":[0,0,0,0,0,0,0,1,1,1,1,2,2,3,3,4,4,4,4,4,4,4,4,4,4,4,4,5,5],"baseVert":[0,8,14,18,22,33],"vertsCount":[8,6,4,4,11,4],"baseTri":[0,7,11,13,15,27],"triCount":[7,4,2,2,12,2]},"links":{"poly":[4,5],"cost":[2572.0693359375],"type":[2],"pos":[-656,-2462,277.4090881347656,-656,-2462,236],"length":1}}],["2_4",{"tileId":"2_4","tx":2,"ty":4,"mesh":{"verts":[-376,-2366,236,-376,-2462,236,-184,-2462,236,-184,-2366,236,-376,-2302,253,-376,-2462,384,-184,-2462,384,-184,-2302,253,-376,-2462,606,`
++`-176,-2462,606,-168,-2390,606,-376,-2294,606,-168,-2390,606,64,-2390,606,72,-2294,606,-376,-2294,606,-376,-1950,897,-376,-2462,897,136,-2462,897,136,-1950,897,-160,-2462,384,64,-2462,384,64,-2286,239,-168,-2278,236,-168,-2278,236,64,-2286,239,136,-2278,236,-376,-1950,269,-376,-2278,236,-168,-2278,236,136,-2278,236,136,-1950,269,-160,-2366,236,-160,-2462,236,64,-2462,236,64,-2366,236,80,-2398,606,80,-2462,606,136,-2462,606,72,-2294,606,64,-2390,606,80,-2398,606,136,-2294,606,72,-2294,606,80,-2398`
++`,606,136,-2462,606,88,-2366,236,88,-2462,236,136,-2462,236,136,-2366,236,88,-2302,253,88,-2462,384,136,-2462,384,136,-2302,253],"vertslength":54,"polys":[0,3,4,7,8,11,12,15,16,19,20,23,24,26,27,31,32,35,36,38,39,41,42,45,46,49,50,53],"polyslength":14,"regions":[6,4,3,3,1,2,2,2,7,5,5,5,8,9],"neighbors":[[[0],[0],[0],[0]],[[0],[0],[0],[0]],[[0],[0],[1,3],[0]],[[0],[1,10],[0],[1,2]],[[0],[0],[0],[0]],[[0],[0],[1,6],[0]],[[1,5],[0],[1,7]],[[0],[0],[1,6],[0],[0]],[[0],[0],[0],[0]],[[0],[0],[1,11]],[[`
++`1,3],[0],[1,11]],[[0],[1,10],[1,9],[0]],[[0],[0],[0],[0]],[[0],[0],[0],[0]]]},"detail":{"verts":[-376,-2366,236,-376,-2462,236,-184,-2462,236,-184,-2366,236,-376,-2302,253,-376,-2324.857177734375,259,-376,-2439.142822265625,363,-376,-2462,377,-184,-2462,377,-184,-2439.142822265625,363,-184,-2324.857177734375,259,-184,-2302,253,-376,-2462,606,-176,-2462,606,-168,-2390,606,-376,-2294,606,-168,-2390,606,64,-2390,606,72,-2294,606,-376,-2294,606,-376,-1950,897,-376,-2462,897,136,-2462,897,136,-1950,8`
++`97,-160,-2462,377,64,-2462,377,64,-2308,246,64,-2286,236,-168,-2278,236,-167,-2301,239,-161,-2439,363,-168,-2278,236,64,-2286,236,136,-2278,236,-376,-1950,269,-376,-2114,236,-376,-2278,236,-168,-2278,236,136,-2278,236,136,-2114,236,136,-1950,269,-124,-2098,237,-160,-2366,236,-160,-2462,236,64,-2462,236,64,-2366,236,80,-2398,606,80,-2462,606,136,-2462,606,72,-2294,606,64,-2390,606,80,-2398,606,136,-2294,606,72,-2294,606,80,-2398,606,136,-2462,606,88,-2366,236,88,-2462,236,136,-2462,236,136,-2366,`
++`236,88,-2302,253,88,-2324.857177734375,259,88,-2439.142822265625,363,88,-2462,377,136,-2462,377,136,-2439.142822265625,363,136,-2324.857177734375,259,136,-2302,253],"vertslength":68,"tris":[3,0,1,1,2,3,11,4,5,6,7,8,6,8,9,10,11,5,10,5,6,6,9,10,12,13,14,12,14,15,16,17,18,16,18,19,23,20,21,21,22,23,30,24,25,27,28,29,26,27,29,26,29,30,25,26,30,31,32,33,35,36,37,40,34,41,34,35,41,37,35,41,40,39,41,37,38,41,39,38,41,45,42,43,43,44,45,46,47,48,49,50,51,52,53,54,52,54,55,59,56,57,57,58,59,67,60,61,62,63`
++`,64,62,64,65,66,67,61,66,61,62,62,65,66],"trislength":41,"triTopoly":[0,0,1,1,1,1,1,1,2,2,3,3,4,4,5,5,5,5,5,6,7,7,7,7,7,7,7,8,8,9,10,11,11,12,12,13,13,13,13,13,13],"baseVert":[0,4,12,16,20,24,31,34,42,46,49,52,56,60],"vertsCount":[4,8,4,4,4,7,3,8,4,3,3,4,4,8],"baseTri":[0,2,8,10,12,14,19,20,27,29,30,31,33,35],"triCount":[2,6,2,2,2,5,1,7,2,1,1,2,2,6]},"links":{"poly":[],"cost":[],"type":[],"pos":[],"length":0}}],["3_4",{"tileId":"3_4","tx":3,"ty":4,"mesh":{"verts":[136,-2366,236,136,-2462,236,560`
++`,-2462,236,560,-2366,236,136,-2302,253,136,-2462,384,632,-2462,253,632,-2302,253,136,-2294,606,136,-2462,606,640,-2462,606,640,-2294,606,136,-1950,897,136,-2462,897,648,-2462,897,648,-1950,897,136,-1950,269,136,-2278,236,648,-2278,236,648,-1950,269],"vertslength":20,"polys":[0,3,4,7,8,11,12,15,16,19],"polyslength":5,"regions":[5,4,3,1,2],"neighbors":[[[0],[0],[0],[0]],[[0],[0],[0],[0]],[[0],[0],[0],[0]],[[0],[0],[0],[0]],[[0],[0],[0],[0]]]},"detail":{"verts":[136,-2366,236,136,-2462,236,560,-246`
++`2,236,560,-2366,236,136,-2302,253,136,-2324.857177734375,259,136,-2439.142822265625,363,136,-2462,377,466.6666564941406,-2462,374,608.3809814453125,-2462,260,632,-2462,253,632,-2302,253,220,-2330,266,580,-2330,266,460,-2450,370,136,-2294,606,136,-2462,606,640,-2462,606,640,-2294,606,136,-1950,897,136,-2462,897,648,-2462,897,648,-1950,897,136,-1950,269,136,-2114,236,136,-2278,236,648,-2278,236,648,-2114,236,648,-1950,269],"vertslength":29,"tris":[3,0,1,1,2,3,11,4,12,4,5,12,5,6,12,6,7,12,11,12,13,`
++`11,10,13,9,10,13,13,12,14,12,7,14,8,7,14,8,9,14,13,9,14,18,15,16,16,17,18,22,19,20,20,21,22,28,23,24,24,25,26,24,26,27,24,27,28],"trislength":22,"triTopoly":[0,0,1,1,1,1,1,1,1,1,1,1,1,1,2,2,3,3,4,4,4,4],"baseVert":[0,4,15,19,23],"vertsCount":[4,11,4,4,6],"baseTri":[0,2,14,16,18],"triCount":[2,12,2,2,4]},"links":{"poly":[0,1],"cost":[1945.7423095703125],"type":[2],"pos":[560,-2462,236,560,-2462,272.0161437988281],"length":1}}],["4_4",{"tileId":"4_4","tx":4,"ty":4,"mesh":{"verts":[648,-1950,897,64`
++`8,-2462,897,952,-2462,897,952,-1950,897,648,-1950,269,648,-2286,236,656,-2462,236,1160,-2462,354,1160,-1950,354],"vertslength":9,"polys":[0,3,4,8],"polyslength":2,"regions":[2,1],"neighbors":[[[0],[0],[0],[0]],[[0],[0],[0],[0],[0]]]},"detail":{"verts":[648,-1950,897,648,-2462,897,952,-2462,897,952,-1950,897,648,-1950,269,648,-2106.800048828125,236,648,-2286,236,656,-2462,236,770.5454711914062,-2462,236,1160,-2462,354,1160,-1950,354,880.727294921875,-1950,271,780,-2186,238],"vertslength":13,"tris`
++`":[3,0,1,1,2,3,6,7,8,11,4,5,9,10,12,9,8,12,5,6,12,8,6,12,10,11,12,5,11,12],"trislength":10,"triTopoly":[0,0,1,1,1,1,1,1,1,1],"baseVert":[0,4],"vertsCount":[4,9],"baseTri":[0,2],"triCount":[2,8]},"links":{"poly":[],"cost":[],"type":[],"pos":[],"length":0}}],["5_4",{"tileId":"5_4","tx":5,"ty":4,"mesh":{"verts":[1160,-1950,357,1160,-2462,357,1320,-2462,404,1320,-1950,404],"vertslength":4,"polys":[0,3],"polyslength":1,"regions":[1],"neighbors":[[[0],[0],[0],[0]]]},"detail":{"verts":[1160,-1950,359,1`
++`160,-2462,359,1320,-2462,404,1320,-1950,404],"vertslength":4,"tris":[3,0,1,1,2,3],"trislength":2,"triTopoly":[0,0],"baseVert":[0],"vertsCount":[4],"baseTri":[0],"triCount":[2]},"links":{"poly":[],"cost":[],"type":[],"pos":[],"length":0}}],["6_4",{"tileId":"6_4","tx":6,"ty":4,"mesh":{"verts":[],"vertslength":0,"polys":[],"polyslength":0,"regions":[],"neighbors":[]},"detail":{"verts":[],"vertslength":0,"tris":[],"trislength":0,"triTopoly":[],"baseVert":[],"vertsCount":[],"baseTri":[],"triCount":[]`
++`},"links":{"poly":[],"cost":[],"type":[],"pos":[],"length":0}}],["0_5",{"tileId":"0_5","tx":0,"ty":5,"mesh":{"verts":[-920,-1838,298,-912,-1950,271,-888,-1950,271,-888,-1438,391,-1392,-1950,406,-1064,-1950,305,-1056,-1838,302,-1056,-1838,302,-920,-1838,298,-888,-1438,391,-1392,-1438,406,-1392,-1950,406,-1056,-1838,302,-888,-1438,391,-1048,-1854,897,-1048,-1950,897,-888,-1950,897,-888,-1854,897,-1040,-1862,295,-1040,-1950,295,-936,-1950,271,-936,-1862,290],"vertslength":22,"polys":[0,3,4,6,7,9,10`
++`,13,14,17,18,21],"polyslength":6,"regions":[1,1,1,1,2,3],"neighbors":[[[0],[0],[0],[1,2]],[[0],[0],[1,3]],[[0],[1,0],[1,3]],[[0],[1,1],[1,2],[0]],[[0],[0],[0],[0]],[[0],[0],[0],[0]]]},"detail":{"verts":[-920,-1838,300,-912,-1950,273,-888,-1950,273,-888,-1438,391,-1392,-1950,403,-1064,-1950,305,-1056,-1838,300,-1056,-1838,300,-920,-1838,300,-888,-1438,391,-1392,-1438,403,-1392,-1950,403,-1056,-1838,300,-888,-1438,391,-1346.1817626953125,-1438,391,-1048,-1854,897,-1048,-1950,897,-888,-1950,897,-88`
++`8,-1854,897,-1040,-1862,292,-1040,-1950,292,-977.5999755859375,-1950,275,-936,-1950,273,-936,-1862,290],"vertslength":24,"tris":[0,1,2,0,2,3,4,5,6,7,8,9,14,10,11,14,11,12,12,13,14,18,15,16,16,17,18,21,22,23,19,20,21,19,21,23],"trislength":12,"triTopoly":[0,0,1,2,3,3,3,4,4,5,5,5],"baseVert":[0,4,7,10,15,19],"vertsCount":[4,3,3,5,4,5],"baseTri":[0,2,3,4,7,9],"triCount":[2,1,1,3,2,3]},"links":{"poly":[],"cost":[],"type":[],"pos":[],"length":0}}],["1_5",{"tileId":"1_5","tx":1,"ty":5,"mesh":{"verts":`
++`[-888,-1438,391,-888,-1950,271,-376,-1950,271,-376,-1438,391,-888,-1854,897,-888,-1950,897,-376,-1950,897,-376,-1854,897],"vertslength":8,"polys":[0,3,4,7],"polyslength":2,"regions":[1,2],"neighbors":[[[0],[0],[0],[0]],[[0],[0],[0],[0]]]},"detail":{"verts":[-888,-1438,391,-888,-1950,273,-376,-1950,273,-376,-1438,391,-888,-1854,897,-888,-1950,897,-376,-1950,897,-376,-1854,897],"vertslength":8,"tris":[3,0,1,1,2,3,7,4,5,5,6,7],"trislength":4,"triTopoly":[0,0,1,1],"baseVert":[0,4],"vertsCount":[4,4]`
++`,"baseTri":[0,2],"triCount":[2,2]},"links":{"poly":[],"cost":[],"type":[],"pos":[],"length":0}}],["2_5",{"tileId":"2_5","tx":2,"ty":5,"mesh":{"verts":[-376,-1438,391,-376,-1950,271,136,-1950,271,136,-1438,391,-376,-1854,897,-376,-1950,897,136,-1950,897,136,-1854,897],"vertslength":8,"polys":[0,3,4,7],"polyslength":2,"regions":[1,2],"neighbors":[[[0],[0],[0],[0]],[[0],[0],[0],[0]]]},"detail":{"verts":[-376,-1438,391,-376,-1950,273,136,-1950,273,136,-1438,391,-376,-1854,897,-376,-1950,897,136,-195`
++`0,897,136,-1854,897],"vertslength":8,"tris":[3,0,1,1,2,3,7,4,5,5,6,7],"trislength":4,"triTopoly":[0,0,1,1],"baseVert":[0,4],"vertsCount":[4,4],"baseTri":[0,2],"triCount":[2,2]},"links":{"poly":[],"cost":[],"type":[],"pos":[],"length":0}}],["3_5",{"tileId":"3_5","tx":3,"ty":5,"mesh":{"verts":[136,-1438,391,136,-1950,271,648,-1950,271,648,-1438,391,136,-1854,897,136,-1950,897,648,-1950,897,648,-1854,897],"vertslength":8,"polys":[0,3,4,7],"polyslength":2,"regions":[1,2],"neighbors":[[[0],[0],[0],[0`
++`]],[[0],[0],[0],[0]]]},"detail":{"verts":[136,-1438,391,136,-1950,273,648,-1950,273,648,-1438,391,136,-1854,897,136,-1950,897,648,-1950,897,648,-1854,897],"vertslength":8,"tris":[3,0,1,1,2,3,7,4,5,5,6,7],"trislength":4,"triTopoly":[0,0,1,1],"baseVert":[0,4],"vertsCount":[4,4],"baseTri":[0,2],"triCount":[2,2]},"links":{"poly":[],"cost":[],"type":[],"pos":[],"length":0}}],["4_5",{"tileId":"4_5","tx":4,"ty":5,"mesh":{"verts":[648,-1438,391,648,-1950,271,1160,-1950,354,1160,-1438,391,648,-1854,897,6`
++`48,-1950,897,952,-1950,897,952,-1854,897],"vertslength":8,"polys":[0,3,4,7],"polyslength":2,"regions":[1,2],"neighbors":[[[0],[0],[0],[0]],[[0],[0],[0],[0]]]},"detail":{"verts":[648,-1438,391,648,-1950,273,880.727294921875,-1950,273,1160,-1950,354,1160,-1600.9090576171875,355,1160,-1438,391,648,-1854,897,648,-1950,897,952,-1950,897,952,-1854,897],"vertslength":10,"tris":[2,3,4,2,4,5,0,1,2,0,2,5,9,6,7,7,8,9],"trislength":6,"triTopoly":[0,0,0,0,1,1],"baseVert":[0,6],"vertsCount":[6,4],"baseTri":[0`
++`,4],"triCount":[4,2]},"links":{"poly":[],"cost":[],"type":[],"pos":[],"length":0}}],["5_5",{"tileId":"5_5","tx":5,"ty":5,"mesh":{"verts":[1160,-1438,391,1160,-1950,357,1320,-1950,404,1320,-1438,404],"vertslength":4,"polys":[0,3],"polyslength":1,"regions":[1],"neighbors":[[[0],[0],[0],[0]]]},"detail":{"verts":[1160,-1438,391,1160,-1600.9090576171875,359,1160,-1950,359,1320,-1950,404,1320,-1438,404,1251.4285888671875,-1438,391],"vertslength":6,"tris":[5,0,1,4,5,1,1,2,3,1,3,4],"trislength":4,"triTo`
++`poly":[0,0,0,0],"baseVert":[0],"vertsCount":[6],"baseTri":[0],"triCount":[4]},"links":{"poly":[],"cost":[],"type":[],"pos":[],"length":0}}],["6_5",{"tileId":"6_5","tx":6,"ty":5,"mesh":{"verts":[],"vertslength":0,"polys":[],"polyslength":0,"regions":[],"neighbors":[]},"detail":{"verts":[],"vertslength":0,"tris":[],"trislength":0,"triTopoly":[],"baseVert":[],"vertsCount":[],"baseTri":[],"triCount":[]},"links":{"poly":[],"cost":[],"type":[],"pos":[],"length":0}}],["0_6",{"tileId":"0_6","tx":0,"ty":`
++`6,"mesh":{"verts":[-1392,-1382,406,-1392,-1438,406,-888,-1438,393,-888,-1382,405],"vertslength":4,"polys":[0,3],"polyslength":1,"regions":[1],"neighbors":[[[0],[0],[0],[0]]]},"detail":{"verts":[-1392,-1382,405,-1392,-1438,403,-1346.1817626953125,-1438,395,-888,-1438,395,-888,-1382,405],"vertslength":5,"tris":[0,1,2,2,3,4,0,2,4],"trislength":3,"triTopoly":[0,0,0],"baseVert":[0],"vertsCount":[5],"baseTri":[0],"triCount":[3]},"links":{"poly":[],"cost":[],"type":[],"pos":[],"length":0}}],["1_6",{"ti`
++`leId":"1_6","tx":1,"ty":6,"mesh":{"verts":[-888,-1382,405,-888,-1438,393,-376,-1438,393,-376,-1382,405],"vertslength":4,"polys":[0,3],"polyslength":1,"regions":[1],"neighbors":[[[0],[0],[0],[0]]]},"detail":{"verts":[-888,-1382,405,-888,-1438,395,-376,-1438,395,-376,-1382,405],"vertslength":4,"tris":[3,0,1,1,2,3],"trislength":2,"triTopoly":[0,0],"baseVert":[0],"vertsCount":[4],"baseTri":[0],"triCount":[2]},"links":{"poly":[],"cost":[],"type":[],"pos":[],"length":0}}],["2_6",{"tileId":"2_6","tx":2`
++`,"ty":6,"mesh":{"verts":[-376,-1382,405,-376,-1438,393,136,-1438,393,136,-1382,405],"vertslength":4,"polys":[0,3],"polyslength":1,"regions":[1],"neighbors":[[[0],[0],[0],[0]]]},"detail":{"verts":[-376,-1382,405,-376,-1438,395,136,-1438,395,136,-1382,405],"vertslength":4,"tris":[3,0,1,1,2,3],"trislength":2,"triTopoly":[0,0],"baseVert":[0],"vertsCount":[4],"baseTri":[0],"triCount":[2]},"links":{"poly":[],"cost":[],"type":[],"pos":[],"length":0}}],["3_6",{"tileId":"3_6","tx":3,"ty":6,"mesh":{"verts`
++`":[136,-1382,405,136,-1438,393,648,-1438,393,648,-1382,405],"vertslength":4,"polys":[0,3],"polyslength":1,"regions":[1],"neighbors":[[[0],[0],[0],[0]]]},"detail":{"verts":[136,-1382,405,136,-1438,395,648,-1438,395,648,-1382,405],"vertslength":4,"tris":[3,0,1,1,2,3],"trislength":2,"triTopoly":[0,0],"baseVert":[0],"vertsCount":[4],"baseTri":[0],"triCount":[2]},"links":{"poly":[],"cost":[],"type":[],"pos":[],"length":0}}],["4_6",{"tileId":"4_6","tx":4,"ty":6,"mesh":{"verts":[648,-1382,405,648,-1438`
++`,393,1160,-1438,393,1160,-1382,405],"vertslength":4,"polys":[0,3],"polyslength":1,"regions":[1],"neighbors":[[[0],[0],[0],[0]]]},"detail":{"verts":[648,-1382,405,648,-1438,395,1160,-1438,395,1160,-1382,405],"vertslength":4,"tris":[3,0,1,1,2,3],"trislength":2,"triTopoly":[0,0],"baseVert":[0],"vertsCount":[4],"baseTri":[0],"triCount":[2]},"links":{"poly":[],"cost":[],"type":[],"pos":[],"length":0}}],["5_6",{"tileId":"5_6","tx":5,"ty":6,"mesh":{"verts":[1160,-1382,405,1160,-1438,393,1320,-1438,404,`
++`1320,-1382,405],"vertslength":4,"polys":[0,3],"polyslength":1,"regions":[1],"neighbors":[[[0],[0],[0],[0]]]},"detail":{"verts":[1160,-1382,405,1160,-1438,395,1274.2857666015625,-1438,395,1320,-1438,404,1320,-1382,405],"vertslength":5,"tris":[2,3,4,0,1,2,0,2,4],"trislength":3,"triTopoly":[0,0,0],"baseVert":[0],"vertsCount":[5],"baseTri":[0],"triCount":[3]},"links":{"poly":[],"cost":[],"type":[],"pos":[],"length":0}}],["6_6",{"tileId":"6_6","tx":6,"ty":6,"mesh":{"verts":[],"vertslength":0,"polys":`
++`[],"polyslength":0,"regions":[],"neighbors":[]},"detail":{"verts":[],"vertslength":0,"tris":[],"trislength":0,"triTopoly":[],"baseVert":[],"vertsCount":[],"baseTri":[],"triCount":[]},"links":{"poly":[],"cost":[],"type":[],"pos":[],"length":0}}]]}`;
+    }
+}
+
+/**
+ * @module 导航网格/开放跨度
+ */
+
+/** 当前世界参数下的最大 span 数量（由世界尺寸与体素尺寸自动计算）。 */
+const totalspan = ((MESH_WORLD_SIZE_XY / MESH_CELL_SIZE_XY) + 1) * ((MESH_WORLD_SIZE_XY / MESH_CELL_SIZE_XY) + 1) * ((MESH_WORLD_SIZE_Z / MESH_TRACE_SIZE_Z) + 1);
+
+// SOA 结构 (Structure of Arrays) 内存布局优化
+// 按属性分离存储，提高缓存局部性，减少内存碎片
+/** 每个 span 的地板高度（体素单位），SOA 布局。 */
+const floor = new Int16Array(totalspan);
+/** 每个 span 的天花板高度（体素单位），SOA 布局。 */
+const ceiling = new Int16Array(totalspan);
+/** 链表指针——指向同列下一个 span 的索引。 */
+const next = new Uint32Array(totalspan);
+/** 每个 span 所属的区域 ID。 */
+const regionId = new Uint16Array(totalspan);
+/** 距离场值，用于腐蚀运算。 */
+const distance = new Uint16Array(totalspan);
+/** 降噪后的距离场值。 */
+const denoisedistance = new Uint16Array(totalspan);
+/** 每个 span 的 4 邻居索引（W, N, E, S），0 表示无邻居。 */
+const neighbor = new Uint32Array(totalspan * 4);
+/** 位图——标记 span 是否正在使用（1 bit = 1 span）。 */
+const use = new Uint8Array(Math.ceil(totalspan / 8));
+/** 距离场无穷大常量（0xFFFF）。 */
+const DISTANCE_INF = 0xFFFF;
+
+// 内存占用计算：
+// Int16Array: 2 bytes * totalspan
+// Int16Array: 2 bytes * totalspan
+// Uint32Array: 4 bytes * totalspan
+// Uint16Array: 2 bytes * totalspan
+// Uint16Array: 2 bytes * totalspan
+// Uint8Array: 1 byte * (totalspan/8)
+// ≈ 13 bytes per span (vs 40+ bytes with object fields)
+
+// ============ 纯函数式 API ============
+// 所有操作都直接基于 ID，无需创建对象，内存占用为 0
+/**
+ * Span 低级操作 API（SOA 结构）。
+ *
+ * 使用 Structure of Arrays 模式将 Span 属性存储在 TypedArray 中，
+ * 所有方法均为静态纯函数，通过 ID 直接读写，
+ * 内存占用约 13 bytes/span（对比对象方式 40+ bytes）。
+ *
+ * @navigationTitle Span 操作 API
+ */
+class OpenSpan{
+    /**
+     * 初始化一个 span
+     * @param {number} id 
+     * @param {number} m_floor 
+     * @param {number} m_ceiling 
+     */
+    static initSpan(id, m_floor, m_ceiling) {
+        floor[id] = m_floor;
+        ceiling[id] = m_ceiling;
+        next[id] = 0;
+        regionId[id] = 0;
+        distance[id] = 0;
+        denoisedistance[id]=0;
+        const base = id << 2;
+        neighbor[base] = 0;
+        neighbor[base + 1] = 0;
+        neighbor[base + 2] = 0;
+        neighbor[base + 3] = 0;
+        use[id >> 3] |= (1 << (id & 7));  // 设置 use 位
+    }
+
+    /**
+     * 获取 floor 值
+     * @param {number} id 
+     * @returns {number}
+     */
+    static getFloor(id) {
+        return floor[id];
+    }
+
+    /**
+     * 设置 floor 值
+     * @param {number} id 
+     * @param {number} value 
+     */
+    static setFloor(id, value) {
+        floor[id] = value;
+    }
+
+    /**
+     * 获取 ceiling 值
+     * @param {number} id 
+     * @returns {number}
+     */
+    static getCeiling(id) {
+        return ceiling[id];
+    }
+
+    /**
+     * 设置 ceiling 值
+     * @param {number} id 
+     * @param {number} value 
+     */
+    static setCeiling(id, value) {
+        ceiling[id] = value;
+    }
+
+    /**
+     * 获取下一个 span 的 ID
+     * @param {number} id 
+     * @returns {number} 0 表示没有下一个
+     */
+    static getNext(id) {
+        return next[id];
+    }
+
+    /**
+     * 设置下一个 span 的 ID
+     * @param {number} id 
+     * @param {number} nextId 
+     */
+    static setNext(id, nextId) {
+        next[id] = nextId;
+    }
+
+    /**
+     * 获取 use 状态
+     * @param {number} id 
+     * @returns {boolean}
+     */
+    static getUse(id) {
+        return (use[id >> 3] & (1 << (id & 7))) !== 0;
+    }
+
+    /**
+     * 设置 use 状态
+     * @param {number} id 
+     * @param {boolean} flag 
+     */
+    static setUse(id, flag) {
+        if (flag) {
+            use[id >> 3] |= (1 << (id & 7));
+        } else {
+            use[id >> 3] &= ~(1 << (id & 7));
+        }
+    }
+
+    /**
+     * 获取 region ID
+     * @param {number} id 
+     * @returns {number}
+     */
+    static getRegionId(id) {
+        return regionId[id];
+    }
+
+    /**
+     * 设置 region ID
+     * @param {number} id 
+     * @param {number} rid 
+     */
+    static setRegionId(id, rid) {
+        regionId[id] = rid;
+    }
+
+    /**
+     * 获取距离值
+     * @param {number} id 
+     * @returns {number}
+     */
+    static getDistance(id) {
+        const d = distance[id];
+        return d === DISTANCE_INF ? Infinity : d;
+    }
+
+    /**
+     * 设置距离值
+     * @param {number} id 
+     * @param {number} dist 
+     */
+    static setDistance(id, dist) {
+        if (!Number.isFinite(dist)) {
+            distance[id] = DISTANCE_INF;
+            return;
+        }
+
+        if (dist <= 0) {
+            distance[id] = 0;
+            return;
+        }
+
+        const clamped = Math.min(DISTANCE_INF - 1, Math.floor(dist));
+        distance[id] = clamped;
+    }
+
+    /**
+     * 获取距离值
+     * @param {number} id 
+     * @returns {number}
+     */
+    static getDenoiseDistance(id) {
+        const d = denoisedistance[id];
+        return d === DISTANCE_INF ? Infinity : d;
+    }
+
+    /**
+     * 设置距离值
+     * @param {number} id 
+     * @param {number} dist 
+     */
+    static setDenoiseDistance(id, dist) {
+        if (!Number.isFinite(dist)) {
+            denoisedistance[id] = DISTANCE_INF;
+            return;
+        }
+
+        if (dist <= 0) {
+            denoisedistance[id] = 0;
+            return;
+        }
+
+        const clamped = Math.min(DISTANCE_INF - 1, Math.floor(dist));
+        denoisedistance[id] = clamped;
+    }
+    /**
+     * 获取指定方向邻居 spanId
+     * @param {number} id
+     * @param {number} dir 0:W, 1:N, 2:E, 3:S
+     * @returns {number}
+     */
+    static getNeighbor(id, dir) {
+        return neighbor[(id << 2) + dir];
+    }
+
+    /**
+     * 设置指定方向邻居 spanId
+     * @param {number} id
+     * @param {number} dir 0:W, 1:N, 2:E, 3:S
+     * @param {number} neighborId
+     */
+    static setNeighbor(id, dir, neighborId) {
+        neighbor[(id << 2) + dir] = neighborId;
+    }
+
+    /**
+     * 清空 [startId, endId] 范围内的 span 数据
+     * @param {number} startId
+     * @param {number} endId
+     */
+    static clearRange(startId, endId) {
+        const s = Math.max(1, startId | 0);
+        const e = Math.max(s, endId | 0);
+        for (let id = s; id <= e; id++) {
+            floor[id] = 0;
+            ceiling[id] = 0;
+            next[id] = 0;
+            regionId[id] = 0;
+            distance[id] = 0;
+            denoisedistance[id]=0;
+            const base = id << 2;
+            neighbor[base] = 0;
+            neighbor[base + 1] = 0;
+            neighbor[base + 2] = 0;
+            neighbor[base + 3] = 0;
+            use[id >> 3] &= ~(1 << (id & 7));
+        }
+    }
+
+    /**
+     * 双向通行检查（id1 和 id2 之间能否通行）
+     * @param {number} id1 
+     * @param {number} id2 
+     * @param {number} maxStep 
+     * @param {number} agentHeight 
+     * @returns {boolean}
+     */
+    static canTraverseTo(id1, id2, maxStep = MAX_WALK_HEIGHT, agentHeight = AGENT_HEIGHT) {
+        // 检查 id2 是否在使用
+        if (!this.getUse(id2)) return false;
+        
+        // 高度差检查
+        if (Math.abs(floor[id2] - floor[id1]) > maxStep) {
+            return false;
+        }
+
+        // 检查两个 span 之间能否通行
+        const floorLevel = Math.max(floor[id1], floor[id2]);
+        const ceilLevel = Math.min(ceiling[id1], ceiling[id2]);
+
+        if (ceilLevel - floorLevel < agentHeight) {
+            return false;
+        }
+
+        return true;
+    }
+
+    /**
+     * 单向通行检查（从 id1 只能往上到 id2）
+     * @param {number} id1 
+     * @param {number} id2 
+     * @param {number} maxStep 
+     * @param {number} agentHeight 
+     * @returns {boolean}
+     */
+    static canTo(id1, id2, maxStep = MAX_WALK_HEIGHT, agentHeight = AGENT_HEIGHT) {
+        // 检查 id2 是否在使用
+        //if (!this.getUse(id2)) return false;
+        
+        // 只允许上升 maxStep 高度
+        if (floor[id2] - floor[id1] > maxStep) {
+            return false;
+        }
+
+        // 检查高度空间
+        const floorLevel = floor[id1];
+        const ceilLevel = ceiling[id2];
+
+        if (ceilLevel - floorLevel < agentHeight) {
+            return false;
+        }
+
+        return true;
+    }
+}
+
+/**
+ * @module 导航网格/开放高度场
+ */
+/**@typedef {import("cs_script/point_script").Vector} Vector */
+
+/**
+ * 开放高度场（体素化）。
+ *
+ * 将 3D 场景通过列式体素化转换为可行走 Span 链表。
+ * 支持坡度检测、边缘腐蚀（erode）和 Padding 标记。
+ * 是整个 Navmesh 构建管线的第一步。
+ *
+ * @navigationTitle 开放高度场
+ */
+class OpenHeightfield {
+    /**
+     * 创建指定 Tile 坐标和尺寸参数的开放高度场。
+     * @param {number} tx
+     * @param {number} ty
+     * @param {number} tileSize
+     * @param {number} fullGrid
+     * @param {number} tilePadding
+     */
+    constructor(tx, ty, tileSize, fullGrid, tilePadding) {
+        /** @type {number} Span 自增 ID 计数器，从 1 开始（0 表示链表终止） */
+        this.SPAN_ID = 1;
+
+        /** @type {number} 当前 Tile 的 X 索引 */
+        this.tx = tx;
+        /** @type {number} 当前 Tile 的 Y 索引 */
+        this.ty = ty;
+        /** @type {number} Tile 边长（体素单位） */
+        this.tileSize = tileSize;
+        /** @type {number} 世界网格总边长 */
+        this.fullGrid = fullGrid;
+        /** @type {number} Tile 边界填充宽度（体素单位） */
+        this.tilePadding = tilePadding;
+
+        this.coreMinX = tx * tileSize;
+        this.coreMinY = ty * tileSize;
+        this.coreMaxX = Math.min(fullGrid - 1, this.coreMinX + tileSize - 1);
+        this.coreMaxY = Math.min(fullGrid - 1, this.coreMinY + tileSize - 1);
+
+        this.buildMinX = Math.max(0, this.coreMinX - tilePadding);
+        this.buildMinY = Math.max(0, this.coreMinY - tilePadding);
+        this.buildMaxX = Math.min(fullGrid - 1, this.coreMaxX + tilePadding);
+        this.buildMaxY = Math.min(fullGrid - 1, this.coreMaxY + tilePadding);
+
+        this.localCoreMinX = this.coreMinX - this.buildMinX;
+        this.localCoreMinY = this.coreMinY - this.buildMinY;
+        this.localCoreMaxX = this.coreMaxX - this.buildMinX;
+        this.localCoreMaxY = this.coreMaxY - this.buildMinY;
+
+        this.baseX = this.buildMinX;
+        this.baseY = this.buildMinY;
+        this.gridX = this.buildMaxX - this.buildMinX + 1;
+        this.gridY = this.buildMaxY - this.buildMinY + 1;
+        this.tileCoreMinX = this.coreMinX;
+        this.tileCoreMaxX = this.coreMaxX + 1;
+        this.tileCoreMinY = this.coreMinY;
+        this.tileCoreMaxY = this.coreMaxY + 1;
+
+        this.cells = new Array(this.gridX);
+        for (let i = 0; i < this.gridX; i++) {
+            this.cells[i] = new Uint32Array(this.gridY);
+        }
+
+        this.mins = { x: -MESH_CELL_SIZE_XY / 2, y: -MESH_CELL_SIZE_XY / 2, z: -MESH_TRACE_SIZE_Z / 2 };
+        this.maxs = { x: MESH_CELL_SIZE_XY / 2, y: MESH_CELL_SIZE_XY / 2, z: MESH_TRACE_SIZE_Z / 2 };
+    }
+    /**
+     * 执行体素化。
+     *
+     * 遍历构建区域内运行列式射线检测，生成可行走 Span 链表，
+     * 然后执行边缘腐蚀和 Padding 标记。
+     */
+    init() {
+        const minZ = origin.z;
+        const maxZ = origin.z + MESH_WORLD_SIZE_Z;
+        for (let x = 0; x < this.gridX; x++) {
+            for (let y = 0; y < this.gridY; y++) {
+                const worldX = origin.x + (this.baseX + x) * MESH_CELL_SIZE_XY;
+                const worldY = origin.y + (this.baseY + y) * MESH_CELL_SIZE_XY;
+                this.cells[x][y] = this.voxelizeColumn(worldX, worldY, minZ, maxZ);
+            }
+
+        }
+        this.erode(MESH_ERODE_RADIUS);
+        this.markPaddingAsUnwalkable();
+    }
+
+    /**
+     * 对单列体素执行从顶到底的射线检测。
+     *
+     * 反复向下射线寻找地板，向上射线寻找天花板，
+     * 生成符合高度/坡度见条件的 OpenSpan 并插入链表。
+     *
+     * @param {number} wx 世界 X 坐标
+     * @param {number} wy 世界 Y 坐标
+     * @param {number} minZ 最低 Z 
+     * @param {number} maxZ 最高 Z
+     * @returns {number} 链表头 Span ID，0 表示空
+     */
+    voxelizeColumn(wx, wy, minZ, maxZ) {
+        let head = 0;  // 0 表示链表为空
+        let currentZ = maxZ;
+        const radius = MESH_TRACE_SIZE_Z / 2;
+
+        while (currentZ >= minZ + radius) {
+            //寻找地板 (floor)
+            const downStart = { x: wx, y: wy, z: currentZ };
+            const downEnd = { x: wx, y: wy, z: minZ };
+            const downTr = Instance.TraceBox({ mins: this.mins, maxs: this.maxs, start: downStart, end: downEnd, ignorePlayers: true });
+            if (!downTr || !downTr.didHit) break; // 下面没东西了，结束
+
+            const floorZ = downTr.end.z - radius;
+
+            //从地板向上寻找天花板 (ceiling)
+            const upStart = { x: wx, y: wy, z: downTr.end.z + 1 };
+            const upEnd = { x: wx, y: wy, z: maxZ };
+            const upTr = Instance.TraceBox({ mins: this.mins, maxs: this.maxs, start: upStart, end: upEnd, ignorePlayers: true });
+
+            let ceilingZ = maxZ;
+            if (upTr.didHit) ceilingZ = upTr.end.z + radius;
+
+            const floor = Math.round(floorZ - origin.z);
+            const ceiling = Math.round(ceilingZ - origin.z);
+
+            const slopeWalkable = this.isSlopeWalkableByNormal(downTr.normal);
+            if ((ceiling - floor) >= AGENT_HEIGHT && slopeWalkable) {
+                const newId = this.SPAN_ID++;
+                OpenSpan.initSpan(newId, floor, ceiling);
+
+                if (head === 0 || floor < OpenSpan.getFloor(head)) {
+                    OpenSpan.setNext(newId, head);
+                    head = newId;
+                } else {
+                    let curr = head;
+                    while (OpenSpan.getNext(curr) !== 0 && OpenSpan.getFloor(OpenSpan.getNext(curr)) < floor) {
+                        curr = OpenSpan.getNext(curr);
+                    }
+                    OpenSpan.setNext(newId, OpenSpan.getNext(curr));
+                    OpenSpan.setNext(curr, newId);
+                }
+            }
+
+            currentZ = floorZ - radius - 1;
+        }
+
+        return head;
+    }
+
+    /**
+     * 根据命中法线判断坡度是否可行走。
+     * @param {Vector} normal
+     * @returns {boolean}
+     */
+    isSlopeWalkableByNormal(normal) {
+        if (!normal) return false;
+
+        const len = Math.hypot(normal.x, normal.y, normal.z);
+        if (len <= 1e-6) return false;
+
+        const upDot = Math.max(-1, Math.min(1, normal.z / len));
+        const slopeDeg = Math.acos(upDot) * 180 / Math.PI;
+        return slopeDeg <= MAX_SLOPE;
+    }
+    /**
+     * 根据半径腐蚀可行走区域。
+     *
+     * 通过距离场传播将边缘附近的 Span 标记为不可行走，
+     * 避免怪物贴墙行走。
+     *
+     * @param {number} radius 腐蚀半径（体素单位）
+     */
+    erode(radius) {
+        if (radius <= 0) return;
+
+        // 1. 初始化距离场，默认给一个很大的值
+        // 使用 Uint16Array 节省内存，索引为 span id
+        const distances = new Uint16Array(this.SPAN_ID + 1).fill(65535);
+        const dirs = [{ dx: -1, dy: 0 }, { dx: 0, dy: 1 }, { dx: 1, dy: 0 }, { dx: 0, dy: -1 }];
+
+        // 2. 标记边界点（距离为 0）
+        for (let i = 0; i < this.gridX; i++) {
+            for (let j = 0; j < this.gridY; j++) {
+                let spanId = this.cells[i][j];
+                while (spanId !== 0) {
+                    if (OpenSpan.getUse(spanId)) {
+                        let isBoundary = false;
+                        for (let d = 0; d < 4; d++) {
+                            const nx = i + dirs[d].dx;
+                            const ny = j + dirs[d].dy;
+
+                            // 触碰地图边界或没有邻居，即为边界
+                            if (nx < 0 || ny < 0 || nx >= this.gridX || ny >= this.gridY) {
+                                isBoundary = true;
+                                break;
+                            }
+
+                            let hasNeighborInDir = false;
+                            let nspanId = this.cells[nx]?.[ny] || 0;
+                            while (nspanId !== 0) {
+                                if (OpenSpan.getUse(nspanId)) {
+                                    if (OpenSpan.canTraverseTo(spanId, nspanId)) {
+                                        hasNeighborInDir = true;
+                                        break;
+                                    }
+                                }
+                                nspanId = OpenSpan.getNext(nspanId);
+                            }
+
+                            // 任一方向缺失可达邻居，就视为边界
+                            if (!hasNeighborInDir) {
+                                isBoundary = true;
+                                break;
+                            }
+                        }
+                        if (isBoundary) distances[spanId] = 0;
+                    }
+                    spanId = OpenSpan.getNext(spanId);
+                }
+            }
+        }
+
+        // 3. 两次遍历计算精确距离场 (Pass 1: Top-Left to Bottom-Right)
+        this._passDist(distances, true);
+        // (Pass 2: Bottom-Right to Top-Left)
+        this._passDist(distances, false);
+
+        // 4. 根据 AGENT_RADIUS 删除不合格的 Span
+        for (let i = 0; i < this.gridX; i++) {
+            for (let j = 0; j < this.gridY; j++) {
+                let spanId = this.cells[i][j];
+                while (spanId !== 0) {
+                    if (OpenSpan.getUse(spanId)) {
+                        // 如果距离边界太近，则剔除
+                        if (distances[spanId] < radius) {
+                            OpenSpan.setUse(spanId, false);
+                        }
+                    }
+                    spanId = OpenSpan.getNext(spanId);
+                }
+            }
+        }
+    }
+
+    /**
+     * 内部辅助：距离场传递
+     * @param {Uint16Array} distances
+     * @param {boolean} forward
+     */
+    _passDist(distances, forward) {
+        const dirs = [{ dx: -1, dy: 0 }, { dx: 0, dy: 1 }, { dx: 1, dy: 0 }, { dx: 0, dy: -1 }];
+        const startX = forward ? 0 : this.gridX - 1;
+        const endX = forward ? this.gridX : -1;
+        const step = forward ? 1 : -1;
+
+        for (let i = startX; i !== endX; i += step) {
+            for (let j = forward ? 0 : this.gridY - 1; j !== (forward ? this.gridY : -1); j += step) {
+                let spanId = this.cells[i][j];
+                while (spanId !== 0) {
+                    if (OpenSpan.getUse(spanId)) {
+                        for (let d = 0; d < 4; d++) {
+                            const nx = i + dirs[d].dx;
+                            const ny = j + dirs[d].dy;
+                            if (nx < 0 || ny < 0 || nx >= this.gridX || ny >= this.gridY) continue;
+
+                            let nspanId = this.cells[nx]?.[ny] || 0;
+                            while (nspanId !== 0) {
+                                if (OpenSpan.getUse(nspanId)) {
+                                    if (OpenSpan.canTraverseTo(spanId, nspanId)) {
+                                        // 核心公式：当前点距离 = min(当前距离, 邻居距离 + 1)
+                                        distances[spanId] = Math.min(distances[spanId], distances[nspanId] + 1);
+                                    }
+                                }
+                                nspanId = OpenSpan.getNext(nspanId);
+                            }
+                        }
+                    }
+                    spanId = OpenSpan.getNext(spanId);
+                }
+            }
+        }
+    }
+
+    /**
+     * 仅让 tile core 参与区域和轮廓生成，padding 只提供体素上下文
+     */
+    markPaddingAsUnwalkable() {
+        for (let i = 0; i < this.gridX; i++) {
+            for (let j = 0; j < this.gridY; j++) {
+                if (i >= this.localCoreMinX && i <= this.localCoreMaxX && j >= this.localCoreMinY && j <= this.localCoreMaxY) continue;
+
+                let spanId = this.cells[i][j];
+                while (spanId !== 0) {
+                    OpenSpan.setUse(spanId, false);
+                    spanId = OpenSpan.getNext(spanId);
+                }
+            }
+        }
+    }
+
+    debug(duration = 30) {
+        for (let i = 0; i < this.gridX; i++) {
+            for (let j = 0; j < this.gridY; j++) {
+                let spanId = this.cells[i][j];
+                while (spanId !== 0) {
+                    if (OpenSpan.getUse(spanId)) {
+                        const c = {
+                            r: 255,
+                            g: 255,
+                            b: 0
+                        };
+                        Instance.DebugSphere({
+                            center: {
+                                x: origin.x + (this.baseX + i) * MESH_CELL_SIZE_XY,
+                                y: origin.y + (this.baseY + j) * MESH_CELL_SIZE_XY,
+                                z: origin.z + OpenSpan.getFloor(spanId) * MESH_CELL_SIZE_Z
+                            },
+                            radius: 3,
+                            duration,
+                            color: c
+                        });
+                    }
+                    spanId = OpenSpan.getNext(spanId);
+                }
+            }
+        }
+    }
+}
+
+/**
+ * @module 导航网格/区域生成器
+ */
+
+/**
+ * 区域生成器。
+ *
+ * 通过分水岭算法将可行走 Span 分割为不同区域：
+ * 1. 双向扫描构建距离场。
+ * 2. 分水岭洪填分配区域 ID。
+ * 3. 合并小区域 / 过滤噪声。
+ * 输出供 ContourBuilder 使用。
+ *
+ * @navigationTitle 区域生成器
+ */
+class RegionGenerator {
+    /**
+     * 初始化区域生成器，绑定开放高度场数据。
+     * @param {OpenHeightfield} openHeightfield
+     */
+    constructor(openHeightfield) {
+        /** @type {Uint32Array[]} 开放高度场单元格数组（Span 链表头） */
+        this.hf = openHeightfield.cells;
+        /** @type {number} 构建区域 X 基址偏移 */
+        this.baseX = openHeightfield.baseX;
+        /** @type {number} 构建区域 Y 基址偏移 */
+        this.baseY = openHeightfield.baseY;
+
+        /** @type {number} 构建区域 X 方向网格数 */
+        this.gridX = openHeightfield.gridX;
+        /** @type {number} 构建区域 Y 方向网格数 */
+        this.gridY = openHeightfield.gridY;
+
+        /** @type {number} 区域 ID 自增计数器 */
+        this.nextRegionId = 1;
+    }
+
+    /**
+     * 执行区域生成全流程。
+     *
+     * 依次构建邻居关系、距离场、分水岭区域，最后合并过小区域。
+     */
+    init() {
+        this.buildCompactNeighbors();
+        this.buildDistanceField();
+        this.buildRegionsWatershed();
+        this.mergeAndFilterRegions();
+    }
+    /**
+     * 为每个 Span 建立 4 方向邻居关系。
+     */
+    buildCompactNeighbors() {
+        const dirs = [
+            { dx: -1, dy: 0 },
+            { dx: 0, dy: 1 },
+            { dx: 1, dy: 0 },
+            { dx: 0, dy: -1 }
+        ];
+
+        for (let x = 0; x < this.gridX; x++) {
+            for (let y = 0; y < this.gridY; y++) {
+                let spanId = this.hf[x][y];
+                while (spanId !== 0) {
+                    if(OpenSpan.getUse(spanId))
+                    {
+                        for (let d = 0; d < 4; d++) {
+                            const nx = x + dirs[d].dx;
+                            const ny = y + dirs[d].dy;
+                            if (nx < 0 || ny < 0 || nx >= this.gridX || ny >= this.gridY) {
+                                OpenSpan.setNeighbor(spanId, d, 0);
+                                continue;
+                            }
+
+                            let best = 0;
+                            let bestDiff = Infinity;
+                            let nspanId = this.hf[nx][ny];
+
+                            while (nspanId !== 0) {
+                                if(OpenSpan.getUse(nspanId))
+                                {
+                                    if (OpenSpan.canTraverseTo(spanId, nspanId)) {
+                                        const diff = Math.abs(OpenSpan.getFloor(spanId) - OpenSpan.getFloor(nspanId));
+                                        if (diff < bestDiff) {
+                                            best = nspanId;
+                                            bestDiff = diff;
+                                        }
+                                    }
+                                }
+                                nspanId = OpenSpan.getNext(nspanId);
+                            }
+
+                            OpenSpan.setNeighbor(spanId, d, best);
+                        }
+                    }
+                    spanId = OpenSpan.getNext(spanId);
+                }
+            }
+        }
+    }
+
+    /**
+     * 获取对角线邻居。
+     * 例如：西北 (NW) = 先向西(0)再向北(1)
+     * @param {number} spanId 
+     * @param {number} dir1 
+     * @param {number} dir2 
+     * @returns {number} 邻居spanId，0表示无邻居
+     */
+    getDiagonalNeighbor(spanId, dir1, dir2) {
+        const first = OpenSpan.getNeighbor(spanId, dir1);
+        if (first !== 0) {
+            const diagonal = OpenSpan.getNeighbor(first, dir2);
+            if (diagonal !== 0) return diagonal;
+        }
+
+        const second = OpenSpan.getNeighbor(spanId, dir2);
+        if (second !== 0) {
+            return OpenSpan.getNeighbor(second, dir1);
+        }
+
+        return 0;
+    }
+    //构建距离场
+    buildDistanceField() {
+        // 1. 初始化：边界设为0，内部设为无穷大
+        for (let x = 0; x < this.gridX; x++) {
+            for (let y = 0; y < this.gridY; y++) {
+                let spanId = this.hf[x][y];
+                while (spanId !== 0) {
+                    if(OpenSpan.getUse(spanId))
+                    {
+                        // 如果任意一个邻居缺失，说明是边界
+                        OpenSpan.setDistance(spanId, this.isBorderSpan(spanId) ? 0 : Infinity);
+                    }
+                    spanId = OpenSpan.getNext(spanId);
+                }
+            }
+        }
+
+        // 第一遍扫描：从左下到右上
+        // 西(0)、西南(0+3)、南(3)、东南(3+2)
+        for (let y = 0; y < this.gridY; y++) {
+            for (let x = 0; x < this.gridX; x++) {
+                let spanId = this.hf[x][y];
+                while (spanId !== 0) {
+                    if(OpenSpan.getUse(spanId))
+                    {
+                        if (OpenSpan.getDistance(spanId) > 0) {
+                            // 西
+                            let n = OpenSpan.getNeighbor(spanId, 0);
+                            if (n !== 0) OpenSpan.setDistance(spanId, Math.min(OpenSpan.getDistance(spanId), OpenSpan.getDistance(n) + 2));
+                            // 西南
+                            let nd = this.getDiagonalNeighbor(spanId, 0, 3);
+                            if (nd !== 0) OpenSpan.setDistance(spanId, Math.min(OpenSpan.getDistance(spanId), OpenSpan.getDistance(nd) + 3));
+                            // 南
+                            n = OpenSpan.getNeighbor(spanId, 3);
+                            if (n !== 0) OpenSpan.setDistance(spanId, Math.min(OpenSpan.getDistance(spanId), OpenSpan.getDistance(n) + 2));
+                            // 东南
+                            nd = this.getDiagonalNeighbor(spanId, 3, 2);
+                            if (nd !== 0) OpenSpan.setDistance(spanId, Math.min(OpenSpan.getDistance(spanId), OpenSpan.getDistance(nd) + 3));
+                        }
+                    }
+                    spanId = OpenSpan.getNext(spanId);
+                }
+            }
+        }
+
+        // 第二遍扫描：从右上到左下
+        // 东(2)、东北(2+1)、北(1)、西北(1+0)
+        for (let y = this.gridY - 1; y >= 0; y--) {
+            for (let x = this.gridX - 1; x >= 0; x--) {
+                let spanId = this.hf[x][y];
+                while (spanId !== 0) {
+                    if(OpenSpan.getUse(spanId))
+                    {
+                        if (OpenSpan.getDistance(spanId) > 0) {
+                            // 东
+                            let n = OpenSpan.getNeighbor(spanId, 2);
+                            if (n !== 0) OpenSpan.setDistance(spanId, Math.min(OpenSpan.getDistance(spanId), OpenSpan.getDistance(n) + 2));
+                            // 东北
+                            let nd = this.getDiagonalNeighbor(spanId, 2, 1);
+                            if (nd !== 0) OpenSpan.setDistance(spanId, Math.min(OpenSpan.getDistance(spanId), OpenSpan.getDistance(nd) + 3));
+                            // 北
+                            n = OpenSpan.getNeighbor(spanId, 1);
+                            if (n !== 0) OpenSpan.setDistance(spanId, Math.min(OpenSpan.getDistance(spanId), OpenSpan.getDistance(n) + 2));
+                            // 西北
+                            let nd2 = this.getDiagonalNeighbor(spanId, 1, 0);
+                            if (nd2 !== 0) OpenSpan.setDistance(spanId, Math.min(OpenSpan.getDistance(spanId), OpenSpan.getDistance(nd2) + 3));
+                        }
+                    }
+                    spanId = OpenSpan.getNext(spanId);
+                }
+            }
+        }
+        // 第二遍扫描后，distance 场已经稳定了，可以用来做降噪了
+        for (let x = 0; x < this.gridX; x++) {
+            for (let y = 0; y < this.gridY; y++) {
+                let spanId = this.hf[x][y];
+                while (spanId !== 0) {
+                    if(OpenSpan.getUse(spanId))
+                    {
+                        let all=OpenSpan.getDistance(spanId);
+                        let n = OpenSpan.getNeighbor(spanId, 0);
+                        if (n !== 0)all+=OpenSpan.getDistance(n);
+                        else all+=OpenSpan.getDistance(spanId);
+                        n = OpenSpan.getNeighbor(spanId, 1);
+                        if (n !== 0)all+=OpenSpan.getDistance(n);
+                        else all+=OpenSpan.getDistance(spanId);
+                        n = OpenSpan.getNeighbor(spanId, 2);
+                        if (n !== 0)all+=OpenSpan.getDistance(n);
+                        else all+=OpenSpan.getDistance(spanId);
+                        n = OpenSpan.getNeighbor(spanId, 3);
+                        if (n !== 0)all+=OpenSpan.getDistance(n);
+                        else all+=OpenSpan.getDistance(spanId);
+
+                        n = this.getDiagonalNeighbor(spanId, 0,3);
+                        if (n !== 0)all+=OpenSpan.getDistance(n);
+                        else all+=OpenSpan.getDistance(spanId);
+                        n = this.getDiagonalNeighbor(spanId, 0,1);
+                        if (n !== 0)all+=OpenSpan.getDistance(n);
+                        else all+=OpenSpan.getDistance(spanId);
+
+                        n = this.getDiagonalNeighbor(spanId, 2,3);
+                        if (n !== 0)all+=OpenSpan.getDistance(n);
+                        else all+=OpenSpan.getDistance(spanId);
+                        n = this.getDiagonalNeighbor(spanId, 2,1);
+                        if (n !== 0)all+=OpenSpan.getDistance(n);
+                        else all+=OpenSpan.getDistance(spanId);
+
+                        // 如果任意一个邻居缺失，说明是边界
+                        OpenSpan.setDenoiseDistance(spanId, all/9);
+                    }
+                    spanId = OpenSpan.getNext(spanId);
+                }
+            }
+        }
+    }
+
+    /**
+     * 是否是边界span
+     * @param {number} spanId
+     */
+    isBorderSpan(spanId) {
+        for (let d = 0; d < 4; d++) {
+            if (OpenSpan.getNeighbor(spanId, d) === 0) return true;
+        }
+        return false;
+    }
+
+    //洪水扩张
+    buildRegionsWatershed() {
+        // 1) 按 denoiseDistance 收集所有可用 span，并重置 regionId
+        //    distBuckets: 下标=距离值，value=该距离上的 span 列表
+        /** @type {number[][]} */
+        const distBuckets = [];
+        let maxDist = 0;
+
+        for (let x = 0; x < this.gridX; x++) {
+            for (let y = 0; y < this.gridY; y++) {
+                let spanId = this.hf[x][y];
+                while (spanId !== 0) {
+                    if(OpenSpan.getUse(spanId))
+                    {
+                        OpenSpan.setRegionId(spanId, 0);
+                        const dist = OpenSpan.getDenoiseDistance(spanId);
+                        if (Number.isFinite(dist) && dist >= 0) {
+                            const d = Math.floor(dist);
+                            if (!distBuckets[d]) distBuckets[d] = [];
+                            distBuckets[d].push(spanId);
+                            if (d > maxDist) maxDist = d;
+                        }
+                    }
+                    spanId = OpenSpan.getNext(spanId);
+                }
+            }
+        }
+
+        // 2) 生成“每隔2个距离一个批次”的批次列表（从大到小）
+        //    这里的阈值计算会自然形成：当 maxDist 为偶数时，首批包含 d-2/d-1/d
+        /** @type {number[][]} */
+        const batches = [];
+        let coveredMin = maxDist + 1;
+        let level = (maxDist + 1) & -2;
+
+        while (coveredMin > 0) {
+            const threshold = Math.max(level - 2, 0);
+            const batch = [];
+
+            for (let dist = coveredMin - 1; dist >= threshold; dist--) {
+                const list = distBuckets[dist];
+                if (list && list.length > 0) batch.push(...list);
+            }
+
+            if (batch.length > 0) batches.push(batch);
+
+            coveredMin = threshold;
+            level = Math.max(level - 2, 0);
+        }
+
+        // 3) 逐批处理（从高距离到低距离）
+        for (const batch of batches) {
+            // batchSet 用于 O(1) 判断邻居是否仍在当前批次内
+            const batchSet = new Set(batch);
+
+            // queue 是“旧水位”的广度扩张队列（BFS）
+            // 只装入已经被赋予 region 的节点，向同批次未赋值节点扩散
+            const queue = [];
+
+            // 3.1 先尝试让本批次节点接入已有 region（来自历史批次或已处理节点）
+            for (const spanId of batch) {
+                if (OpenSpan.getRegionId(spanId) !== 0) {
+                    queue.push(spanId);
+                    continue;
+                }
+
+                let bestRegion = 0;
+                let maxNeighborDist = -1;
+
+                // 从4邻域中挑一个“最靠内”（距离更大）的已有 region 作为接入目标
+                for (let d = 0; d < 4; d++) {
+                    const n = OpenSpan.getNeighbor(spanId, d);
+                    if (n === 0) continue;
+
+                    const neighborRegion = OpenSpan.getRegionId(n);
+                    if (neighborRegion === 0) continue;
+
+                    const neighborDist = OpenSpan.getDenoiseDistance(n);
+                    if (neighborDist > maxNeighborDist) {
+                        maxNeighborDist = neighborDist;
+                        bestRegion = neighborRegion;
+                    }
+                }
+
+                if (bestRegion !== 0) {
+                    OpenSpan.setRegionId(spanId, bestRegion);
+                    queue.push(spanId);
+                }
+            }
+
+            // 3.2 旧水位 BFS：在当前批次内，把已接入的 region 尽量向外扩散
+            for (let q = 0; q < queue.length; q++) {
+                const current = queue[q];
+                const rid = OpenSpan.getRegionId(current);
+
+                for (let d = 0; d < 4; d++) {
+                    const n = OpenSpan.getNeighbor(current, d);
+                    if (n === 0) continue;
+                    if (!batchSet.has(n)) continue;
+                    if (OpenSpan.getRegionId(n) !== 0) continue;
+
+                    OpenSpan.setRegionId(n, rid);
+                    queue.push(n);
+                }
+            }
+
+            // 3.3 对仍未覆盖的节点创建新水位（新 region），并立即 DFS 泛洪
+            for (const spanId of batch) {
+                if (OpenSpan.getRegionId(spanId) !== 0) continue;
+
+                const rid = this.nextRegionId++;
+                OpenSpan.setRegionId(spanId, rid);
+
+                // stack 是“新水位”深度扩张栈（DFS）
+                const stack = [spanId];
+                while (stack.length > 0) {
+                    const current = stack.pop();
+                    if (current === undefined) break;
+
+                    for (let d = 0; d < 4; d++) {
+                        const n = OpenSpan.getNeighbor(current, d);
+                        if (n === 0) continue;
+                        if (!batchSet.has(n)) continue;
+                        if (OpenSpan.getRegionId(n) !== 0) continue;
+
+                        OpenSpan.setRegionId(n, rid);
+                        stack.push(n);
+                    }
+                }
+            }
+        }
+    }
+    //合并过滤小region
+    mergeAndFilterRegions() {
+        /**@type {Map<number,number[]>} */
+        const regionSpans = new Map();
+
+        //统计每个region包含的span
+        for (let x = 0; x < this.gridX; x++) {
+            for (let y = 0; y < this.gridY; y++) {
+                let spanId = this.hf[x][y];
+                while (spanId !== 0) {
+                    if(OpenSpan.getUse(spanId))
+                    {
+                        if (OpenSpan.getRegionId(spanId) > 0) {
+                            if (!regionSpans.has(OpenSpan.getRegionId(spanId))) regionSpans.set(OpenSpan.getRegionId(spanId), []);
+                            regionSpans.get(OpenSpan.getRegionId(spanId))?.push(spanId);
+                        }
+                    }
+                    spanId = OpenSpan.getNext(spanId);
+                }
+            }
+        }
+        //合并过小的region
+        for (const [id, spans] of regionSpans) {
+            if (spans.length >= REGION_MERGE_AREA) continue;
+            const neighbors = new Map();
+            for (const spanId of spans) {
+                for (let d = 0; d < 4; d++) {
+                    const n = OpenSpan.getNeighbor(spanId, d);
+                    if (n !== 0 && OpenSpan.getRegionId(n) !== id) {
+                        neighbors.set(
+                            OpenSpan.getRegionId(n),
+                            (neighbors.get(OpenSpan.getRegionId(n)) ?? 0) + 1
+                        );
+                    }
+                }
+            }
+
+            let best = 0;
+            let bestCount = 0;
+            for (const [nid, count] of neighbors) {
+                if (count > bestCount) {
+                    best = nid;
+                    bestCount = count;
+                }
+            }
+
+            if (best > 0) {
+                for (const spanId of spans) {
+                    OpenSpan.setRegionId(spanId, best);
+                    regionSpans.get(OpenSpan.getRegionId(spanId))?.push(spanId);
+                }
+                regionSpans.set(id, []);
+            }
+        }
+        //统计每个region包含的span
+        regionSpans.clear();
+        for (let x = 0; x < this.gridX; x++) {
+            for (let y = 0; y < this.gridY; y++) {
+                let spanId = this.hf[x][y];
+                while (spanId !== 0) {
+                    if(OpenSpan.getUse(spanId))
+                    {
+                        if (OpenSpan.getRegionId(spanId) > 0) {
+                            if (!regionSpans.has(OpenSpan.getRegionId(spanId))) regionSpans.set(OpenSpan.getRegionId(spanId), []);
+                            regionSpans.get(OpenSpan.getRegionId(spanId))?.push(spanId);
+                        }
+                    }
+                    spanId = OpenSpan.getNext(spanId);
+                }
+            }
+        }
+        //忽略过小的region
+        for (const [id, spans] of regionSpans) {
+            if (spans.length >= REGION_MIN_AREA) continue;
+            for (const spanId of spans) {
+                if (OpenSpan.getRegionId(spanId) == id) OpenSpan.setRegionId(spanId, 0);
+            }
+        }
+    }
+    /**
+     * Debug: 绘制 Region（按 regionId 上色）
+     * @param {number} duration
+     */
+    debugDrawRegions(duration = 5) {
+        const colorCache = new Map();
+
+        const randomColor = (/** @type {number} */ id) => {
+            if (!colorCache.has(id)) {
+                colorCache.set(id, {
+                    r: (id * 97) % 255,
+                    g: (id * 57) % 255,
+                    b: (id * 17) % 255
+                });
+            }
+            return colorCache.get(id);
+        };
+
+        for (let x = 0; x < this.gridX; x++) {
+            for (let y = 0; y < this.gridY; y++) {
+                let spanId = this.hf[x][y];
+                while (spanId !== 0) {
+                    if(OpenSpan.getUse(spanId))
+                    {
+                        if (OpenSpan.getRegionId(spanId) > 0) {
+                            const c = randomColor(OpenSpan.getRegionId(spanId));
+
+                            const center = {
+                                x: origin.x + (this.baseX + x + 0.5) * MESH_CELL_SIZE_XY,
+                                y: origin.y + (this.baseY + y + 0.5) * MESH_CELL_SIZE_XY,
+                                z: origin.z + OpenSpan.getFloor(spanId) * MESH_CELL_SIZE_Z
+                            };
+
+                            Instance.DebugSphere({
+                                center,
+                                radius: 3,
+                                color: c,
+                                duration
+                            });
+                        }
+                    }
+                    spanId = OpenSpan.getNext(spanId);
+                }
+            }
+        }
+    }
+    /**
+     * Debug: 绘制 Distance Field（亮度 = 距离）
+     */
+    debugDrawDistance(duration = 5) {
+        let maxDist = 0;
+
+        for (let x = 0; x < this.gridX; x++) {
+            for (let y = 0; y < this.gridY; y++) {
+                let spanId = this.hf[x][y];
+                while (spanId !== 0) {
+                    if(OpenSpan.getUse(spanId))
+                    {
+                        maxDist = Math.max(maxDist, OpenSpan.getDistance(spanId));
+                    }
+                    spanId = OpenSpan.getNext(spanId);
+                }
+            }
+        }
+
+        for (let x = 0; x < this.gridX; x++) {
+            for (let y = 0; y < this.gridY; y++) {
+                let spanId = this.hf[x][y];
+                while (spanId !== 0) {
+                    if(OpenSpan.getUse(spanId))
+                    {
+                        if (OpenSpan.getDistance(spanId) < Infinity) {
+                            const t = OpenSpan.getDistance(spanId) / maxDist;
+                            const c = {
+                                r: Math.floor(255 * t),
+                                g: Math.floor(255 * (1 - t)),
+                                b: 0
+                            };
+
+                            Instance.DebugSphere({
+                                center: {
+                                    x: origin.x + (this.baseX + x) * MESH_CELL_SIZE_XY,
+                                    y: origin.y + (this.baseY + y) * MESH_CELL_SIZE_XY,
+                                    z: origin.z + OpenSpan.getFloor(spanId) * MESH_CELL_SIZE_Z
+                                },
+                                radius: 3,
+                                color: c,
+                                duration
+                            });
+                        }
+                    }
+                    spanId = OpenSpan.getNext(spanId);
+                }
+            }
+        }
+    }
+
+}
+
+/**
+ * @module 导航网格/轮廓构建
+ */
+
+/**
+ * 轮廓构建器。
+ *
+ * 将 OpenHeightfield 的可行走 Span 转换为多边形轮廓，
+ * 为 PolyMeshBuilder 提供输入。
+ * 流程：构建紧凑邻居 → 追踪轮廓 → 简化 → 拆分长边。
+ *
+ * @navigationTitle 轮廓构建器
+ */
+class ContourBuilder {
+    /**
+     * 初始化轮廓构建器，绑定开放高度场数据。
+     * @param {OpenHeightfield} hf
+     */
+    constructor(hf) {
+        /** @type {boolean} 构建过程中是否发生错误 */
+        this.error = false;
+        /** @type {number[][]} 开放高度场单元格数组（Span 链表头） */
+        this.hf = hf.cells;
+        /** @type {number} X 方向网格数 */
+        this.gridX = hf.gridX;
+        /** @type {number} Y 方向网格数 */
+        this.gridY = hf.gridY;
+        /** @type {number} X 基址偏移 */
+        this.baseX = hf.baseX;
+        /** @type {number} Y 基址偏移 */
+        this.baseY = hf.baseY;
+        /** @type {number} Tile 核心区 X 最小值 */
+        this.tileCoreMinX = hf.tileCoreMinX;
+        /** @type {number} Tile 核心区 X 最大值 */
+        this.tileCoreMaxX = hf.tileCoreMaxX;
+        /** @type {number} Tile 核心区 Y 最小值 */
+        this.tileCoreMinY = hf.tileCoreMinY;
+        /** @type {number} Tile 核心区 Y 最大值 */
+        this.tileCoreMaxY = hf.tileCoreMaxY;
+
+        /** @type {Contour[][]} 按区域 ID 分组的轮廓数组（外轮廓 + 内孔） */
+        this.contours = [];
+    }
+
+    /**
+     * 为所有可行走 Span 建立紧凑四方向邻居索引。
+     *
+     * 遍历每个 cell 列的每个可用 Span，在四个方向上找到高度差最小且可通行的
+     * 相邻 Span，将结果写入 OpenSpan 的邻居槽位，供后续轮廓追踪直接查询。
+     */
+    buildCompactNeighbors() {
+        const dirs = [
+            { dx: -1, dy: 0 },
+            { dx: 0, dy: 1 },
+            { dx: 1, dy: 0 },
+            { dx: 0, dy: -1 }
+        ];
+
+        for (let x = 0; x < this.gridX; x++) {
+            for (let y = 0; y < this.gridY; y++) {
+                let spanId = this.hf[x][y];
+                while (spanId !== 0) {
+                    if (OpenSpan.getUse(spanId)) {
+                        for (let d = 0; d < 4; d++) {
+                            const nx = x + dirs[d].dx;
+                            const ny = y + dirs[d].dy;
+                            if (nx < 0 || ny < 0 || nx >= this.gridX || ny >= this.gridY) {
+                                OpenSpan.setNeighbor(spanId, d, 0);
+                                continue;
+                            }
+
+                            let best = 0;
+                            let bestDiff = Infinity;
+                            let nspanId = this.hf[nx][ny];
+                            while (nspanId !== 0) {
+                                if (OpenSpan.getUse(nspanId) && OpenSpan.canTraverseTo(spanId, nspanId)) {
+                                    const diff = Math.abs(OpenSpan.getFloor(spanId) - OpenSpan.getFloor(nspanId));
+                                    if (diff < bestDiff) {
+                                        best = nspanId;
+                                        bestDiff = diff;
+                                    }
+                                }
+                                nspanId = OpenSpan.getNext(nspanId);
+                            }
+                            OpenSpan.setNeighbor(spanId, d, best);
+                        }
+                    }
+                    spanId = OpenSpan.getNext(spanId);
+                }
+            }
+        }
+    }
+
+    /**
+     * 判断指定 Span 在某方向上是否为区域边界边。
+     *
+     * 无邻居或邻居所属 Region 不同时视为边界，轮廓追踪会在这些边上输出顶点。
+     * @param {number} spanId - 当前 Span ID
+     * @param {number} dir - 方向索引（0-3 对应 -X/+Y/+X/-Y）
+     * @returns {boolean} 是否为边界边
+     */
+    isBoundaryEdge(spanId, dir) {
+        const n = OpenSpan.getNeighbor(spanId, dir);
+        if (n === 0) return true;
+        return OpenSpan.getRegionId(n) !== OpenSpan.getRegionId(spanId);
+    }
+    /**
+     * 获取指定方向邻居 Span 所属的 Region ID。
+     *
+     * 若该方向无邻居则返回 0，用于轮廓追踪时记录每条边对面的区域标识。
+     * @param {number} spanId - 当前 Span ID
+     * @param {number} dir - 方向索引
+     * @returns {number} 邻居的 Region ID，无邻居时为 0
+     */
+    getNeighborregionid(spanId, dir) {
+        const n = OpenSpan.getNeighbor(spanId, dir);
+        if (n !== 0) return OpenSpan.getRegionId(n);
+        else return 0;
+    }
+    /**
+     * 生成边的唯一字符串键，用于 visited 集合去重。
+     * @param {number} x - cell X 坐标
+     * @param {number} y - cell Y 坐标
+     * @param {number} spanId - Span ID
+     * @param {number} dir - 边方向
+     * @returns {string} 格式为 "x,y,spanId,dir" 的唯一键
+     */
+    edgeKey(x, y, spanId, dir) {
+        return `${x},${y},${spanId},${dir}`;
+    }
+
+    /**
+     * 沿指定方向移动一格，返回新的 cell 坐标。
+     * @param {number} x - 当前 cell X
+     * @param {number} y - 当前 cell Y
+     * @param {number} dir - 方向索引（0=-X, 1=+Y, 2=+X, 3=-Y）
+     * @returns {{x: number, y: number}} 移动后的坐标
+     */
+    move(x, y, dir) {
+        switch (dir) {
+            case 0: return { x: x - 1, y };
+            case 1: return { x, y: y + 1 };
+            case 2: return { x: x + 1, y };
+            case 3: return { x, y: y - 1 };
+        }
+        return { x, y };
+    }
+
+    /**
+     * 获取 cell 在指定方向上的角点坐标。
+     *
+     * 轮廓追踪在边界边上输出顶点时，使用此方法确定该边的角点位置。
+     * @param {number} x - cell X
+     * @param {number} y - cell Y
+     * @param {number} dir - 方向索引
+     * @returns {{x: number, y: number}} 角点坐标
+     */
+    corner(x, y, dir) {
+        switch (dir) {
+            case 0: return { x, y };
+            case 1: return { x, y: y + 1 };
+            case 2: return { x: x + 1, y: y + 1 };
+            case 3: return { x: x + 1, y };
+        }
+        return { x, y };
+    }
+
+    /**
+     * 执行完整的轮廓构建流程。
+     *
+     * 1. 调用 {@link buildCompactNeighbors} 建立 Span 邻居索引
+     * 2. 遍历所有可行走 Span 的四个方向，在边界边上调用 {@link traceContour} 追踪轮廓
+     * 3. 对追踪结果依次执行简化（{@link simplifyContour}）和长边分割（{@link splitLongEdges}）
+     * 4. 过滤退化轮廓后存入 {@link contours}
+     */
+    init() {
+        /** @type {Set<string>} */
+        const visited = new Set();
+        this.buildCompactNeighbors();
+
+        for (let x = 0; x < this.gridX; x++) {
+            for (let y = 0; y < this.gridY; y++) {
+                let spanId = this.hf[x][y];
+                while (spanId !== 0) {
+                    if(OpenSpan.getUse(spanId))
+                    {
+                        if (OpenSpan.getRegionId(spanId) > 0) {
+                            for (let dir = 0; dir < 4; dir++) {
+                                if (this.isBoundaryEdge(spanId, dir)) {
+
+                                    const key = this.edgeKey(x, y, spanId, dir);
+                                    if (visited.has(key)) continue;
+
+                                    let contour = this.traceContour(x, y, spanId, dir, visited);
+                                    if (contour && contour.length >= 3) {
+                                        //外轮廓：逆时针（CCW）
+                                        //洞轮廓：顺时针（CW）
+                                        contour = this.splitLongEdges(this.simplifyContour(contour));
+                                        if (!contour || contour.length < 2) continue;
+
+                                        if (!this.isDegenerateContour(contour) && contour.length >= 3) {
+                                            this.contours.push(contour);
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    spanId = OpenSpan.getNext(spanId);
+                }
+            }
+        }
+    }
+    /**
+     * 简化轮廓：保留关键拐点，移除冗余的中间顶点。
+     *
+     * - 锁定所有「邻居区域切换点」和「tile 边界非共线点」
+     * - 对非 Portal 段使用 Douglas-Peucker 风格的最大误差递归简化
+     * - Portal 段（邻居 regionId > 0）只保留端点，保持跨 Tile 对齐
+     * @param {Contour[]} contour - 原始轮廓点数组
+     * @returns {Contour[]} 简化后的轮廓
+     */
+    simplifyContour(contour) {
+        const n = contour.length;
+        if (n < 4) return contour.slice();
+        const pts = contour.slice();
+
+        const locked = new Array(n).fill(0);
+        let lockCount = 0;
+        for (let i = 0; i < n; i++) {
+            const cur = pts[i];
+            const next = pts[(i + 1) % n];
+            const prev = pts[(i - 1 + n) % n];
+            const isPortalChange = next.neighborRegionId !== cur.neighborRegionId;
+            const keepBorderPoint = this.isPointOnTileBorder(cur) && !this.isBorderCollinearPoint(prev, cur, next);
+
+            if (isPortalChange || keepBorderPoint) {
+                locked[i] = 1;
+                //Instance.DebugSphere({center: vec.Zfly(this.contourPointToWorld(cur),20*Math.random()), radius: 2, color:{r: 255, g: next.neighborRegionId!=0?255:0, b: 0},duration: 30});
+                lockCount++;
+            }
+        }
+
+        if (lockCount === 0) {
+            let minId = 0;
+            let maxId = 0;
+            for (let i = 1; i < n; i++) {
+                const p = pts[i];
+                if (p.x < pts[minId].x || (p.x === pts[minId].x && p.y < pts[minId].y)) minId = i;
+                if (p.x > pts[maxId].x || (p.x === pts[maxId].x && p.y > pts[maxId].y)) maxId = i;
+            }
+            locked[minId] = 1;
+            locked[maxId] = 1;
+        }
+
+        /** @type {Contour[]} */
+        const out = [];
+
+        let i = 0;
+        let firstLocked = -1;
+        let lastLocked = -1;
+        while (i < n - 1) {
+            if (locked[i] === 0) {
+                i++;
+                continue;
+            }
+
+            if (firstLocked === -1) firstLocked = i;
+            let j = i + 1;
+            while (j < n - 1 && locked[j] === 0) j++;
+            if (locked[j]) lastLocked = j;
+
+            if (locked[i] && locked[j]) {
+                // 锁点就是切换点：只看锁点后的第一条边类型
+                const portalRegionId = pts[(i + 1) % n]?.neighborRegionId ?? 0;
+                if (portalRegionId > 0) {
+                    out.push(pts[i]);
+                } else {
+                    this.simplifySegmentByMaxError(pts, i, j, out);
+                }
+            }
+            i = j;
+        }
+
+        // wrap 段同样只看锁点后的第一条边类型
+        const wrapPortalRegionId = pts[(lastLocked + 1) % n]?.neighborRegionId ?? 0;
+        if (wrapPortalRegionId > 0) {
+            out.push(pts[lastLocked]);
+        } else {
+            this.simplifySegmentByMaxErrorWrap(pts, lastLocked, firstLocked, out);
+        }
+
+        if (out.length >= 3) {
+            const indexByPoint = new Map();
+            for (let k = 0; k < n; k++) {
+                indexByPoint.set(pts[k], k);
+            }
+
+            /** @type {number[]} */
+            const outIndices = [];
+            for (const p of out) {
+                const idx = indexByPoint.get(p);
+                if (idx !== undefined) outIndices.push(idx);
+            }
+            return outIndices.map((idx) => pts[idx]);
+        }
+
+        return out;
+    }
+    /**
+     * 对非 Portal 线段进行递归最大误差简化（Douglas-Peucker 风格）。
+     *
+     * 在 [i0, i1] 区间找到离线段最远的点，若距离超过 maxError 则递归分割，
+     * 否则只保留起点 i0。
+     * @param {Contour[]} pts - 完整轮廓点序列
+     * @param {number} i0 - 起始索引（锁定点）
+     * @param {number} i1 - 结束索引（锁定点）
+     * @param {Contour[]} out - 输出数组，保留点会 push 进去
+     */
+    simplifySegmentByMaxError(pts, i0, i1, out) {
+        const a = pts[i0];
+        const b = pts[i1];
+        let maxDistSq = 0;
+        let index = -1;
+
+        for (let i = i0 + 1; i < i1; i++) {
+            const d = distPtSegSq(pts[i], a, b);
+            if (d > maxDistSq) {
+                maxDistSq = d;
+                index = i;
+            }
+        }
+
+        const maxErrorSq = this.getContourMaxErrorSq();
+        if (index !== -1 && maxDistSq > maxErrorSq) {
+            this.simplifySegmentByMaxError(pts, i0, index, out);
+            this.simplifySegmentByMaxError(pts, index, i1, out);
+        } else {
+            out.push(a);
+        }
+    }
+
+    /**
+     * 跨数组末尾回绕版本的最大误差简化。
+     *
+     * 处理从最后一个锁定点回绕到第一个锁定点的环形段，
+     * 索引从 i0 往后走到末尾再从 0 开始到 i1。
+     * @param {Contour[]} pts - 完整轮廓点序列
+     * @param {number} i0 - 起始索引（尾部锁定点）
+     * @param {number} i1 - 结束索引（头部锁定点）
+     * @param {Contour[]} out - 输出数组
+     */
+    simplifySegmentByMaxErrorWrap(pts, i0, i1, out) {
+        if (i0 < 0 || i1 < 0) return;
+
+        const n = pts.length;
+        const a = pts[i0];
+        const b = pts[i1];
+        let maxDistSq = 0;
+        let index = -1;
+
+        for (let i = i0 + 1; i < n; i++) {
+            const d = distPtSegSq(pts[i], a, b);
+            if (d > maxDistSq) {
+                maxDistSq = d;
+                index = i;
+            }
+        }
+        for (let i = 0; i < i1; i++) {
+            const d = distPtSegSq(pts[i], a, b);
+            if (d > maxDistSq) {
+                maxDistSq = d;
+                index = i;
+            }
+        }
+
+        const maxErrorSq = this.getContourMaxErrorSq();
+        if (index !== -1 && maxDistSq > maxErrorSq) {
+            if (index < i0) this.simplifySegmentByMaxErrorWrap(pts, i0, index, out);
+            else this.simplifySegmentByMaxError(pts, i0, index, out);
+
+            if (index < i1) this.simplifySegmentByMaxError(pts, index, i1, out);
+            else this.simplifySegmentByMaxErrorWrap(pts, index, i1, out);
+        } else {
+            out.push(a);
+        }
+    }
+
+    /**
+     * 线段是否位于当前 tile 的边界上。
+     * @param {Contour} a
+     * @param {Contour} b
+     */
+    isSegmentOnTileBorder(a, b) {
+        if (this.isPointOnTileBorder(a) || this.isPointOnTileBorder(b)) return true;
+
+        const minX = this.tileCoreMinX;
+        const maxX = this.tileCoreMaxX;
+        const minY = this.tileCoreMinY;
+        const maxY = this.tileCoreMaxY;
+
+        if (a.x === minX && b.x === minX) return true;
+        if (a.x === maxX && b.x === maxX) return true;
+        if (a.y === minY && b.y === minY) return true;
+        if (a.y === maxY && b.y === maxY) return true;
+
+        return false;
+    }
+
+    /**
+     * 点是否落在当前 tile 的外边界上。
+     * @param {Contour} p
+     */
+    isPointOnTileBorder(p) {
+        const minX = this.tileCoreMinX;
+        const maxX = this.tileCoreMaxX;
+        const minY = this.tileCoreMinY;
+        const maxY = this.tileCoreMaxY;
+
+        if (p.x === minX || p.x === maxX) return true;
+        if (p.y === minY || p.y === maxY) return true;
+
+        return false;
+    }
+
+    /**
+     * tile 边界上的“纯共线中间点”判定。
+     * 仅当 prev-cur-next 同在同一条 tile 外边界线上时返回 true。
+     * @param {Contour} prev
+     * @param {Contour} cur
+     * @param {Contour} next
+     */
+    isBorderCollinearPoint(prev, cur, next) {
+        const minX = this.tileCoreMinX;
+        const maxX = this.tileCoreMaxX;
+        const minY = this.tileCoreMinY;
+        const maxY = this.tileCoreMaxY;
+
+        if (prev.x === minX && cur.x === minX && next.x === minX) return true;
+        if (prev.x === maxX && cur.x === maxX && next.x === maxX) return true;
+        if (prev.y === minY && cur.y === minY && next.y === minY) return true;
+        if (prev.y === maxY && cur.y === maxY && next.y === maxY) return true;
+
+        return false;
+    }
+
+    /**
+     * 拆分轮廓中超过最大边长的线段。
+     *
+     * 反复在中点插入新顶点，直到所有边长均不超过 {@link getContourMaxEdgeLen} 的阈值。
+     * 这一步确保多边形不会出现过长的边，有利于后续三角化质量。
+     * @param {Contour[]} counter - 简化后的轮廓点序列
+     * @returns {Contour[]} 拆分长边后的轮廓
+     */
+    splitLongEdges(counter) {
+        const maxEdgeLen = this.getContourMaxEdgeLen();
+        if (maxEdgeLen <= 0) return counter;
+
+        let guard = 0;
+        while (guard++ < counter.length * 8) {
+            let inserted = false;
+            for (let i = 0; i < counter.length; i++) {
+                const i0 = counter[i];
+                const i1 = counter[(i + 1) % counter.length];
+                const dx = Math.abs(i1.x - i0.x);
+                const dy = Math.abs(i1.y - i0.y);
+                if (Math.max(dx, dy) <= maxEdgeLen) continue;
+                //这里在counter插入新点，值为两端点的中点
+                const newPoint = {
+                    x: (i0.x + i1.x) * 0.5,
+                    y: (i0.y + i1.y) * 0.5,
+                    z: (i0.z + i1.z) * 0.5,
+                    regionId: i0.regionId,
+                    neighborRegionId: i0.neighborRegionId
+                };
+
+                // 如果你的 counter/contour 存的是点对象：
+                counter.splice(i + 1, 0, newPoint);
+                inserted = true;
+                break;
+            }
+            if (!inserted) break;
+        }
+        return counter;
+    }
+    /**
+     * 统计轮廓中不重复的 (x, y) 坐标个数。
+     * @param {Contour[]} contour - 轮廓点序列
+     * @returns {number} 唯一坐标数
+     */
+    countUniqueXY(contour) {
+        const set = new Set();
+        for (const p of contour) set.add(`${p.x}|${p.y}`);
+        return set.size;
+    }
+
+    /**
+     * 判断轮廓是否退化（点数不足或面积过小）。
+     *
+     * 退化轮廓会在 init 中被过滤不加入最终结果。
+     * @param {Contour[]} contour - 轮廓点序列
+     * @returns {boolean} 是否退化
+     */
+    isDegenerateContour(contour) {
+        if (!contour || contour.length < 3) return true;
+        if (this.countUniqueXY(contour) < 3) return true;
+        return Math.abs(this.computeSignedArea2D(contour)) <= 1e-6;
+    }
+
+    /**
+     * 计算轮廓的 2D 有符号面积（Shoelace 公式）。
+     *
+     * 正值表示逆时针（外轮廓），负值表示顺时针（孔洞）。
+     * @param {Contour[]} contour - 轮廓点序列
+     * @returns {number} 有符号面积
+     */
+    computeSignedArea2D(contour) {
+        let area = 0;
+        const n = contour.length;
+        for (let i = 0; i < n; i++) {
+            const a = contour[i];
+            const b = contour[(i + 1) % n];
+            area += a.x * b.y - b.x * a.y;
+        }
+        return area * 0.5;
+    }
+
+    /**
+     * 从起始边界边开始，沿区域边界追踪一圈完整轮廓。
+     *
+     * 采用「右转 → 直行 → 左转 → 后转」优先级顺序行走，确保紧贴区域边界。
+     * 每条边界边记录角点坐标、高度、所属 Region ID 和对面邻居 Region ID。
+     * @param {number} sx - 起始 cell X
+     * @param {number} sy - 起始 cell Y
+     * @param {number} startSpanId - 起始 Span ID
+     * @param {number} startDir - 起始边方向
+     * @param {Set<string>} visited - 已访问边集合，用于去重
+     * @returns {Contour[] | null} 轮廓点数组，失败时返回 null
+     */
+    traceContour(sx, sy, startSpanId, startDir, visited) {
+        let x = sx;
+        let y = sy;
+        let spanId = startSpanId;
+        let dir = startDir;
+
+        const verts = [];
+
+        let iter = 0;
+        const MAX_ITER = this.gridX * this.gridY * 4;
+        if (!this.isBoundaryEdge(startSpanId, startDir)) return null;
+        const startKey = this.edgeKey(x, y, spanId, dir);
+        while (iter++ < MAX_ITER) {
+            const key = this.edgeKey(x, y, spanId, dir);
+            //回到起点
+            if (key === startKey && verts.length > 0) break;
+
+            if (visited.has(key)) {
+                Instance.Msg("奇怪的轮廓边,找了一遍现在又找一遍");
+                this.error=true;
+                return null;
+            }
+            visited.add(key);
+
+            // 只有在边界边才输出顶点
+            if (this.isBoundaryEdge(spanId, dir)) {
+                const c = this.corner(x, y, dir);
+
+                const h = this.getCornerHeightFromEdge(x, y, spanId, dir);
+                const nid = this.getNeighborregionid(spanId, dir);
+                //Instance.Msg(nid);
+                if (h !== null) {
+                    verts.push({
+                        x: this.baseX + c.x,
+                        y: this.baseY + c.y,
+                        z: h,
+                        regionId: OpenSpan.getRegionId(spanId),      //当前span的region
+                        neighborRegionId: nid   //对面span的region（或 0）
+                    });
+                }
+
+            }
+
+            // 顺序：右转 → 直行 → 左转 → 后转
+            let advanced = false;
+            for (let i = 0; i < 4; i++) {
+                const ndir = (dir + 3 - i + 4) % 4;
+                const nspanId = OpenSpan.getNeighbor(spanId, ndir);
+
+                // 这条边是boundary，就沿边走
+                if (nspanId === 0 || OpenSpan.getRegionId(nspanId) !== OpenSpan.getRegionId(spanId)) {
+                    dir = ndir;
+                    advanced = true;
+                    break;
+                }
+
+                // 否则穿过这条边
+                const p = this.move(x, y, ndir);
+                x = p.x;
+                y = p.y;
+                spanId = nspanId;
+                dir = (ndir + 2) % 4;
+                advanced = true;
+                break;
+            }
+
+            if (!advanced) {
+                Instance.Msg("轮廓断啦");
+                this.error=true;
+                return null;
+            }
+        }
+        if (verts.length < 3) {
+            this.error=true;
+            return null;
+        }
+        return verts;
+    }
+
+    /**
+     * 获取指定边角点的最大地板高度。
+     *
+     * 考察当前 Span 及其左、前、对角方向的邻居，取四者中的最大 floor 高度。
+     * 确保轮廓顶点高度反映角点处真实的最高可行走层。
+     * @param {number} x - cell X
+     * @param {number} y - cell Y
+     * @param {number} spanId - 当前 Span ID
+     * @param {number} dir - 边方向
+     * @returns {number} 角点处的最大地板高度
+     */
+    getCornerHeightFromEdge(x, y, spanId, dir) {
+        let maxFloor = OpenSpan.getFloor(spanId);
+        const leftDir = (dir + 3) & 3;
+        // 只使用 buildCompactNeighbors 建好的 walkable 邻接，
+        // 避免在相邻 cell 的整列 span 中误取到“非当前可走链路”的高度层。
+        const left = OpenSpan.getNeighbor(spanId, leftDir);
+        if (left !== 0) {
+            const h = OpenSpan.getFloor(left);
+            if (h > maxFloor) maxFloor = h;
+        }
+
+        const front = OpenSpan.getNeighbor(spanId, dir);
+        if (front !== 0) {
+            const h = OpenSpan.getFloor(front);
+            if (h > maxFloor) maxFloor = h;
+        }
+
+        // 对角采用“先左再前”与“先前再左”两条可走链路择优。
+        let diag = 0;
+        if (left !== 0) diag = OpenSpan.getNeighbor(left, dir);
+        if (diag === 0 && front !== 0) diag = OpenSpan.getNeighbor(front, leftDir);
+        if (diag !== 0) {
+            const h = OpenSpan.getFloor(diag);
+            if (h > maxFloor) maxFloor = h;
+        }
+
+        return maxFloor;
+    }
+    /**
+     * 判断 cell 坐标是否在网格范围内。
+     * @param {number} x - cell X
+     * @param {number} y - cell Y
+     * @returns {boolean}
+     */
+    inBounds(x, y) {
+        return x >= 0 && y >= 0 && x < this.gridX && y < this.gridY;
+    }
+
+    /**
+     * 获取轮廓简化的最大误差平方值。
+     * @returns {number}
+     */
+    getContourMaxErrorSq() {
+        const e = CONT_MAX_ERROR;
+        return e * e;
+    }
+
+    /**
+     * 获取轮廓边允许的最大长度，用于 {@link splitLongEdges}。
+     * @returns {number} 最大边长，若配置值 ≤ 0 则不分割
+     */
+    getContourMaxEdgeLen() {
+        return 0;
+    }
+
+    /**
+     * 将轮廓点从网格坐标转换为世界坐标，用于调试绘制。
+     * @param {Contour} v - 轮廓点
+     * @returns {{x: number, y: number, z: number}} 世界坐标
+     */
+    contourPointToWorld(v) {
+        return {
+            x: origin.x + v.x * MESH_CELL_SIZE_XY ,//- MESH_CELL_SIZE_XY / 2,
+            y: origin.y + v.y * MESH_CELL_SIZE_XY ,//- MESH_CELL_SIZE_XY / 2,
+            z: origin.z + v.z * MESH_CELL_SIZE_Z,
+        };
+    }
+
+    /**
+     * 调试绘制所有轮廓，每个轮廓用随机颜色的线段显示。
+     * @param {number} [duration=5] - 绘制持续时间（秒）
+     */
+    debugDrawContours(duration = 5) {
+        Instance.Msg(`一共${this.contours.length}个轮廓`);
+        for (const contour of this.contours) {
+            const color = { r: 255 * Math.random(), g: 255 * Math.random(), b: 255 * Math.random() };
+            const z = Math.random() * 20;
+            for (let i = 0; i < contour.length; i++) {
+                const a = this.contourPointToWorld(contour[i]);
+                const b = this.contourPointToWorld(contour[(i + 1) % contour.length]);
+                const start = {
+                    x: a.x,
+                    y: a.y,
+                    z: a.z + z
+                };
+                const end = {
+                    x: b.x,
+                    y: b.y,
+                    z: b.z + z
+                };
+                Instance.DebugLine({
+                    start,
+                    end,
+                    color,
+                    duration
+                });
+            }
+        }
+    }
+}
+/**
+ * @typedef {Object} Contour
+ * @property {number} x
+ * @property {number} y
+ * @property {number} z
+ * x,y 为离散格点坐标；z 为离散高度层
+ * @property {number} regionId
+ * @property {number} neighborRegionId
+ */
+
+/**
+ * @module 导航网格/多边形网格构建
+ */
+/** @typedef {import("cs_script/point_script").Vector} Vector */
+/** @typedef {import("./path_contourbuilder").Contour} Contour */
+/**
+ * 多边形网格构建器。
+ *
+ * 将轮廓三角剖分后合并为凸多边形，建立邻接关系。
+ * 流程：分组轮廓 → 三角化 → 合并三角形 → 邻接图。
+ *
+ * @navigationTitle 多边形网格构建器
+ */
+class PolyMeshBuilder {
+    /**
+     * 初始化多边形网格构建器，传入按 Tile 分组的轮廓数据。
+     * @param {Contour[][]} contours
+     */
+    constructor(contours) {
+        /** @type {boolean} */
+        this.error = false;
+        /** @type {Contour[][]} */
+        this.contours = contours;
+
+        /** @type {Float32Array} 顶点坐标数组，顺序为[x0,y0,z0,x1,y1,z1,...] */
+        this.verts = new Float32Array(MAX_VERTS * 3); // 0:顶点0的x，1:顶点0的y，2:顶点0的z，3:顶点1的x，4:顶点1的y，5:顶点1的z，以此类推
+        /** @type {number} 当前已用顶点数 */
+        this.vertslength = 0;
+        /** @type {Int32Array} 多边形顶点索引区间数组，顺序为[start0,end0,start1,end1,...] */
+        this.polys = new Int32Array(MAX_POLYS * 2); // 0:多边形0的第一个顶点索引，1:多边形0的终点索引，2:多边形1的第一个顶点索引，3:多边形1的终点索引，以此类推
+        /** @type {number} 当前已用多边形数 */
+        this.polyslength = 0;
+        /** @type {Int16Array} 多边形所属区域id数组 */
+        this.regions = new Int16Array(MAX_POLYS);
+        //最多32767个多边形，每个最多POLY_MAX_VERTS_PER_POLY条边，每个边几个邻居？100?
+        /**
+         * @type {Array<Array<Int16Array>>}
+         * 多边形邻接信息：
+         *  - neighbors[polyIdx][edgeIdx][0] 表示该边有几个邻居
+         *  - neighbors[polyIdx][edgeIdx][1...N] 存储邻居多边形的索引
+         * 结构：
+         *   - 外层数组长度为最大多边形数
+         *   - 每个多边形有 POLY_MAX_VERTS_PER_POLY 条边
+         *   - 每条边可有多个邻居（最大100）
+         */
+        this.neighbors = new Array(MAX_POLYS); // [][][0] 0号位表示有几个邻居
+        this.worldConverted = false;
+    }
+
+    /**
+     * 执行完整的多边形网格构建流程。
+     *
+     * 1. 按 regionId 分组轮廓
+     * 2. 处理孔洞并合并为简单多边形
+     * 3. 耳裁切三角化
+     * 4. 合并三角形为凸多边形
+     * 5. 添加到全局数组并建立邻接关系
+     */
+    init() {
+        this.error = false;
+        /** @type {{x:number,y:number,z:number,regionId:number}[][]} */
+        const allPolys = [];
+
+        const grouped = this.groupContoursByRegion(this.contours);
+        for (const regionContours of grouped.values()) {
+            const simpleContours = this.buildSimpleRegionContours(regionContours);
+            for (const contour of simpleContours) {
+                const tris = this.triangulate(contour);
+                if (tris.length === 0) continue;
+
+                const merged = this.mergeTriangles(tris, POLY_MERGE_LONGEST_EDGE_FIRST);
+                for (const poly of merged) allPolys.push(poly);
+            }
+        }
+
+        for (const p of allPolys) this.addPolygon(p);
+        this.buildAdjacency();
+        this.convertVertsToWorldAfterAdjacency();
+    }
+
+    /**
+     * 返回构建结果（顶点 + 多边形 + 区域 + 邻接）。
+     * @returns {import("./path_manager").NavMeshMesh}
+     */
+    return() {
+        return {
+            verts: this.verts,
+            vertslength:this.vertslength,
+            polys: this.polys,
+            polyslength:this.polyslength,
+            regions: this.regions,
+            neighbors: this.neighbors
+        };
+    }
+
+    /**
+     * 将轮廓按 regionId 分组。
+     * @param {Contour[][]} contours - 所有轮廓
+     * @returns {Map<number, Contour[][]>} 按 regionId 分组的轮廓集合
+     */
+    groupContoursByRegion(contours) {
+        /** @type {Map<number, Contour[][]>} */
+        const byRegion = new Map();
+        for (const contour of contours) {
+            if (!contour || contour.length < 3 || this.isDegenerateContour(contour)) continue;
+            const rid = contour[0].regionId;
+            if (!byRegion.has(rid)) byRegion.set(rid, []);
+            byRegion.get(rid)?.push(contour);
+        }
+        return byRegion;
+    }
+
+    /**
+     * Recast 风格：处理同一 Region 内的外轮廓与孔洞。
+     *
+     * 按面积排序后用奇偶性判断外轮廓/孔洞，将孔洞通过桥接边合并到外轮廓，
+     * 产生可直接三角化的简单多边形。
+     * @param {Contour[][]} regionContours - 同一 region 的所有轮廓
+     * @returns {Contour[][]} 合并后的简单多边形数组
+     */
+    buildSimpleRegionContours(regionContours) {
+        /** @type {Contour[][]} */
+        const candidates = [];
+        for (const contour of regionContours) {
+            if (this.isDegenerateContour(contour)) continue;
+            const sanitized = this.sanitizeContour(contour);
+            if (sanitized.length >= 3 && !this.isDegenerateContour(sanitized)) {
+                candidates.push(sanitized);
+            }
+        }
+        if (candidates.length === 0) return [];
+
+        candidates.sort((a, b) => Math.abs(this.computeSignedArea(b)) - Math.abs(this.computeSignedArea(a)));
+
+        /** @type {Contour[][]} */
+        const outers = [];
+        /** @type {Contour[][][]} */
+        const holeGroups = [];
+
+        for (let i = 0; i < candidates.length; i++) {
+            const contour = candidates[i].slice();
+            const point = contour[0];
+
+            let depth = 0;
+            for (let j = 0; j < i; j++) {
+                if (this.pointInPolygon2D(point, candidates[j])) depth++;
+            }
+
+            const isHole = (depth & 1) === 1;
+            if (!isHole) {
+                this.ensureWinding(contour, true);
+                outers.push(contour);
+                holeGroups.push([]);
+                continue;
+            }
+
+            let bestOuter = -1;
+            let bestArea = Infinity;
+            for (let k = 0; k < outers.length; k++) {
+                if (!this.pointInPolygon2D(point, outers[k])) continue;
+                const a = Math.abs(this.computeSignedArea(outers[k]));
+                if (a < bestArea) {
+                    bestArea = a;
+                    bestOuter = k;
+                }
+            }
+
+            if (bestOuter >= 0) {
+                this.ensureWinding(contour, false);
+                holeGroups[bestOuter].push(contour);
+            }
+        }
+
+        /** @type {Contour[][]} */
+        const result = [];
+        for (let i = 0; i < outers.length; i++) {
+            let merged = outers[i].slice();
+            const holes = holeGroups[i].slice();
+            holes.sort((a, b) => this.getLeftMostPoint(a).x - this.getLeftMostPoint(b).x);
+
+            for (let h = 0; h < holes.length; h++) {
+                merged = this.mergeHoleIntoOuter(merged, holes, h);
+                merged = this.sanitizeContour(merged);
+                if (merged.length < 3) break;
+            }
+
+            if (merged.length >= 3 && !this.isDegenerateContour(merged)) {
+                this.ensureWinding(merged, true);
+                result.push(merged);
+            }
+        }
+
+        return result;
+    }
+
+    /**
+     * 清理轮廓：移除重复点并剥离共线中间点。
+     * @param {Contour[]} contour - 原始轮廓
+     * @returns {Contour[]} 清理后的轮廓
+     */
+    sanitizeContour(contour) {
+        /** @type {Contour[]} */
+        const out = [];
+        for (let i = 0; i < contour.length; i++) {
+            const cur = contour[i];
+            const prev = out[out.length - 1];
+            if (prev && prev.x === cur.x && prev.y === cur.y) continue;
+            out.push(cur);
+        }
+
+        if (out.length >= 2) {
+            const a = out[0];
+            const b = out[out.length - 1];
+            if (a.x === b.x && a.y === b.y) out.pop();
+        }
+
+        let i = 0;
+        while (out.length >= 3 && i < out.length) {
+            const n = out.length;
+            const a = out[(i + n - 1) % n];
+            const b = out[i];
+            const c = out[(i + 1) % n];
+            if (Math.abs(area(a, b, c)) <= 1e-9) {
+                out.splice(i, 1);
+                continue;
+            }
+            i++;
+        }
+
+        return out;
+    }
+
+    /**
+     * 确保轮廓的绕行方向。
+     * @param {Contour[]} contour - 轮廓点序列
+     * @param {boolean} ccw - true 表示逆时针（外轮廓），false 表示顺时针（孔洞）
+     */
+    ensureWinding(contour, ccw) {
+        const area2 = this.computeSignedArea(contour);
+        if (ccw && area2 < 0) contour.reverse();
+        if (!ccw && area2 > 0) contour.reverse();
+    }
+
+    /**
+     * 判断轮廓是否退化（点数不足、唯一坐标不足或面积过小）。
+     * @param {Contour[]} contour
+     * @returns {boolean}
+     */
+    isDegenerateContour(contour) {
+        if (!contour || contour.length < 3) return true;
+        const unique = new Set();
+        for (const p of contour) unique.add(`${p.x}|${p.y}`);
+        if (unique.size < 3) return true;
+        return Math.abs(this.computeSignedArea(contour)) <= 1e-6;
+    }
+
+    /**
+     * 计算轮廓的 2D 有符号面积（Contour 类型输入）。
+     * @param {Contour[]} contour
+     * @returns {number}
+     */
+    computeSignedArea(contour) {
+        let sum = 0;
+        for (let i = 0; i < contour.length; i++) {
+            const a = contour[i];
+            const b = contour[(i + 1) % contour.length];
+            sum += a.x * b.y - b.x * a.y;
+        }
+        return sum * 0.5;
+    }
+
+    /**
+     * 计算 2D 有符号面积（纯 {x,y} 输入）。
+     * @param {{x:number,y:number}[]} contour
+     * @returns {number}
+     */
+    computeSignedAreaXY(contour) {
+        let sum = 0;
+        for (let i = 0; i < contour.length; i++) {
+            const a = contour[i];
+            const b = contour[(i + 1) % contour.length];
+            sum += a.x * b.y - b.x * a.y;
+        }
+        return sum * 0.5;
+    }
+
+    /**
+     * 2D 射线法判断点是否在多边形内。
+     * @param {Contour} pt - 待检测点
+     * @param {Contour[]} polygon - 多边形顶点序列
+     * @returns {boolean}
+     */
+    pointInPolygon2D(pt, polygon) {
+        let inside = false;
+        for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
+            const pi = polygon[i];
+            const pj = polygon[j];
+            const intersects = ((pi.y > pt.y) !== (pj.y > pt.y))
+                && (pt.x < (pj.x - pi.x) * (pt.y - pi.y) / ((pj.y - pi.y) || 1e-9) + pi.x);
+            if (intersects) inside = !inside;
+        }
+        return inside;
+    }
+
+    /**
+     * 获取轮廓中 X 最小的点，用于孔洞桥接排序。
+     * @param {Contour[]} contour
+     * @returns {Contour}
+     */
+    getLeftMostPoint(contour) {
+        let p = contour[0];
+        for (let i = 1; i < contour.length; i++) {
+            const v = contour[i];
+            if (v.x < p.x || (v.x === p.x && v.y < p.y)) p = v;
+        }
+        return p;
+    }
+
+    /**
+     * 判断两条线段是否相交。
+     * @param {Contour} p1 - 线段1起点
+     * @param {Contour} p2 - 线段1终点
+     * @param {Contour} p3 - 线段2起点
+     * @param {Contour} p4 - 线段2终点
+     * @param {boolean} includeEnd - 是否包含端点相交
+     * @returns {boolean}
+     */
+    segmentsIntersect(p1, p2, p3, p4, includeEnd) {
+        const cross = (
+            /** @type {{x:number,y:number}} */ a,
+            /** @type {{x:number,y:number}} */ b,
+            /** @type {{x:number,y:number}} */ c
+        ) => (c.y - a.y) * (b.x - a.x) - (b.y - a.y) * (c.x - a.x);
+
+        const d1 = cross(p1, p2, p3);
+        const d2 = cross(p1, p2, p4);
+        const d3 = cross(p3, p4, p1);
+        const d4 = cross(p3, p4, p2);
+        if (includeEnd) return (d1 * d2 <= 0 && d3 * d4 <= 0);
+        return (d1 * d2 < 0 && d3 * d4 < 0);
+    }
+
+    /**
+     * 为孔洞点找到外轮廓上最近的桥接点索引。
+     *
+     * 遍历外轮廓顶点，排除与轮廓/孔洞相交的桥接线段，取距离最近的。
+     * @param {Contour} holePt - 孔洞起始点
+     * @param {Contour[]} outer - 外轮廓点序列
+     * @param {Contour[][]} holes - 所有孔洞序列
+     * @param {number} holeId - 当前孔洞索引
+     * @returns {number} 外轮廓上的桥接点索引，未找到时返回 -1
+     */
+    findBridgeOuterIndex(holePt, outer, holes, holeId) {
+        const hole = holes[holeId];
+        let bestDistSq = Infinity;
+        let bestIdx = -1;
+
+        for (let i = 0; i < outer.length; i++) {
+            const a = outer[i];
+            const dx = holePt.x - a.x;
+            const dy = holePt.y - a.y;
+            const distSq = dx * dx + dy * dy;
+            if (distSq >= bestDistSq) continue;
+
+            let intersects = false;
+
+            for (let j = 0; j < outer.length; j++) {
+                const p1 = outer[j];
+                const p2 = outer[(j + 1) % outer.length];
+                if (j === i || (j + 1) % outer.length === i) continue;
+                if (this.segmentsIntersect(holePt, a, p1, p2, true)) {
+                    intersects = true;
+                    break;
+                }
+            }
+            if (intersects) continue;
+
+            for (let j = 0; j < hole.length; j++) {
+                const p1 = hole[j];
+                const p2 = hole[(j + 1) % hole.length];
+                if (p1 === holePt || p2 === holePt) continue;
+                if (this.segmentsIntersect(holePt, a, p1, p2, true)) {
+                    intersects = true;
+                    break;
+                }
+            }
+            if (intersects) continue;
+
+            for (let k = holeId + 1; k < holes.length; k++) {
+                const other = holes[k];
+                for (let j = 0; j < other.length; j++) {
+                    const p1 = other[j];
+                    const p2 = other[(j + 1) % other.length];
+                    if (this.segmentsIntersect(holePt, a, p1, p2, true)) {
+                        intersects = true;
+                        break;
+                    }
+                }
+                if (intersects) break;
+            }
+            if (intersects) continue;
+
+            bestDistSq = distSq;
+            bestIdx = i;
+        }
+
+        return bestIdx;
+    }
+
+    /**
+     * 将孔洞通过桥接边合并到外轮廓中。
+     * @param {Contour[]} outer - 外轮廓
+     * @param {Contour[][]} holes - 所有孔洞
+     * @param {number} holeId - 当前孔洞索引
+     * @returns {Contour[]} 合并后的多边形
+     */
+    mergeHoleIntoOuter(outer, holes, holeId) {
+        const hole = holes[holeId];
+        let oi = -1;
+        let holePt = hole[0];
+        let hi = 0;
+
+        for (hi = 0; hi < hole.length; hi++) {
+            holePt = hole[hi];
+            oi = this.findBridgeOuterIndex(holePt, outer, holes, holeId);
+            if (oi >= 0) break;
+        }
+
+        if (oi < 0) {
+            Instance.Msg("未找到洞桥接点，跳过该洞");
+            this.error=true;
+            return outer;
+        }
+
+        /** @type {Contour[]} */
+        const merged = [];
+
+        for (let i = 0; i <= oi; i++) merged.push(outer[i]);
+        merged.push(holePt);
+        for (let i = 1; i <= hole.length; i++) merged.push(hole[(hi + i) % hole.length]);
+        merged.push(outer[oi]);
+        for (let i = oi + 1; i < outer.length; i++) merged.push(outer[i]);
+
+        return merged;
+    }
+
+    /**
+     * 耳裁切三角化：将简单多边形切分为三角形序列。
+     *
+     * 优先切割“周长最小”的耳朵（当 POLY_BIG_TRI 启用时）以获得更均匀的三角形。
+     * @param {{x:number,y:number,z:number,regionId:number}[]} poly - 简单多边形顶点
+     * @returns {{x:number,y:number,z:number,regionId:number}[][]} 三角形数组
+     */
+    triangulate(poly) {
+        let verts = this.sanitizeTriangulationInput(poly);
+        if (verts.length < 3) return [];
+        if (this.computeSignedAreaXY(verts) < 0) verts = verts.reverse();
+
+        /** @type {{x:number,y:number,z:number,regionId:number}[][]} */
+        const result = [];
+
+        let guard = 0;
+        while (verts.length > 3 && guard++ < 5000) {
+            let bestIndex = -1;
+            let bestPerimeter = Infinity;
+
+            for (let i = 0; i < verts.length; i++) {
+                const prev = verts[(i - 1 + verts.length) % verts.length];
+                const cur = verts[i];
+                const next = verts[(i + 1) % verts.length];
+
+                if (!isConvex(prev, cur, next)) continue;
+
+                let blocked = false;
+                for (let j = 0; j < verts.length; j++) {
+                    if (j === i || j === (i - 1 + verts.length) % verts.length || j === (i + 1) % verts.length) continue;
+                    if (pointInTri(verts[j], prev, cur, next)) {
+                        blocked = true;
+                        break;
+                    }
+                }
+                if (blocked) continue;
+
+                for (let j = 0; j < verts.length; j++) {
+                    if (j === i || j === (i - 1 + verts.length) % verts.length || j === (i + 1) % verts.length) continue;
+                    if (distPtSegSq(verts[j], prev, next) <= 1e-9) {
+                        if (vec.length2D(prev, verts[j]) === 0 || vec.length2D(next, verts[j]) === 0) continue;
+                        blocked = true;
+                        break;
+                    }
+                }
+                if (blocked) continue;
+
+                const perimeter = vec.length2D(prev, cur) + vec.length2D(cur, next) + vec.length2D(next, prev);
+                {
+                    if (perimeter < bestPerimeter) {
+                        bestPerimeter = perimeter;
+                        bestIndex = i;
+                    }
+                }
+            }
+
+            if (bestIndex < 0) break;
+
+            const prev = verts[(bestIndex - 1 + verts.length) % verts.length];
+            const cur = verts[bestIndex];
+            const next = verts[(bestIndex + 1) % verts.length];
+            result.push([prev, cur, next]);
+            verts.splice(bestIndex, 1);
+        }
+
+        if (verts.length === 3) {
+            result.push([verts[0], verts[1], verts[2]]);
+            return result;
+        }
+
+        if (verts.length !== 0) {
+            this.error = true;
+            Instance.Msg(`区域(${poly[0].regionId})：耳切失败，跳过该轮廓`);
+            return [];
+        }
+
+        return result;
+    }
+
+    /**
+     * 清理三角化输入：移除重复点和共线点。
+     * @param {{x:number,y:number,z:number,regionId:number}[]} poly
+     * @returns {{x:number,y:number,z:number,regionId:number}[]}
+     */
+    sanitizeTriangulationInput(poly) {
+        /** @type {{x:number,y:number,z:number,regionId:number}[]} */
+        const out = [];
+        for (let i = 0; i < poly.length; i++) {
+            const cur = poly[i];
+            const prev = out[out.length - 1];
+            if (prev && prev.x === cur.x && prev.y === cur.y) continue;
+            out.push(cur);
+        }
+
+        if (out.length >= 2) {
+            const a = out[0];
+            const b = out[out.length - 1];
+            if (a.x === b.x && a.y === b.y) out.pop();
+        }
+
+        let i = 0;
+        while (out.length >= 3 && i < out.length) {
+            const n = out.length;
+            const a = out[(i + n - 1) % n];
+            const b = out[i];
+            const c = out[(i + 1) % n];
+            if (Math.abs(area(a, b, c)) <= 1e-9) {
+                out.splice(i, 1);
+                continue;
+            }
+            i++;
+        }
+
+        return out;
+    }
+
+    /**
+     * 合并三角形为凸多边形。
+     *
+     * 反复尝试将共享边的两个多边形合并，保持凸性且不超过最大顶点数。
+     * longestEdgeFirst 为 true 时优先合并最长共享边，产生更少多边形。
+     * @param {{x:number,y:number,z:number,regionId:number}[][]} tris - 三角形序列
+     * @param {boolean} longestEdgeFirst - 是否优先合并最长边
+     * @returns {{x:number,y:number,z:number,regionId:number}[][]} 合并后的多边形序列
+     */
+    mergeTriangles(tris, longestEdgeFirst) {
+        const polys = tris.map((t) => t.slice());
+        let merged = true;
+
+        while (merged) {
+            merged = false;
+
+            let bestI = -1;
+            let bestJ = -1;
+            let bestPoly = null;
+            let bestDist = -Infinity;
+
+            for (let i = 0; i < polys.length; i++) {
+                for (let j = i + 1; j < polys.length; j++) {
+                    const info = this.getMergeInfo(polys[i], polys[j]);
+                    if (!info) continue;
+
+                    if (!longestEdgeFirst) {
+                        bestI = i;
+                        bestJ = j;
+                        bestPoly = info.info;
+                        break;
+                    }
+
+                    if (info.dist > bestDist) {
+                        bestDist = info.dist;
+                        bestI = i;
+                        bestJ = j;
+                        bestPoly = info.info;
+                    }
+                }
+                if (!longestEdgeFirst && bestPoly) break;
+            }
+
+            if (!bestPoly) break;
+
+            polys[bestI] = bestPoly;
+            polys.splice(bestJ, 1);
+            merged = true;
+        }
+
+        return polys;
+    }
+
+    /**
+     * 尝试合并两个多边形，返回合并结果和共享边长度。
+     * @param {{x:number,y:number,z:number,regionId:number}[]} a - 多边形 A
+     * @param {{x:number,y:number,z:number,regionId:number}[]} b - 多边形 B
+     * @returns {{info: {x:number,y:number,z:number,regionId:number}[], dist: number} | null} 合并成功时返回结果，否则 null
+     */
+    getMergeInfo(a, b) {
+        let ai = -1;
+        let bi = -1;
+        const eps = 1e-6;
+
+        for (let i = 0; i < a.length; i++) {
+            const an = (i + 1) % a.length;
+            for (let j = 0; j < b.length; j++) {
+                const bn = (j + 1) % b.length;
+                if (vec.length(a[i], b[bn]) <= eps && vec.length(a[an], b[j]) <= eps) {
+                    ai = i;
+                    bi = j;
+                    break;
+                }
+            }
+            if (ai >= 0) break;
+        }
+
+        if (ai < 0) return null;
+
+        /** @type {{x:number,y:number,z:number,regionId:number}[]} */
+        const merged = [];
+        const nA = a.length;
+        const nB = b.length;
+        for (let i = 0; i < nA - 1; i++) merged.push(a[(ai + 1 + i) % nA]);
+        for (let i = 0; i < nB - 1; i++) merged.push(b[(bi + 1 + i) % nB]);
+
+        if (merged.length > POLY_MAX_VERTS_PER_POLY) return null;
+        if (!this.isPolyConvex(merged)) return null;
+
+        const v1 = a[ai];
+        const v2 = a[(ai + 1) % nA];
+        const distSq = (v1.x - v2.x) ** 2 + (v1.y - v2.y) ** 2;
+
+        return { info: merged, dist: distSq };
+    }
+
+    /**
+     * 判断多边形是否为凸多边形。
+     * @param {{x:number,y:number,z:number,regionId:number}[]} poly
+     * @returns {boolean}
+     */
+    isPolyConvex(poly) {
+        const n = poly.length;
+        for (let i = 0; i < n; i++) {
+            if (area(poly[i], poly[(i + 1) % n], poly[(i + 2) % n]) < -1e-6) return false;
+        }
+        return true;
+    }
+
+    /**
+     * 将一个多边形的顶点和区域信息添加到全局数组中。
+     * @param {{x:number,y:number,z:number,regionId:number}[]} poly
+     */
+    addPolygon(poly) {
+        const pi=this.polyslength*2;
+        this.polys[pi]=this.vertslength;
+        for (const v of poly) {
+            const vi = this.vertslength*3;
+            this.verts[vi]=v.x;
+            this.verts[vi+1]=v.y;
+            this.verts[vi+2]=v.z;
+            this.vertslength++;
+        }
+        this.polys[pi+1]=this.vertslength-1;
+        this.regions[this.polyslength]=poly[0].regionId;
+        this.polyslength++;
+    }
+
+    /**
+     * 在邻接关系建好后，将所有顶点从网格坐标转为世界坐标。
+     *
+     * 必须在 buildAdjacency 之后调用，因为邻接匹配依赖网格坐标的精确比对。
+     */
+    convertVertsToWorldAfterAdjacency() {
+        if (this.worldConverted) return;
+        // 只转换实际已用顶点，且每次步进3
+        for (let i = 0; i < this.vertslength; i++) {
+            const vi = i * 3;
+            const v = this.toWorldVertex({
+                x: this.verts[vi],
+                y: this.verts[vi + 1],
+                z: this.verts[vi + 2]
+            });
+            this.verts[vi] = v.x;
+            this.verts[vi + 1] = v.y;
+            this.verts[vi + 2] = v.z;
+        }
+        this.worldConverted = true;
+    }
+
+    /**
+     * 将网格坐标转换为世界坐标。
+     * @param {{x:number,y:number,z:number}} v - 网格坐标
+     * @returns {{x:number,y:number,z:number}} 世界坐标
+     */
+    toWorldVertex(v) {
+        return {
+            x: origin.x + v.x * MESH_CELL_SIZE_XY,// - MESH_CELL_SIZE_XY / 2,
+            y: origin.y + v.y * MESH_CELL_SIZE_XY,// - MESH_CELL_SIZE_XY / 2,
+            z: origin.z + v.z * MESH_CELL_SIZE_Z
+        };
+    }
+
+    /**
+     * 为所有多边形建立边邻接关系。
+     *
+     * 通过匹配每条边的正/反向顶点键，记录共享边的相邻多边形索引。
+     */
+    buildAdjacency() {
+        /**@type {Map<string, {poly: number, edge: number}>} */
+        const edgeMap = new Map();
+        // 先重置所有邻居信息
+        for (let pi = 0; pi < this.polyslength; pi++) {
+            const startVert = this.polys[pi * 2];
+            const endVert = this.polys[pi * 2 + 1];
+            const vertCount = endVert - startVert + 1;
+            this.neighbors[pi]=new Array(vertCount);
+            for (let ei = 0; ei < vertCount; ei++) {
+                if (!this.neighbors[pi][ei]) {
+                    this.neighbors[pi][ei] = new Int16Array(100);
+                }
+                this.neighbors[pi][ei][0] = 0; // 0号位表示邻居数量
+            }
+        }
+        for (let pi = 0; pi < this.polyslength; pi++) {
+            const startVert = this.polys[pi * 2];
+            const endVert = this.polys[pi * 2 + 1];
+            const vertCount = endVert - startVert + 1;
+            for (let ei = 0; ei < vertCount; ei++) {
+                const a = startVert + ei;
+                const b = startVert + ((ei + 1) % vertCount);
+                const ka = `${this.verts[a * 3]},${this.verts[a * 3 + 1]},${this.verts[a * 3 + 2]}`;
+                const kb = `${this.verts[b * 3]},${this.verts[b * 3 + 1]},${this.verts[b * 3 + 2]}`;
+                const lk = ka + '|' + kb;
+                const rk = kb + '|' + ka;
+                if (!edgeMap.has(lk)) {
+                    edgeMap.set(lk, { poly: pi, edge: ei });
+                    edgeMap.set(rk, { poly: pi, edge: ei });
+                } else {
+                    const other = edgeMap.get(lk);
+                    if (!other) continue;
+                    // 双向写入邻居
+                    let n1 = ++this.neighbors[pi][ei][0];
+                    this.neighbors[pi][ei][n1] = other.poly;
+                    let n2 = ++this.neighbors[other.poly][other.edge][0];
+                    this.neighbors[other.poly][other.edge][n2] = pi;
+                }
+            }
+        }
+    }
+
+    /**
+     * 调试绘制所有多边形边框。
+     * @param {number} [duration=5] - 绘制持续时间（秒）
+     */
+    debugDrawPolys(duration = 5) {
+        // 修正：this.polys为Int32Array，存储为[起始顶点索引, 结束顶点索引]，每个多边形2个元素
+        for (let pi = 0; pi < this.polyslength; pi++) {
+            const startVert = this.polys[pi * 2];
+            const endVert = this.polys[pi * 2 + 1];
+            const vertCount = endVert - startVert + 1;
+            if (vertCount < 3) continue;
+            const color = { r: 255, g: 255, b: 0 };
+            for (let i = 0; i < vertCount; i++) {
+                const vi0 = startVert + i;
+                const vi1 = startVert + ((i + 1) % vertCount);
+                const v0 = {
+                    x: this.verts[vi0 * 3],
+                    y: this.verts[vi0 * 3 + 1],
+                    z: this.verts[vi0 * 3 + 2],
+                };
+                const v1 = {
+                    x: this.verts[vi1 * 3],
+                    y: this.verts[vi1 * 3 + 1],
+                    z: this.verts[vi1 * 3 + 2],
+                };
+                const start = vec.Zfly(v0, 0);
+                const end = vec.Zfly(v1, 0);
+                Instance.DebugLine({ start, end, color, duration });
+            }
+        }
+    }
+
+    /**
+     * 调试绘制多边形之间的邻接连线。
+     * @param {number} [duration=15]
+     */
+    debugDrawAdjacency(duration = 15) {
+        // 修正：边数应由多边形顶点数决定，不能直接用neighborsOfPoly.length
+        for (let pi = 0; pi < this.polyslength; pi++) {
+            const start = this.polyCenter(pi);
+            const startVert = this.polys[pi * 2];
+            const endVert = this.polys[pi * 2 + 1];
+            const vertCount = endVert - startVert + 1;
+            for (let ei = 0; ei < vertCount; ei++) {
+                for(let ni=1;ni<=this.neighbors[pi][ei][0];ni++){
+                    const neighborIndex = this.neighbors[pi][ei][ni];
+                    // 只画一次，避免重复
+                    if (neighborIndex < 0 || neighborIndex <= pi) continue;
+                    const end = this.polyCenter(neighborIndex);
+                    Instance.DebugLine({ start, end, color: { r: 255, g: 0, b: 255 }, duration });
+                }
+            }
+        }
+    }
+
+    /**
+     * 计算多边形的几何中心点。
+     * @param {number} pi - 多边形索引
+     * @returns {{x:number, y:number, z:number}}
+     */
+    polyCenter(pi) {
+        // 修正：根据多边形索引区间遍历顶点，累加坐标
+        const startVert = this.polys[pi * 2];
+        const endVert = this.polys[pi * 2 + 1];
+        const vertCount = endVert - startVert + 1;
+        if (vertCount <= 0) return { x: 0, y: 0, z: 0 };
+        let x = 0, y = 0, z = 0;
+        for (let vi = startVert; vi <= endVert; vi++) {
+            x += this.verts[vi * 3];
+            y += this.verts[vi * 3 + 1];
+            z += this.verts[vi * 3 + 2];
+        }
+        return { x: x / vertCount, y: y / vertCount, z: z / vertCount };
+    }
+
+    /**
+     * 调试绘制共享边（有邻居的边）。
+     * @param {number} [duration=15]
+     */
+    debugDrawSharedEdges(duration = 15) {
+        // 修正：遍历所有多边形和每条边，判断该边是否有邻居，有则高亮
+        for (let pi = 0; pi < this.polyslength; pi++) {
+            const startVert = this.polys[pi * 2];
+            const endVert = this.polys[pi * 2 + 1];
+            const vertCount = endVert - startVert + 1;
+            if (vertCount < 3) continue;
+            const neighborsOfPoly = this.neighbors[pi];
+            if (!neighborsOfPoly) continue;
+            for (let ei = 0; ei < vertCount; ei++) {
+                const edgeNeighbors = neighborsOfPoly[ei];
+                if (!edgeNeighbors) continue;
+                const count = edgeNeighbors[0];
+                if (count > 0) {
+                    const vi0 = startVert + ei;
+                    const vi1 = startVert + ((ei + 1) % vertCount);
+                    const v0 = {
+                        x: this.verts[vi0 * 3],
+                        y: this.verts[vi0 * 3 + 1],
+                        z: this.verts[vi0 * 3 + 2],
+                    };
+                    const v1 = {
+                        x: this.verts[vi1 * 3],
+                        y: this.verts[vi1 * 3 + 1],
+                        z: this.verts[vi1 * 3 + 2],
+                    };
+                    const start = vec.Zfly(v0, 20);
+                    const end = vec.Zfly(v1, 20);
+                    Instance.DebugLine({ start, end, color: { r: 0, g: 255, b: 0 }, duration });
+                }
+            }
+        }
+    }
+}
+
+/**
+ * @module 导航网格/多边形细节
+ */
+/** @typedef {import("cs_script/point_script").Vector} Vector */
+/** @typedef {import("./path_manager").NavMeshMesh} NavMeshMesh */
+
+/**
+ * 多边形细节网格构建器。
+ *
+ * 为每个导航多边形生成高保真的三角形网格（Detail Mesh），
+ * 使用约束 Delaunay 三角剖分（CDT）和耳裁切算法。
+ * Detail Mesh 用于精确的高度插值（由 FunnelHeightFixer 使用）。
+ *
+ * @navigationTitle 细节网格构建器
+ */
+class PolyMeshDetailBuilder {
+    /**
+     * 初始化细节网格构建器，绑定多边形网格与高度场。
+     * @param {NavMeshMesh} mesh - 多边形网格数据
+     * @param {OpenHeightfield} hf - 开放高度场，用于采样高度
+     */
+    constructor(mesh, hf) {
+        /** @type {boolean} 构建过程中是否发生错误 */
+        this.error = false;
+        /** @type {NavMeshMesh} 多边形网格数据 */
+        this.mesh = mesh;
+        /** @type {OpenHeightfield} 开放高度场引用 */
+        this.hf = hf;
+        /** @type {Float32Array} */
+        this.verts = new Float32Array(MAX_TRIS*3 * 3);//全局顶点数组，顺序为[x0,y0,z0,x1,y1,z1,...]，每个多边形的顶点在其中占用一个连续区间
+        /** @type {number} */
+        this.vertslength = 0;//点总数
+        /** @type {Uint16Array} */
+        this.tris = new Uint16Array(MAX_TRIS * 3);//第i个三角形的三个顶点为tris[3i][3i+1][3i+2],每个坐标为verts[tris[3i]|+1|+2]
+        /** @type {number} */
+        this.trislength = 0;//三角形总数
+        /** @type {Uint16Array} */
+        this.triTopoly = new Uint16Array(MAX_TRIS);//[i]:第i个三角形对应的多边形索引
+        //每个多边形对应的三角形索引范围，格式为[baseVert=该多边形点索引起点, vertCount=该多边形有几个点, baseTri=该多边形三角索引起点, triCount=该多边形有几个三角形]
+        /** @type {Uint16Array} */
+        this.baseVert = new Uint16Array(MAX_POLYS);//该多边形点索引起点
+        /** @type {Uint16Array} */
+        this.vertsCount = new Uint16Array(MAX_POLYS);//该多边形有几个点
+        /** @type {Uint16Array} */
+        this.baseTri = new Uint16Array(MAX_POLYS);//该多边形三角索引起点
+        /** @type {Uint16Array} */
+        this.triCount = new Uint16Array(MAX_POLYS);//该多边形有几个三角形
+
+        ///**@type {Vector[]}*/
+        //this.verts = [];
+        ///**@type {number[][]}*/
+        //this.tris = [];
+        ///**@type {number[][]}*/
+        //this.meshes = [];
+        ///**@type {number[]} */
+        //this.triTopoly=[];
+    }
+
+    /**
+     * 为所有多边形构建细节三角形网格。
+     *
+     * 遍历每个多边形调用 {@link buildPoly}，生成带高度信息的三角形网格。
+     * @returns {import("./path_manager").NavMeshDetail}
+     */
+    init() {
+        this.error = false;
+        for (let pi = 0; pi < this.mesh.polyslength; pi++) {
+            this.buildPoly(pi);
+        }
+
+        return {
+            verts: this.verts,
+            vertslength:this.vertslength,
+            tris: this.tris,
+            trislength:this.trislength,
+            triTopoly:this.triTopoly,
+            baseVert:this.baseVert,
+            vertsCount:this.vertsCount,
+            baseTri:this.baseTri,
+            triCount:this.triCount
+        };
+    }
+    /**
+     * 调试绘制所有细节三角形。
+     * @param {number} [duration=5] - 绘制持续时间（秒）
+     */
+    debugDrawPolys(duration = 5) {
+        // TypedArray结构：tris为Uint16Array，verts为Float32Array
+        for (let ti = 0; ti < this.trislength; ti++) {
+            const ia = this.tris[ti * 3];
+            const ib = this.tris[ti * 3 + 1];
+            const ic = this.tris[ti * 3 + 2];
+            const color = { r: 255 * Math.random(), g: 255 * Math.random(), b: 255 * Math.random() };
+            const va = {
+                x: this.verts[ia * 3],
+                y: this.verts[ia * 3 + 1],
+                z: this.verts[ia * 3 + 2]
+            };
+            const vb = {
+                x: this.verts[ib * 3],
+                y: this.verts[ib * 3 + 1],
+                z: this.verts[ib * 3 + 2]
+            };
+            const vc = {
+                x: this.verts[ic * 3],
+                y: this.verts[ic * 3 + 1],
+                z: this.verts[ic * 3 + 2]
+            };
+            Instance.DebugLine({ start: va, end: vb, color, duration });
+            Instance.DebugLine({ start: vb, end: vc, color, duration });
+            Instance.DebugLine({ start: vc, end: va, color, duration });
+        }
+    }
+    /**
+     * 为单个多边形构建细节三角形网格。
+     *
+     * 流程：采样边界高度 → 初始 CDT 三角化 → 内部采样点
+     * → 逾代插入高度误差最大的点 → 写入全局数组。
+     * @param {number} pi - 多边形索引
+     */
+    buildPoly(pi) {
+        // TypedArray结构：polys为索引区间数组，regions为Int16Array
+        const startVert = this.mesh.polys[pi * 2];
+        const endVert = this.mesh.polys[pi * 2 + 1];
+        const poly = [startVert, endVert];
+        const regionid = this.mesh.regions[pi];
+        const polyVerts = this.getPolyVerts(this.mesh, poly);
+        // 待优化：内部采样点高度可改为基于细分后三角形插值
+
+        // 1. 为多边形边界顶点采样高度
+        const borderVerts = this.applyHeights(polyVerts, this.hf,regionid);
+        // 2. 计算边界平均高度和高度范围
+        const borderHeightInfo = this.calculateBorderHeightInfo(borderVerts);
+        // 3. 获取初始三角划分（用于高度误差检查）
+        const initialVertices = [...borderVerts];
+        const initialConstraints = [];
+        for (let i = 0; i < borderVerts.length; i++) {
+            const j = (i + 1) % borderVerts.length;
+            initialConstraints.push([i, j]);
+        }
+        // 4. 执行初始划分（基于边界点）
+        const trianglesCDT = new SimplifiedCDT(initialVertices, initialConstraints, () => {
+            this.error = true;
+        });
+        let triangles = trianglesCDT.getTri();
+        // 5. 生成内部采样点
+        let rawSamples = this.buildDetailSamples(polyVerts, borderHeightInfo, this.hf,triangles,trianglesCDT.vertices,regionid);
+        // 6. 过滤内部采样点：仅保留高度误差较大的点
+        while(rawSamples.length>0)
+        {
+            let insert=false;
+            let heightDiff = 0;
+            let heightid = -1;
+            triangles = trianglesCDT.getTri();
+            let toRemoveIndices = [];
+            for (let i=0;i<rawSamples.length;i++) {
+                const sample=rawSamples[i];
+                let diff=0;
+                // 找到包含采样点的三角形
+                for (const tri of triangles) {
+                    if (tri.containsPoint(sample, trianglesCDT.vertices)) {
+                        const interpolatedHeight = tri.interpolateHeight(sample.x, sample.y, trianglesCDT.vertices);
+                        diff = Math.abs(sample.z - interpolatedHeight);
+                        if(this.isNearTriangleEdge(sample,tri,trianglesCDT.vertices)) diff = 0;
+                        break;
+                    }
+                }
+                // 仅当高度误差超过阈值时保留
+                if(diff<=POLY_DETAIL_HEIGHT_ERROR)toRemoveIndices.push(i);
+                else if (diff > heightDiff) {
+                    heightDiff=diff;
+                    heightid=i;
+                    insert=true;
+                }
+            }
+            if(insert)trianglesCDT.insertPointSimplified(rawSamples[heightid]);
+            else break;
+            for (let i = toRemoveIndices.length - 1; i >= 0; i--) {
+                rawSamples.splice(toRemoveIndices[i], 1);
+            }
+        }
+        
+        // 7. 添加到全局列表
+        // TypedArray结构填充
+        const baseVert = this.vertslength;
+        const baseTri = this.trislength;
+        const allVerts = trianglesCDT.vertices;
+        // 填充verts
+        for (let i = 0; i < allVerts.length; i++) {
+            const v = allVerts[i];
+            this.verts[baseVert * 3 + i * 3] = v.x;
+            this.verts[baseVert * 3 + i * 3 + 1] = v.y;
+            this.verts[baseVert * 3 + i * 3 + 2] = v.z;
+        }
+        this.vertslength += allVerts.length;
+        triangles = trianglesCDT.getTri();
+        if (trianglesCDT.error) this.error = true;
+        // 填充tris和triTopoly
+        for (let i = 0; i < triangles.length; i++) {
+            const tri = triangles[i];
+            this.tris[(baseTri + i) * 3] = baseVert + tri.a;
+            this.tris[(baseTri + i) * 3 + 1] = baseVert + tri.b;
+            this.tris[(baseTri + i) * 3 + 2] = baseVert + tri.c;
+            this.triTopoly[baseTri + i] = pi;
+        }
+        this.trislength += triangles.length;
+        // 填充baseVert、vertsCount、baseTri、triCount
+        this.baseVert[pi] = baseVert;
+        this.vertsCount[pi] = allVerts.length;
+        this.baseTri[pi] = baseTri;
+        this.triCount[pi] = triangles.length;
+        // meshes数组可选，若需要保留
+        // this.meshes.push([
+        //     baseVert,
+        //     allVerts.length,
+        //     baseTri,
+        //     triangles.length
+        // ]);
+    }
+    /**
+    * 计算边界顶点高度信息
+     * @param {Vector[]} borderVerts
+     * @returns {{avgHeight: number, minHeight: number, maxHeight: number, heightRange: number}}
+     */
+    calculateBorderHeightInfo(borderVerts) {
+        let sumHeight = 0;
+        let minHeight = Infinity;
+        let maxHeight = -Infinity;
+
+        for (const v of borderVerts) {
+            sumHeight += v.z;
+            minHeight = Math.min(minHeight, v.z);
+            maxHeight = Math.max(maxHeight, v.z);
+        }
+
+        const avgHeight = sumHeight / borderVerts.length;
+        const heightRange = maxHeight - minHeight;
+
+        return {
+            avgHeight,
+            minHeight,
+            maxHeight,
+            heightRange
+        };
+    }
+    /**
+     * 从多边形索引区间提取顶点坐标。
+     * @param {NavMeshMesh} mesh - 网格数据
+     * @param {number[]} poly - [startVert, endVert] 顶点索引区间
+     * @returns {Vector[]}
+     */
+    getPolyVerts(mesh, poly) {
+        // poly为[startVert, endVert]区间
+        const [start, end] = poly;
+        const verts = [];
+        for (let i = start; i <= end; i++) {
+            const x = mesh.verts[i * 3];
+            const y = mesh.verts[i * 3 + 1];
+            const z = mesh.verts[i * 3 + 2];
+            verts.push({ x, y, z });
+        }
+        return verts;
+    }
+    /**
+    * 生成内部采样点（带高度误差检查）
+     * @param {Vector[]} polyVerts
+     * @param {{avgHeight: number;minHeight: number;maxHeight: number;heightRange: number;}} heightInfo
+     * @param {OpenHeightfield} hf
+     * @returns {Vector[]}
+     * @param {Triangle[]} initialTriangles
+     * @param {Vector[]} initialVertices
+     * @param {number} regionid
+     */
+    buildDetailSamples(polyVerts, heightInfo, hf,initialTriangles,initialVertices,regionid) {
+        const samples = [];
+        // 2. AABB
+        let minx = Infinity, miny = Infinity, maxx = -Infinity, maxy = -Infinity;
+        for (const v of polyVerts) {
+            minx = Math.min(minx, v.x);
+            miny = Math.min(miny, v.y);
+            maxx = Math.max(maxx, v.x);
+            maxy = Math.max(maxy, v.y);
+        }
+
+        const step = POLY_DETAIL_SAMPLE_DIST * MESH_CELL_SIZE_XY;
+        for (let x = minx + step / 2; x <= maxx; x += step) {
+            for (let y = miny + step / 2; y <= maxy; y += step) {
+                if (this.pointInPoly2D(x, y, polyVerts)) {
+                    // 采样高度
+                    let triheight=heightInfo.avgHeight;
+
+                    // 计算与边界平均高度的差值
+                    //const heightDiff = Math.abs(height - heightInfo.avgHeight);
+                    for (const tri of initialTriangles) {
+                        if (tri.containsPoint({x, y,z:heightInfo.avgHeight},initialVertices)) {
+                            // 使用三角形插值计算高度
+                            triheight = tri.interpolateHeight(x, y, initialVertices);
+                            break;
+                        }
+                    }
+                    const height=this.sampleHeight(hf, x, y, triheight??heightInfo.avgHeight,regionid);
+                    // 检查是否超过阈值
+                    if(Math.abs(height - triheight)>POLY_DETAIL_HEIGHT_ERROR) {
+                        samples.push({ x: x, y: y, z: height });
+                    }
+                }
+            }
+        }
+        return samples;
+    }
+    /**
+     * 判断采样点是否距离三角形边太近。
+     * @param {Vector} sample
+     * @param {Triangle} tri
+     * @param {Vector[]} verts
+     * @returns {boolean}
+     */
+    isNearTriangleEdge(sample, tri, verts) {
+
+        const dis = Math.min(distPtSegSq(sample,verts[tri.a],verts[tri.b]),distPtSegSq(sample,verts[tri.b],verts[tri.c]),distPtSegSq(sample,verts[tri.c],verts[tri.a]));
+        if (dis < POLY_DETAIL_SAMPLE_DIST * 0.5) return true;
+        return false;
+    }
+    /**
+     * 为多边形边界顶点采样真实高度，并在边上插入高度误差较大的点。
+     * @param {Vector[]} polyVerts - 多边形顶点
+     * @param {OpenHeightfield} hf - 开放高度场
+     * @param {number} regionid - 区域 ID
+     * @returns {Vector[]} 带真实高度的边界顶点序列
+     */
+    applyHeights(polyVerts, hf,regionid) {
+        const resultVerts = [];
+        const n = polyVerts.length;
+        const step = POLY_DETAIL_SAMPLE_DIST * MESH_CELL_SIZE_XY;
+        for (let i = 0; i < n; i++) {
+            const a = polyVerts[i];
+            const b = polyVerts[(i + 1) % n];
+            // 对当前顶点采样高度
+            const az = this.sampleHeight(hf, a.x, a.y, a.z,regionid);
+            const bz = this.sampleHeight(hf, b.x, b.y, b.z, regionid);
+            const A = { x: a.x, y: a.y, z: az };
+            const B = { x: b.x, y: b.y, z: bz };
+            // 添加当前顶点（起始点）
+            resultVerts.push(A);
+
+            // 细分当前边
+            const samples = this.sampleEdgeWithHeightCheck(
+                A, 
+                B, 
+                hf,
+                step
+            );
+            // 递归插点
+            this.subdivideEdgeByHeight(
+                A,
+                B,
+                samples,
+                hf,
+                regionid,
+                resultVerts
+            );
+        }
+        
+        return resultVerts;
+    }
+    /**
+     * 在 [start, end] 之间递归插入高度误差最大的点。
+     * @param {Vector} start - 起始顶点
+     * @param {Vector} end - 结束顶点
+     * @param {Vector[]} samples - 该边上的细分点（不含 start/end）
+     * @param {OpenHeightfield} hf
+     * @param {number} regionid
+     * @param {Vector[]} outVerts - 输出顶点数组
+     */
+    subdivideEdgeByHeight(start, end,samples,hf,regionid,outVerts) {
+        let maxError = 0;
+        let maxIndex = -1;
+        let maxVert = null;
+
+        const total = samples.length;
+
+        for (let i = 0; i < total; i++) {
+            const s = samples[i];
+            const t = (i + 1) / (total + 1);
+
+            // 不加入该点时的插值高度
+            const interpZ = start.z * (1 - t) + end.z * t;
+
+            const h = this.sampleHeight(hf, s.x, s.y, interpZ, regionid);
+            const err = Math.abs(h - interpZ);
+
+            if (err > maxError) {
+                maxError = err;
+                maxIndex = i;
+                maxVert = { x: s.x, y: s.y, z: h };
+            }
+        }
+
+        // 没有需要加入的点
+        if (maxError <= POLY_DETAIL_HEIGHT_ERROR || maxIndex === -1||!maxVert) {
+            return;
+        }
+
+        // 递归左半段
+        this.subdivideEdgeByHeight(
+            start,
+            maxVert,
+            samples.slice(0, maxIndex),
+            hf,
+            regionid,
+            outVerts
+        );
+
+        // 插入当前最大误差点（保持顺序）
+        outVerts.push(maxVert);
+
+        // 递归右半段
+        this.subdivideEdgeByHeight(
+            maxVert,
+            end,
+            samples.slice(maxIndex + 1),
+            hf,
+            regionid,
+            outVerts
+        );
+    }
+    /**
+     * 沿边等距采样点，返回中间点坐标数组。
+     * @param {Vector} start - 边起点
+     * @param {Vector} end - 边终点
+     * @param {OpenHeightfield} hf
+     * @param {number} sampleDist - 采样间距
+     * @returns {Vector[]} 采样点数组
+     */
+    sampleEdgeWithHeightCheck(start, end, hf, sampleDist) {
+        const samples = [];
+        
+        // 计算边向量和长度
+        const dx = end.x - start.x;
+        const dy = end.y - start.y;
+        const length = Math.sqrt(dx * dx + dy * dy);
+        
+        if (length <= 1e-6) {
+            return []; // 边长度为 0，不采样
+        }
+        
+        // 计算方向向量
+        const dirX = dx / length;
+        const dirY = dy / length;
+        // 计算采样点数（不包含起点和终点）
+        const numSamples = Math.floor(length / sampleDist);
+        
+        // 记录采样点高度
+
+        for (let i = 1; i <= numSamples; i++) {
+            const t = i / (numSamples + 1); // 确保不会采样到端点
+            const x = start.x + dirX * length * t;
+            const y = start.y + dirY * length * t;
+            const z = start.z * (1 - t) + end.z * t;
+            samples.push({ x, y, z });
+        }
+        
+        return samples;
+    }
+    /**
+     * 从开放高度场采样世界坐标处的地板高度。
+     *
+     * 先在对应 cell 中查找同区域的最近 Span，找不到时向多周围扩散搜索。
+     * @param {OpenHeightfield} hf
+     * @param {number} wx - 世界坐标 X
+     * @param {number} wy - 世界坐标 Y
+     * @param {number} fallbackZ - 找不到时的回退高度
+     * @param {number} regionid - 区域 ID
+     * @returns {number} 采样到的高度
+     */
+    sampleHeight(hf, wx, wy, fallbackZ,regionid) {
+        const globalIx = Math.round((wx - origin.x+ MESH_CELL_SIZE_XY / 2) / MESH_CELL_SIZE_XY);
+        const globalIy = Math.round((wy - origin.y+ MESH_CELL_SIZE_XY / 2) / MESH_CELL_SIZE_XY);
+        const ix = globalIx - (hf.baseX);
+        const iy = globalIy - (hf.baseY);
+
+        if (ix < 0 || iy < 0 || ix >= hf.gridX || iy >= hf.gridY) return fallbackZ;
+
+        let best = null;
+        let bestDiff = Infinity;
+        let spanId = hf.cells[ix][iy];
+        while (spanId !== 0) {
+            if(OpenSpan.getRegionId(spanId)===regionid)
+            {
+                const z = origin.z + OpenSpan.getFloor(spanId) * MESH_CELL_SIZE_Z;
+                const d = Math.abs(z - fallbackZ);
+                if (d < bestDiff) {
+                    bestDiff = d;
+                    best = z;
+                }
+            }
+            spanId = OpenSpan.getNext(spanId);
+        }
+        // 如果没有找到合适的 span，开始螺旋式搜索
+        if (best === null) {
+            const maxRadius = Math.max(hf.gridX, hf.gridY); // 搜索最大半径
+            let radius = 1; // 初始半径
+            out:
+            while (radius <= maxRadius) {
+                // 螺旋式外扩，检查四个方向
+                for (let offset = 0; offset <= radius; offset++) {
+                    // 检查 (ix + offset, iy + radius) 等候选位置
+                    let candidates = [
+                        [ix + offset, iy + radius], // 上
+                        [ix + radius, iy + offset], // 右
+                        [ix - offset, iy - radius], // 下
+                        [ix - radius, iy - offset]  // 左
+                    ];
+
+                    for (const [nx, ny] of candidates) {
+                        if (nx >= 0 && ny >= 0 && nx < hf.gridX && ny < hf.gridY) {
+                            // 在有效范围内查找对应 span
+                            spanId = hf.cells[nx][ny];
+                            while (spanId !== 0) {
+                                if(OpenSpan.getRegionId(spanId)===regionid)
+                                {
+                                    const z = origin.z + OpenSpan.getFloor(spanId) * MESH_CELL_SIZE_Z;
+                                    const d = Math.abs(z - fallbackZ);
+                                    if (d < bestDiff) {
+                                        bestDiff = d;
+                                        best = z;
+                                        break out;
+                                    }
+                                }
+                                spanId = OpenSpan.getNext(spanId);
+                            }
+                        }
+                    }
+                }
+                // 增大半径，继续搜索
+                radius++;
+            }
+        }
+
+        // 如果最终未找到合适 span，返回 fallbackZ
+        return best ?? fallbackZ;
+    }
+    /**
+    * 判断点是否在多边形内（不含边界）
+    * 使用 odd-even rule（射线法）
+     *
+     * @param {number} px
+     * @param {number} py
+     * @param {{x:number,y:number}[]} poly
+     * @returns {boolean}
+     */
+    pointInPoly2D(px, py, poly) {
+        let inside = false;
+        const n = poly.length;
+
+        for (let i = 0, j = n - 1; i < n; j = i++) {
+            const xi = poly[i].x, yi = poly[i].y;
+            const xj = poly[j].x, yj = poly[j].y;
+
+            // ===== 点在边上，按 outside 处理 =====
+            if (Tool.pointOnSegment2D(px, py, xi, yi, xj, yj, { includeEndpoints: true })) {
+                return false;
+            }
+
+            // ===== 射线法 =====
+            const intersect =
+                ((yi > py) !== (yj > py)) &&
+                (px < (xj - xi) * (py - yi) / (yj - yi + 1e-12) + xi);
+
+            if (intersect) inside = !inside;
+        }
+
+        return inside;
+    }
+
+}
+
+/**
+ * 简化的约束 Delaunay 三角剖分器。
+ *
+ * 使用耳裁切进行初始三角化，然后通过 Bowyer-Watson 风格插入新点并
+ * 对非约束边执行 Delaunay 合法化翻转。
+ */
+class SimplifiedCDT {
+    /**
+     * 创建约束 Delaunay 三角剖分实例。
+     * @param {Vector[]} vertices - 初始顶点列表
+     * @param {number[][]} constraints - 约束边列表（顶点索引对）
+     * @param {(() => void)} onError - 错误回调
+     */
+    constructor(vertices, constraints, onError) {
+        /** @type {boolean} 是否发生错误 */
+        this.error = false;
+        /** @type {(() => void) | undefined} 错误回调 */
+        this.onError = onError;
+        /** @type {Vector[]} 顶点列表（插入新点时会增长） */
+        this.vertices = vertices;
+        /** @type {number[][]} 约束边列表 */
+        this.constraints = constraints;
+        /** @type {Triangle[]} 当前三角形列表 */
+        this.triangles = [];
+        
+        // 构建约束边查找集合
+        this.constraintEdges = new Set();
+        for (const [a, b] of constraints) {
+            // 规范化边键（小索引在前）
+            const key = Tool.orderedPairKey(a, b);
+            this.constraintEdges.add(key);
+        }
+        // 初始剖分：耳切法
+        this.earClipping(vertices);
+    }
+
+    /**
+     * 获取当前三角形列表。
+     * @returns {Triangle[]} 三角形顶点索引列表
+     */
+    getTri() {
+        return this.triangles;
+    }
+    /**
+     * 耳裁切三角化，优先切割周长最小的耳朵。
+     * @param {Vector[]} poly - 多边形顶点
+     */
+    earClipping(poly) {
+        const verts = Array.from({ length: poly.length }, (_, i) => i);
+        let guard = 0;
+        while (verts.length > 3 && guard++ < 5000) {
+            let bestEar=null;
+            let minPerimeter=Infinity;
+            let bestIndex=-1;
+
+            for (let i = 0; i < verts.length; i++) {
+                const prev = poly[verts[(i - 1 + verts.length) % verts.length]];
+                const cur = poly[verts[i]];
+                const next = poly[verts[(i + 1) % verts.length]];
+                // cur 对应角度是否小于 180 度
+                if (!isConvex(prev, cur, next)) continue;
+                // 检查三角形是否包含其他点
+                let contains = false;
+                for (let j = 0; j < verts.length; j++) {
+                    if (j == i || j == (i - 1 + verts.length) % verts.length || j == (i + 1) % verts.length) continue;
+                    if (pointInTri(poly[verts[j]], prev, cur, next)) {
+                        contains = true;
+                        break;
+                    }
+                }
+                if (contains) continue;
+                // 其他点不能在线段 prev-next 上
+                for (let j = 0; j < verts.length; j++) {
+                    if (j == i || j == (i - 1 + verts.length) % verts.length || j == (i + 1) % verts.length) continue;
+                    if (distPtSegSq(poly[verts[j]], prev, next) == 0) // 判断点是否在线段上
+                    {
+                        if (vec.length2D(prev, poly[verts[j]]) == 0 || vec.length2D(next, poly[verts[j]]) == 0) continue;
+                        contains = true;
+                        break;
+                    }
+                }
+                if (contains) continue;
+                const perimeter = 
+                vec.length2D(prev, cur) +
+                vec.length2D(cur, next) +
+                vec.length2D(next, prev);
+            
+                // 找到周长最小的耳朵
+                if (perimeter < minPerimeter) {
+                    minPerimeter = perimeter;
+                    bestEar = {p:verts[(i - 1 + verts.length) % verts.length], c:verts[i], n:verts[(i + 1) % verts.length]};
+                    bestIndex = i;
+                }
+            }
+            // 找到最佳耳朵则切除
+            if (bestEar && bestIndex !== -1) {
+                this.triangles.push(new Triangle(bestEar.p, bestEar.c, bestEar.n));
+                verts.splice(bestIndex, 1);
+            } else {
+                // 找不到耳朵，退出循环
+                break;
+            }
+        }
+        if (verts.length == 3) {
+            this.triangles.push(new Triangle(verts[0], verts[1], verts[2]));
+        }else {
+            this.error = true;
+            if (this.onError) this.onError();
+            Instance.Msg("细节多边形耳切失败");
+        }
+    }
+    /**
+     * 向三角剖分中插入新点，拆分包含它的三角形并合法化受影响的边。
+     * @param {Vector} point - 要插入的点
+     */
+    insertPointSimplified(point) {
+
+        const pointIndex = this.vertices.length;
+        this.vertices.push(point);
+        const p=this.vertices[pointIndex];
+        let targetIdx = -1;
+
+        // 找到包含点的三角形
+        for (let i = 0; i < this.triangles.length; i++) {
+            if (this.triangles[i].containsPoint(p, this.vertices)) {
+                targetIdx = i;
+                break;
+            }
+        }
+        
+        if (targetIdx === -1) {
+            // 点不在任何三角形内（可能在边上），尝试处理边上点
+            this.handlePointOnEdge(pointIndex);
+            //Instance.Msg("点在边上");
+            return;
+        }
+
+        const t = this.triangles[targetIdx];
+
+        this.triangles.splice(targetIdx, 1);
+
+        // 分裂为三个新三角形
+        const t1 = new Triangle(t.a, t.b, pointIndex);
+        const t2 = new Triangle(t.b, t.c, pointIndex);
+        const t3 = new Triangle(t.c, t.a, pointIndex);
+        
+        this.triangles.push(t1, t2, t3);
+
+        // 只对这三条边进行局部优化
+        this.legalizeEdge(pointIndex, t.a, t.b);
+        this.legalizeEdge(pointIndex, t.b, t.c);
+        this.legalizeEdge(pointIndex, t.c, t.a);
+    }
+    /**
+     * 处理点落在三角形边上的情况，拆分相邻两个三角形为四个。
+     * @param {number} pointIndex - 新点在 vertices 中的索引
+     */
+    handlePointOnEdge(pointIndex) {
+        const p = this.vertices[pointIndex];
+        // 先检查是否在约束边上
+        for (const [a, b] of this.constraints) {
+            if (Tool.pointOnSegment2D(p.x, p.y, this.vertices[a].x, this.vertices[a].y, this.vertices[b].x, this.vertices[b].y, { includeEndpoints: true })) {
+                return;
+            }
+        }
+        // 查找包含该点的边
+        for (let i = 0; i < this.triangles.length; i++) {
+            const tri = this.triangles[i];
+            const edges = tri.edges();
+            
+            for (const [a, b] of edges) {
+                if (this.isConstraintEdge(a, b)) continue;
+                if (Tool.pointOnSegment2D(p.x, p.y, this.vertices[a].x, this.vertices[a].y, this.vertices[b].x, this.vertices[b].y, { includeEndpoints: true })) {
+                    // 找到共享该边的另一个三角形
+                    const otherTri = this.findAdjacentTriangleByEdge([a, b], tri);
+                    
+                    if (otherTri) {
+
+                        // 移除两个共享该边的三角形
+                        this.triangles.splice(this.triangles.indexOf(tri), 1);
+                        this.triangles.splice(this.triangles.indexOf(otherTri), 1);
+                        
+                        // 获取两个三角形中不在该边上的顶点
+                        const c = tri.oppositeVertex(a, b);
+                        const d = otherTri.oppositeVertex(a, b);
+                        
+                        // 创建四个新三角形
+                        const t1=new Triangle(a, pointIndex, c);
+                        const t2=new Triangle(pointIndex, b, c);
+                        const t3=new Triangle(a, d, pointIndex);
+                        const t4=new Triangle(pointIndex, d, b);
+
+                        this.triangles.push(t1,t2,t3,t4);
+
+                        // 优化新产生的边
+                        this.legalizeEdge(pointIndex, a, c);
+                        this.legalizeEdge(pointIndex, b, c);
+                        this.legalizeEdge(pointIndex, a, d);
+                        this.legalizeEdge(pointIndex, b, d);
+                        
+                        return;
+                    }
+                }
+            }
+        }
+    }
+    /**
+     * Delaunay 合法化：若边不满足空圆条件则翻转，跳过约束边。
+     * @param {number} pIdx - 新插入点索引
+     * @param {number} v1 - 边的一端
+     * @param {number} v2 - 边的另一端
+     */
+    legalizeEdge(pIdx, v1, v2) {
+        // 约束边不可翻转
+        if (this.isConstraintEdge(v1, v2)) {
+            return;
+        }
+        
+        const edge = [v1, v2];
+        const triangleWithP = this.findTriangleByVerts(v1, v2, pIdx);
+        if (!triangleWithP) return;
+        
+        const t2 = this.findAdjacentTriangleByEdge(edge, triangleWithP);
+        if (!t2) return;
+
+        const otherVert = t2.oppositeVertex(v1, v2);
+        
+        // 检查 Delaunay 条件
+        if (this.inCircumcircle(
+            this.vertices[v1], 
+            this.vertices[v2], 
+            this.vertices[pIdx], 
+            this.vertices[otherVert]
+        )) {
+            // 翻转边
+            this.removeTriangle(t2);
+            this.removeTriangle(triangleWithP);
+
+            // 创建两个新三角形
+            const tt1=new Triangle(v1, otherVert, pIdx);
+            const tt2=new Triangle(v2, otherVert, pIdx);
+
+            this.triangles.push(tt1,tt2);
+
+            // 递归优化新产生的两条外边
+            this.legalizeEdge(pIdx, v1, otherVert);
+            this.legalizeEdge(pIdx, v2, otherVert);
+        }
+    }
+    
+    /**
+     * 判断边是否为约束边（不可翻转）。
+     * @param {number} a
+     * @param {number} b
+     * @returns {boolean}
+     */
+    isConstraintEdge(a, b) {
+        const key = Tool.orderedPairKey(a, b);
+        return this.constraintEdges.has(key);
+    }
+
+    /**
+     * 根据三个顶点索引查找三角形（任意顺序）。
+     * @param {number} a
+     * @param {number} b
+     * @param {number} c
+     * @returns {Triangle | null}
+     */
+    findTriangleByVerts(a, b, c) {
+        for (const tri of this.triangles) {
+            if ((tri.a === a && tri.b === b && tri.c === c) ||
+                (tri.a === a && tri.b === c && tri.c === b) ||
+                (tri.a === b && tri.b === a && tri.c === c) ||
+                (tri.a === b && tri.b === c && tri.c === a) ||
+                (tri.a === c && tri.b === a && tri.c === b) ||
+                (tri.a === c && tri.b === b && tri.c === a)) {
+                return tri;
+            }
+        }
+        return null;
+    }
+    
+    /**
+     * 通过共享边查找相邻三角形。
+     * @param {number[]} edge - 边的两个顶点索引
+     * @param {Triangle} excludeTriangle - 排除的三角形
+     * @returns {Triangle | null}
+     */
+    findAdjacentTriangleByEdge(edge, excludeTriangle) {
+        const [a, b] = edge;
+        
+        for (const tri of this.triangles) {
+            if (tri === excludeTriangle) continue;
+            
+            if ((tri.a === a && tri.b === b) ||
+                (tri.a === b && tri.b === a) ||
+                (tri.a === a && tri.c === b) ||
+                (tri.a === b && tri.c === a) ||
+                (tri.b === a && tri.c === b) ||
+                (tri.b === b && tri.c === a)) {
+                return tri;
+            }
+        }
+        
+        return null;
+    }
+    
+    /**
+     * 移除指定三角形。
+     * @param {Triangle} triangle
+     */
+    removeTriangle(triangle) {
+        const index = this.triangles.indexOf(triangle);
+        if (index !== -1) {
+            this.triangles.splice(index, 1);
+        }
+    }
+
+    /**
+     * 检查点 d 是否在三角形 abc 的外接圆内。
+     * @param {{ x: any; y: any;}} a
+     * @param {{ x: any; y: any;}} b
+     * @param {{ x: any; y: any;}} c
+     * @param {{ x: any; y: any;}} d
+     * @returns {boolean}
+     */
+    inCircumcircle(a, b, c, d) {
+        const orient =
+        (b.x - a.x) * (c.y - a.y) -
+        (b.y - a.y) * (c.x - a.x);
+        const ax = a.x, ay = a.y;
+        const bx = b.x, by = b.y;
+        const cx = c.x, cy = c.y;
+        const dx = d.x, dy = d.y;
+        
+        const adx = ax - dx;
+        const ady = ay - dy;
+        const bdx = bx - dx;
+        const bdy = by - dy;
+        const cdx = cx - dx;
+        const cdy = cy - dy;
+        
+        const abdet = adx * bdy - bdx * ady;
+        const bcdet = bdx * cdy - cdx * bdy;
+        const cadet = cdx * ady - adx * cdy;
+        const alift = adx * adx + ady * ady;
+        const blift = bdx * bdx + bdy * bdy;
+        const clift = cdx * cdx + cdy * cdy;
+        
+        const det = alift * bcdet + blift * cadet + clift * abdet;
+        
+        return orient > 0 ? det > 0 : det < 0;
+    }
+}
+/**
+ * 三角形类，存储三个顶点索引并提供几何查询方法。
+ */
+class Triangle {
+    /**
+     * 用三个顶点索引创建三角形。
+     * @param {number} a - 顶点 A 索引
+     * @param {number} b - 顶点 B 索引
+     * @param {number} c - 顶点 C 索引
+     */
+    constructor(a, b, c) {
+        this.a = a;
+        this.b = b;
+        this.c = c;
+    }
+
+    /**
+     * 返回三角形的三条边（顶点索引对）。
+     * @returns {number[][]}
+     */
+    edges() {
+        return [
+            [this.a, this.b],
+            [this.b, this.c],
+            [this.c, this.a]
+        ];
+    }
+
+    /**
+     * 检查三角形是否包含某条边。
+     * @param {number[]} edge - 边的两个顶点索引
+     * @returns {boolean}
+     */
+    hasEdge(edge) {
+        const [e1, e2] = edge;
+        return (this.a === e1 && this.b === e2) ||
+            (this.b === e1 && this.c === e2) ||
+            (this.c === e1 && this.a === e2) ||
+            (this.a === e2 && this.b === e1) ||
+            (this.b === e2 && this.c === e1) ||
+            (this.c === e2 && this.a === e1);
+    }
+
+    /**
+     * 检查点是否在三角形内。
+     * @param {Vector} point
+     * @param {Vector[]} vertices
+     * @returns {boolean}
+     */
+    containsPoint(point, vertices) {
+        const va = vertices[this.a];
+        const vb = vertices[this.b];
+        const vc = vertices[this.c];
+
+        return pointInTri(point, va, vb, vc);
+    }
+
+    /**
+     * 找到边对面的顶点。
+     * @param {number} v1
+     * @param {number} v2
+     * @returns {number} 对面顶点索引，未找到时返回 -1
+     */
+    oppositeVertex(v1, v2) {
+        if (this.a !== v1 && this.a !== v2) return this.a;
+        if (this.b !== v1 && this.b !== v2) return this.b;
+        if (this.c !== v1 && this.c !== v2) return this.c;
+        return -1;
+    }
+    /**
+    * 计算点在三角形平面上的插值高度
+    * @param {number} x 点的 x 坐标
+    * @param {number} y 点的 y 坐标
+     * @param {Vector[]} vertices
+    * @returns {number} 插值高度
+     */
+    interpolateHeight(x, y, vertices) {
+        const va = vertices[this.a];
+        const vb = vertices[this.b];
+        const vc = vertices[this.c];
+        
+        // 使用重心坐标插值
+        const denom = (vb.y - vc.y) * (va.x - vc.x) + (vc.x - vb.x) * (va.y - vc.y);
+        
+        if (Math.abs(denom) < 1e-6) {
+            // 三角形退化时，返回三个顶点高度平均值
+            return (va.z + vb.z + vc.z) / 3;
+        }
+        
+        const u = ((vb.y - vc.y) * (x - vc.x) + (vc.x - vb.x) * (y - vc.y)) / denom;
+        const v = ((vc.y - va.y) * (x - vc.x) + (va.x - vc.x) * (y - vc.y)) / denom;
+        const w = 1 - u - v;
+        
+        // 插值高度
+        return u * va.z + v * vb.z + w * vc.z;
+    }
+}
+
+/**
+ * @module 导航网格/跳跃链接构建
+ */
+/** @typedef {import("cs_script/point_script").Vector} Vector */
+/** @typedef {import("./path_manager").NavMeshMesh} NavMeshMesh */
+/** @typedef {import("./path_manager").NavMeshLink} NavMeshLink */
+/**
+ * 跳跃链接自动构建器。
+ *
+ * 在不可达的分离行走区域间自动构建跳跃连接。
+ * 使用网格空间索引快速查找候选边缘，并通过 TraceBox
+ * 验证跳跃路径的可行性。支持 Tile 内和跨 Tile 链接。
+ *
+ * @navigationTitle 跳跃链接构建
+ */
+class JumpLinkBuilder
+{
+    /**
+     * 初始化跳跃链接构建器，绑定多边形网格。
+    * @param {NavMeshMesh} polyMesh
+     */
+    constructor(polyMesh) {
+        /** @type {NavMeshMesh} 待分析的多边形网格引用 */
+        this.mesh = polyMesh;
+        /** 2D 边界边间最大跳跃距离（单位：引擎坐标），用于空间索引查询半径 */
+        this.jumpDist = 32;
+        /** 最大跳跃高度（MAX_JUMP_HEIGHT × 体素 Z 尺寸），超过此高差的候选将被丢弃 */
+        this.jumpHeight = MAX_JUMP_HEIGHT*MESH_CELL_SIZE_Z;
+        /** 可行走高差阈值（MAX_WALK_HEIGHT × 体素 Z 尺寸），低于此高差的连接标记为 WALK 而非 JUMP */
+        this.walkHeight = MAX_WALK_HEIGHT*MESH_CELL_SIZE_Z;
+        /** 代理站立高度（AGENT_HEIGHT × 体素 Z 尺寸），用于 TraceBox 验证 */
+        this.agentHeight = AGENT_HEIGHT * MESH_CELL_SIZE_Z;
+        /** 同一岛对内跳跃点最小间距（平方），避免密集重复连接 */
+        this.linkdist=250;
+
+        /** @type {Uint16Array} 每个 link 占 2 个 uint16：poly[i*2]=起始 poly, poly[i*2+1]=目标 poly */
+        this.poly=new Uint16Array(MAX_LINKS*2);
+        /** @type {Float32Array} 每个 link 的寻路代价（通常为距离 × 1.5） */
+        this.cost=new Float32Array(MAX_LINKS);
+
+        /** @type {Uint8Array} 每个 link 的类型（PathState.WALK / PathState.JUMP） */
+        this.type=new Uint8Array(MAX_LINKS);
+
+        /** @type {Float32Array} 每个 link 占 6 个 float：pos[i*6..i*6+2] 为起点 XYZ, pos[i*6+3..i*6+5] 为终点 XYZ */
+        this.pos=new Float32Array(MAX_LINKS*6);
+        /** @type {number} 当前已写入的 link 数量 */
+        this.length=0;
+
+        /** @type {Int16Array} 每个多边形所属的连通区域 ID（由 buildConnectivity 填充）；同岛多边形之间不构建跳跃链接 */
+        this.islandIds=new Int16Array(MAX_POLYS);
+    }
+    /**
+     * 收集所有边界边，返回TypedArray，每3个为一组：polyIndex, p1索引, p2索引
+     * p1/p2为顶点索引（不是坐标），便于后续批量处理
+     * @returns {{boundarylengh:number,boundaryEdges:Uint16Array}} [polyIndex, p1, p2, ...]
+     */
+    collectBoundaryEdges() {
+        const polyCount = this.mesh.polyslength;
+        // 预估最大边界边数量
+        const maxEdges = polyCount * 6;
+        const result = new Uint16Array(maxEdges * 3);
+        let edgeCount = 0;
+        for (let i = 0; i < polyCount; i++) {
+            const startVert = this.mesh.polys[i * 2];
+            const endVert = this.mesh.polys[i * 2 + 1];
+            const vertCount = endVert - startVert + 1;
+            for (let j = 0; j < vertCount; j++) {
+                const neighList = this.mesh.neighbors[i][j];
+                if (!neighList[0]) {
+                    const vi0 = startVert + j;
+                    const vi1 = startVert + ((j + 1) % vertCount);
+                    const idx = edgeCount * 3;
+                    result[idx] = i;
+                    result[idx + 1] = vi0;
+                    result[idx + 2] = vi1;
+                    edgeCount++;
+                }
+            }
+        }
+        // 截取有效部分
+        return {boundarylengh:edgeCount,boundaryEdges:result};
+    }
+    /**
+     * 判断两个多边形是否已经是物理邻居
+     * @param {number} idxA
+     * @param {number} idxB
+     */
+    areNeighbors(idxA, idxB) {
+        const edgeList = this.mesh.neighbors[idxA];
+        for (const entry of edgeList) {
+            for (let k = 1; k <= entry[0]; k++) {
+                if (entry[k] === idxB) return true;
+            }
+        }
+        return false;
+    }
+    // 1D 区间间距：重叠返回 0，不重叠返回最小间距
+    /**
+     * 计算两个一维区间的间距，重叠时返回 0，否则返回最小间距。
+     * @param {number} a0
+     * @param {number} a1
+     * @param {number} b0
+     * @param {number} b1
+     */
+    intervalGap(a0, a1, b0, b1) {
+        const amin = Math.min(a0, a1);
+        const amax = Math.max(a0, a1);
+        const bmin = Math.min(b0, b1);
+        const bmax = Math.max(b0, b1);
+
+        if (amax < bmin) return bmin - amax; // A 在 B 左侧
+        if (bmax < amin) return amin - bmax; // B 在 A 左侧
+        return 0; // 重叠
+    }
+    /**
+     * 计算两条线段在 XY 平面上的最近点对及距离。
+     *
+     * 算法来自《Real-Time Collision Detection》，在 XY 平面求解参数 s/t，
+     * 再映射回 3D 坐标。同时进行提前剪枝：Z 间距 > jumpHeight 或 XY AABB 间距 > dist2dsq 时直接返回。
+     *
+     * @param {number} p1x - 线段 A 起点 X
+     * @param {number} p1y - 线段 A 起点 Y
+     * @param {number} p1z - 线段 A 起点 Z
+     * @param {number} p2x - 线段 A 终点 X
+     * @param {number} p2y - 线段 A 终点 Y
+     * @param {number} p2z - 线段 A 终点 Z
+     * @param {number} p3x - 线段 B 起点 X
+     * @param {number} p3y - 线段 B 起点 Y
+     * @param {number} p3z - 线段 B 起点 Z
+     * @param {number} p4x - 线段 B 终点 X
+     * @param {number} p4y - 线段 B 终点 Y
+     * @param {number} p4z - 线段 B 终点 Z
+     * @param {number} dist2dsq - 2D 距离平方阈值
+     * @returns {{dist:number, ptA:Vector, ptB:Vector}|undefined} 最近点对及距离平方，或 undefined 表示不满足条件
+     */
+    closestPtSegmentSegment(p1x,p1y,p1z,p2x,p2y,p2z,p3x,p3y,p3z,p4x,p4y,p4z,dist2dsq) {
+        const gapZ=this.intervalGap(p1z, p2z, p3z, p4z);
+        if (gapZ > this.jumpHeight) return;
+        const gapX = this.intervalGap(p1x, p2x, p3x, p4x);
+        const gapY = this.intervalGap(p1y, p2y, p3y, p4y);
+
+        if (gapX * gapX + gapY * gapY > dist2dsq)return
+        // 算法来源：Real-Time Collision Detection (Graham Walsh)
+        // 计算线段 S1(p1,p2) 与 S2(p3,p4) 之间最近点
+        
+        const d1 = { x: p2x - p1x, y: p2y - p1y}; // 忽略 Z 参与平面距离计算
+        const d2 = { x: p4x - p3x, y: p4y - p3y};
+        const r = { x: p1x - p3x, y: p1y - p3y};
+
+        const a = d1.x * d1.x + d1.y * d1.y; // Squared length of segment S1
+        const e = d2.x * d2.x + d2.y * d2.y; // Squared length of segment S2
+        const f = d2.x * r.x + d2.y * r.y;
+
+        const EPSILON = 1;
+
+        // 检查线段是否退化成点
+        if (a <= EPSILON && e <= EPSILON) {
+            // 两个都是点
+            return { dist: (p1x - p3x)*(p1x - p3x) + (p1y - p3y)*(p1y - p3y) + (p1z - p3z)*(p1z - p3z), ptA: {x: p1x, y: p1y, z: p1z}, ptB: {x: p3x, y: p3y, z: p3z} };
+        }
+        
+        let s, t;
+        if (a <= EPSILON) {
+            // S1 是点
+            s = 0.0;
+            t = f / e;
+            t = Math.max(0.0, Math.min(1.0, t));
+        } else {
+            const c = d1.x * r.x + d1.y * r.y;
+            if (e <= EPSILON) {
+                // S2 是点
+                t = 0.0;
+                s = Math.max(0.0, Math.min(1.0, -c / a));
+            } else {
+                // 常规情况：两条线段
+                const b = d1.x * d2.x + d1.y * d2.y;
+                const denom = a * e - b * b;
+
+                if (denom !== 0.0) {
+                    s = Math.max(0.0, Math.min(1.0, (b * f - c * e) / denom));
+                } else {
+                    // 平行
+                    s = 0.0;
+                }
+
+                t = (b * s + f) / e;
+
+                if (t < 0.0) {
+                    t = 0.0;
+                    s = Math.max(0.0, Math.min(1.0, -c / a));
+                } else if (t > 1.0) {
+                    t = 1.0;
+                    s = Math.max(0.0, Math.min(1.0, (b - c) / a));
+                }
+            }
+        }
+        // 计算最近点坐标（包含 Z）
+        // 注意：t 和 s 在 XY 平面求得，再应用到 3D 坐标
+        const ptA = {
+            x: p1x + (p2x - p1x) * s,
+            y: p1y + (p2y - p1y) * s,
+            z: p1z + (p2z - p1z) * s
+        };
+
+        const ptB = {
+            x: p3x + (p4x - p3x) * t,
+            y: p3y + (p4y - p3y) * t,
+            z: p3z + (p4z - p3z) * t
+        };
+        const heightDiff = Math.abs(ptA.z - ptB.z);
+        if (heightDiff > this.jumpHeight) return;
+
+        let dist=(ptA.x - ptB.x)*(ptA.x - ptB.x) + (ptA.y - ptB.y)*(ptA.y - ptB.y);
+        if(dist > dist2dsq)return;
+        dist+=heightDiff*heightDiff;
+        if (heightDiff < 1 && dist < 1) return;
+        return {
+            dist,
+            ptA,
+            ptB
+        };
+    }
+    /**
+     * 返回当前构建的 NavMeshLink 结构。
+     *
+     * 若传入 Extlink，先将其追加到当前数组末尾再返回（用于跨 Tile 增量合并）。
+     *
+     * @param {import("./path_manager").NavMeshLink} [Extlink] - 可选的已有连接，追加到末尾
+     * @returns {NavMeshLink}
+     */
+    return(Extlink) {
+        if(Extlink)
+        {
+            const a = Extlink.length;
+            const b = this.length;
+
+            this.poly.set(
+                Extlink.poly.subarray(0, a * 2),
+                b*2
+            );
+
+            this.cost.set(
+                Extlink.cost.subarray(0, a),
+                b
+            );
+
+            this.type.set(
+                Extlink.type.subarray(0, a),
+                b
+            );
+
+            this.pos.set(
+                Extlink.pos.subarray(0, a * 6),
+                b * 6
+            );
+            this.length+=a;
+        }
+        return {
+            poly: this.poly,
+            pos: this.pos,
+            type: this.type,
+            cost: this.cost,
+            length: this.length
+        };
+    }
+    /**
+     * 构建 Tile 内部的所有跳跃连接。
+     *
+     * 流程：计算连通分量 → 收集边界边 → 建立空间索引 → 收集候选 → 去重筛选 → 返回 NavMeshLink。
+     *
+     * @returns {NavMeshLink}
+     */
+    init() {
+        // 3) 计算 mesh 连通分量（islandIds），后续用于“同岛且高度可走”过滤。
+        this.buildConnectivity();
+        // 4) 收集边界边（只在边界边之间寻找 jump 候选）。
+        const {boundarylengh,boundaryEdges} = this.collectBoundaryEdges();
+        // 5) 为边界边建立空间网格索引，加速近邻边查询。
+        const edgeGrid = this.buildEdgeGrid(boundaryEdges,boundarylengh);
+        // 6) 收集候选并执行首轮筛选，得到每个 poly 对的最优候选。
+        const bestJumpPerPoly = this._collectBestJumpCandidates(boundaryEdges,boundarylengh, edgeGrid);
+        // 7) 对候选做收尾去重（pair 去重 + 岛对近距去重），并生成最终 links。
+        this._finalizeJumpLinks(bestJumpPerPoly);
+        // 9) 返回构建完成的 links。
+        return this.return();
+    }
+    /**
+     * 仅构建指定 Tile 与周围 Tile 之间的跨 Tile 跳跃连接。
+     *
+     * 与 init() 类似，但候选筛选增加 tileid 标记过滤：
+     * 仅从中心 Tile (tileid=2) 的边界边出发，目标不能同属中心 Tile。
+     *
+     * @param {number} boundarylengh - 边界边数量
+     * @param {Uint16Array} boundaryEdges - 边界边数组（每 3 个为一组）
+     * @param {Uint8Array} tileid - 每个 poly 的 tile 标记（2=中心, 1=邻居）
+     * @param {NavMeshLink} Extlink - 已有的跨 Tile 连接，追加到末尾
+     * @returns {NavMeshLink}
+     */
+    initInterTileIn(boundarylengh,boundaryEdges,tileid,Extlink) {
+        // 4) 计算 mesh 连通分量。
+        this.buildConnectivity(tileid);
+        // 5) 收集边界边。
+        // 6) 建立边界边空间索引。
+        const edgeGrid = this.buildEdgeGrid(boundaryEdges,boundarylengh);
+        // 7) 收集候选并筛选：额外过滤“同 tile”pair，只保留跨 tile 候选。
+        const bestJumpPerPoly = this._collectBestJumpCandidates(boundaryEdges,boundarylengh,edgeGrid,tileid);
+        // 8) 对候选做收尾去重并生成最终 links。
+        this._finalizeJumpLinks(bestJumpPerPoly);
+        // 10) 返回构建完成的 links。
+        return this.return(Extlink);
+    }
+    /**
+     * 遍历所有边界边对，通过空间索引查询近邻边，筛选出每对多边形之间的最优跳跃候选。
+     *
+     * 过滤条件：同岛排除、AABB 距离剪枝、最近点对距离与高度检查、TraceBox 路径验证。
+     * 对同一 poly 对只保留距离最短的候选。
+     *
+     * @param {Uint16Array} boundaryEdges - 边界边数组
+     * @param {number} boundaryLength - 边界边数量
+     * @param {{grid: Map<number, number[]>, metas: Float32Array, cellSize: number, count: number}} edgeGrid - 空间索引
+     * @param {Uint8Array} [tileid] - 可选 tile 标记，有值时仅从 tileid=2 出发
+     * @returns {Map<number,any>} poly 对到最优候选的映射
+     */
+    _collectBestJumpCandidates(boundaryEdges, boundaryLength, edgeGrid, tileid) {
+        // Key: "polyA_polyB", Value: { targetPoly, dist, startPos, endPos }
+        const verts = this.mesh.verts;
+        const islandIds = this.islandIds;
+        const jumpDistSq = this.jumpDist * this.jumpDist;
+        const bestJumpPerPoly = new Map();
+        const candidateIndices=new Uint16Array(boundaryLength);
+        for (let i = 0; i < boundaryLength; i++) {
+            const idxA = (i<<1)+i;
+            const polyIndexA = boundaryEdges[idxA];
+            if(!islandIds[polyIndexA])continue;
+            if(tileid&&tileid[polyIndexA]!=2)continue;
+            const viA0 = boundaryEdges[idxA + 1]* 3;
+            const viA1 = boundaryEdges[idxA + 2]* 3;
+            candidateIndices[0]=0;
+            this.queryNearbyEdges(edgeGrid, i, this.jumpDist,candidateIndices);
+            for(let s=1;s<=candidateIndices[0];s++)
+            {
+                const j=candidateIndices[s];
+                const idxB = (j<<1)+j;
+                const polyIndexB = boundaryEdges[idxB];
+                if(!islandIds[polyIndexB])continue;
+                if(islandIds[polyIndexA] === islandIds[polyIndexB])continue;//同岛内的边界边不考虑构建跳跃链接
+                if (polyIndexA === polyIndexB) continue;
+                if(tileid&&tileid[polyIndexB]==2)continue;
+                if(!tileid)
+                {
+                    //init()调用，判断多边形是否是邻居
+                    if (this.areNeighbors(polyIndexA, polyIndexB)) continue;
+                }
+                const viB0 = boundaryEdges[idxB + 1]* 3;
+                const viB1 = boundaryEdges[idxB + 2]* 3;
+                const minBoxDist = this.bboxMinDist2D(edgeGrid.metas,i,j);
+                if (minBoxDist > jumpDistSq) continue;
+                
+                const closestResult = this.closestPtSegmentSegment(
+                    verts[viA0], verts[viA0+1], verts[viA0+2],
+                    verts[viA1], verts[viA1+1], verts[viA1+2],
+                    verts[viB0], verts[viB0+1], verts[viB0+2],
+                    verts[viB1], verts[viB1+1], verts[viB1+2],
+                    jumpDistSq);
+                if (!closestResult) continue;
+                //Instance.DebugLine({start:{x:verts[viA0],y:verts[viA0+1],z:verts[viA0+2]+5},
+                //    end:{x:verts[viA1],y:verts[viA1+1],z:verts[viA1+2]+5},
+                //    duration:5,color:{r:0,g:0,b:255}
+                //});
+                //Instance.DebugLine({start:{x:verts[viB0],y:verts[viB0+1],z:verts[viB0+2]+5},
+                //    end:{x:verts[viB1],y:verts[viB1+1],z:verts[viB1+2]+5},
+                //    duration:5,color:{r:0,g:0,b:255}
+                //});
+                const { dist, ptA, ptB } = closestResult;
+                if (!this.validateJumpPath(ptA, ptB)) continue;
+                this.updateBestCandidate(bestJumpPerPoly, polyIndexA, polyIndexB, dist, ptA, ptB);
+            }
+        }
+        return bestJumpPerPoly;
+    }
+
+    /**
+     * 最终连接生成：对候选进行 pair 去重和岛对近距去重，写入 TypedArray。
+     *
+     * 对每个候选检查已写入的同岛对 link，若起/终点距离 < linkdist 则跳过。
+     * 根据高差将 link 标记为 WALK 或 JUMP 类型。
+     *
+     * @param {Map<number,any>} bestJumpPerPoly - _collectBestJumpCandidates 的输出
+     */
+    _finalizeJumpLinks(bestJumpPerPoly) {
+        const sortedCandidates = Array.from(bestJumpPerPoly.values());
+        let linkCount = 0;
+        const linkdistsq=this.linkdist*this.linkdist;
+        for (const cand of sortedCandidates) {
+            // 距离判重，需遍历已写入的link
+            let tooClose = false;
+            for (let k = 0; k < linkCount; k++) {
+                const plIdx = k << 1;
+                const exA = this.poly[plIdx];
+                const exB = this.poly[plIdx + 1];
+                const exIslandA = this.islandIds[exA];
+                const exIslandB = this.islandIds[exB];
+                const islandA = this.islandIds[cand.startPoly];
+                const islandB = this.islandIds[cand.endPoly];
+                if ((islandA === exIslandA && islandB === exIslandB) || (islandA === exIslandB && islandB === exIslandA)) {
+                    // 距离判重
+                    const posIdx = (k << 2) + (k << 1);
+                    const exStart = {
+                        x: this.pos[posIdx],
+                        y: this.pos[posIdx + 1],
+                        z: this.pos[posIdx + 2]
+                    };
+                    const exEnd = {
+                        x: this.pos[posIdx + 3],
+                        y: this.pos[posIdx + 4],
+                        z: this.pos[posIdx + 5]
+                    };
+                    const dSqStart = vec.lengthsq(cand.startPos, exStart);
+                    const dSqEnd = vec.lengthsq(cand.endPos, exEnd);
+                    if (dSqStart < linkdistsq || dSqEnd < linkdistsq) {
+                        tooClose = true;
+                        break;
+                    }
+                }
+            }
+            if (tooClose) continue;
+            // 写入TypedArray
+            const pid=linkCount<<1;
+            this.poly[pid] = cand.startPoly;
+            this.poly[pid + 1] = cand.endPoly;
+            const posIdx = (linkCount << 2) + (linkCount << 1);
+            this.pos[posIdx] = cand.startPos.x;
+            this.pos[posIdx + 1] = cand.startPos.y;
+            this.pos[posIdx + 2] = cand.startPos.z;
+            this.pos[posIdx + 3] = cand.endPos.x;
+            this.pos[posIdx + 4] = cand.endPos.y;
+            this.pos[posIdx + 5] = cand.endPos.z;
+            this.cost[linkCount] = cand.dist * 1.5;
+            this.type[linkCount] = (Math.abs(cand.startPos.z - cand.endPos.z) <= this.walkHeight ? PathState.WALK : PathState.JUMP);
+            linkCount++;
+        }
+        this.length = linkCount;
+    }
+    /**
+     * BFS 计算多边形网格的连通分量，将结果写入 this.islandIds。
+     *
+     * 互相连通的多边形获得相同的区域 ID，后续筛选时同岛 poly 对将被跳过。
+     * 若传入 tileid，只对 tileid[i] != 0 的多边形计算连通性。
+     *
+     * @param {Uint8Array} [tileid] - 可选的 tile 标记数组
+     */
+    buildConnectivity(tileid) {
+        const numPolys = this.mesh.polyslength;
+        this.islandIds = new Int16Array(numPolys);
+        let currentId = 1;
+        // 用TypedArray实现队列
+        const queue = new Uint16Array(numPolys);
+        for (let i = 0; i < numPolys; i++) {
+            if (this.islandIds[i]) continue;
+            if(tileid&&!tileid[i])continue;
+            currentId++;
+            let head = 0, tail = 0;
+            queue[tail++] = i;
+            this.islandIds[i] = currentId;
+            while (head < tail) {
+                let u = queue[head++];
+                const neighbors = this.mesh.neighbors[u];
+                // 获取该多边形的边数
+                u<<=1;
+                const startVert = this.mesh.polys[u];
+                const endVert = this.mesh.polys[u + 1];
+                const edgeCount = endVert - startVert + 1;
+                for (let j = 0; j < edgeCount; j++) {
+                    const entry = neighbors[j];
+                    if (entry[0] == 0) continue;
+                    for (let k = 1; k <= entry[0]; k++) {
+                        const v = entry[k];
+                        if (!this.islandIds[v]) {
+                            this.islandIds[v] = currentId;
+                            queue[tail++] = v;
+                        }
+                    }
+                }
+            }
+        }
+        //Instance.Msg(`共有${currentId-1}个独立行走区域`);
+    }
+
+    /**
+     * 为边界边构建空间网格索引，加速近邻边查询。
+     *
+     * 每条边的 XY AABB 存入 metas（Float32Array），
+     * 按 cellSize=jumpDist 分网格存入 grid Map。
+     *
+     * @param {Uint16Array} edges - 边界边数组（每 3 个为一组）
+     * @param {number} count - 边界边数量
+     * @returns {{grid: Map<number, number[]>, metas: Float32Array, cellSize: number, count: number}}
+     */
+    buildEdgeGrid(edges, count) {
+        const cellSize = this.jumpDist;
+        const grid = new Map();
+        const metas = new Float32Array(count << 2);
+        for (let i = 0; i < count; i++) {
+            const idx = (i<<1)+i;
+            // const polyIndex = edges[idx]; // 未用
+            const vi0 = edges[idx + 1]*3;
+            const vi1 = edges[idx + 2]*3;
+            const x0 = this.mesh.verts[vi0], y0 = this.mesh.verts[vi0 + 1];
+            const x1 = this.mesh.verts[vi1], y1 = this.mesh.verts[vi1 + 1];
+            const minX = Math.min(x0, x1);
+            const maxX = Math.max(x0, x1);
+            const minY = Math.min(y0, y1);
+            const maxY = Math.max(y0, y1);
+            const metaIdx = i << 2;
+            metas[metaIdx] = minX;
+            metas[metaIdx + 1] = maxX;
+            metas[metaIdx + 2] = minY;
+            metas[metaIdx + 3] = maxY;
+            const gridX0 = Math.floor(minX / cellSize);
+            const gridX1 = Math.floor(maxX / cellSize);
+            const gridY0 = Math.floor(minY / cellSize);
+            const gridY1 = Math.floor(maxY / cellSize);
+            for (let x = gridX0; x <= gridX1; x++) {
+                for (let y = gridY0; y <= gridY1; y++) {
+                    const k = (y << 16) | x;
+                    if(!grid.has(k)) grid.set(k, []);
+                    grid.get(k).push(i);
+                }
+            }
+        }
+        return { grid, metas, cellSize,count};
+    }
+
+    /**
+     * 在空间索引中查询指定边的近邻边，结果写入 result 数组。
+     *
+     * result[0] 用作计数器，查询范围为边的 AABB 向外扩展 expand 距离。
+     *
+     * @param {{grid: Map<number, number[]>, metas: Float32Array, cellSize: number, count: number}} edgeGrid - 空间索引
+     * @param {number} edgeIndex - 当前边索引
+     * @param {number} expand - 扩展距离
+     * @param {Uint16Array} result - 输出数组，result[0]=数量，result[1..]=索引
+     */
+    queryNearbyEdges(edgeGrid, edgeIndex, expand, result) {
+        edgeIndex <<=2;
+        const x0 = Math.floor((edgeGrid.metas[edgeIndex] - expand) / edgeGrid.cellSize);
+        const x1 = Math.floor((edgeGrid.metas[edgeIndex + 1] + expand) / edgeGrid.cellSize);
+        const y0 = Math.floor((edgeGrid.metas[edgeIndex + 2] - expand) / edgeGrid.cellSize);
+        const y1 = Math.floor((edgeGrid.metas[edgeIndex + 3] + expand) / edgeGrid.cellSize);
+        /**@type {Uint8Array} */
+        const seen = new Uint8Array(edgeGrid.count);
+        for (let x = x0; x <= x1; x++) {
+            for (let y = y0; y <= y1; y++) {
+                const k = (y << 16) | x;
+                const list = edgeGrid.grid.get(k);
+                if (!list) continue;
+                for (const idx of list) {
+                    if (seen[idx]) continue;
+                    seen[idx] = 1;
+                    result[++result[0]] = idx;
+                }
+            }
+        }
+        return;
+    }
+
+    /**
+     * 计算两条边界边 AABB 在 2D 平面上的最小距离平方，用于快速剪枝。
+     *
+     * @param {Float32Array} metas - 边界边 AABB 元数据
+     * @param {number} idxA - 第一条边索引
+     * @param {number} idxB - 第二条边索引
+     * @returns {number} 2D AABB 最小距离平方
+     */
+    bboxMinDist2D(metas, idxA, idxB) {
+        idxA<<=2;
+        idxB<<=2;
+        return vec.length2Dsq({x:Math.max(0, Math.max(metas[idxA], metas[idxB]) - Math.min(metas[idxA + 1], metas[idxB + 1])),y:Math.max(0, Math.max(metas[idxA + 2], metas[idxB + 2]) - Math.min(metas[idxA + 3], metas[idxB + 3])),z:0});
+    }
+
+    /**
+     * 通过 TraceBox 验证跳跃路径的可行性。
+     *
+     * 分 6 条射线模拟“升-平移-降”的抛物线路径（正向 + 反向），
+     * 任一条线碎于障碍则判定不可跳跃。
+     *
+     * @param {Vector} a - 起点
+     * @param {Vector} b - 终点
+     * @returns {boolean} true 表示路径无障碍可跳跃
+     */
+    validateJumpPath(a, b) {
+        const z=Math.max(a.z, b.z)+8;
+
+        const start = { x: a.x, y: a.y, z: 8 };
+        const end = { x: b.x, y: b.y, z: 8 };
+
+        const boxMins = { x: -1, y: -1, z: 0 };
+        const boxMaxs = { x: 1, y: 1, z: 1 };
+        const hit = Instance.TraceBox({
+            mins: boxMins,
+            maxs: boxMaxs,
+            start:vec.Zfly(start,z),
+            end:vec.Zfly(end,z),
+            ignorePlayers: true
+        });
+        if (hit && hit.didHit) return false;
+        const hitup = Instance.TraceBox({
+            mins: boxMins,
+            maxs: boxMaxs,
+            start:vec.Zfly(start,a.z),
+            end:vec.Zfly(start,z),
+            ignorePlayers: true
+        });
+        if (hitup && hitup.didHit) return false;
+        const hitdown = Instance.TraceBox({
+            mins: boxMins,
+            maxs: boxMaxs,
+            start:vec.Zfly(end,z),
+            end:vec.Zfly(end,b.z),
+            ignorePlayers: true
+        });
+        if (hitdown && hitdown.didHit) return false;
+
+        const hitReverse = Instance.TraceBox({
+            mins: boxMins,
+            maxs: boxMaxs,
+            start: vec.Zfly(end,z),
+            end: vec.Zfly(start,z),
+            ignorePlayers: true
+        });
+        if (hitReverse && hitReverse.didHit) return false;
+        const hitupReverse = Instance.TraceBox({
+            mins: boxMins,
+            maxs: boxMaxs,
+            start:vec.Zfly(end,b.z),
+            end:vec.Zfly(end,z),
+            ignorePlayers: true
+        });
+        if (hitupReverse && hitupReverse.didHit) return false;
+        const hitdownReverse = Instance.TraceBox({
+            mins: boxMins,
+            maxs: boxMaxs,
+            start:vec.Zfly(start,z),
+            end:vec.Zfly(start,a.z),
+            ignorePlayers: true
+        });
+        if (hitdownReverse && hitdownReverse.didHit) return false;
+        return true;
+    }
+    /**
+     * 更新 poly 对的最优跳跃候选：若新候选距离更短则替换。
+     *
+     * key 为 (idxA << 16) | idxB，保证每对多边形只保留一个最优候选。
+     *
+     * @param {Map<number,any>} map - poly 对到候选的映射
+     * @param {number} idxA - 起始多边形索引
+     * @param {number} idxB - 目标多边形索引
+     * @param {number} dist - 距离平方
+     * @param {Vector} ptA - 起点
+     * @param {Vector} ptB - 终点
+     */
+    updateBestCandidate(map, idxA, idxB, dist, ptA, ptB) {
+        // 检查是否已记录过该多边形对的跳跃目标
+        const key = (idxA << 16) | idxB;
+
+        const existing = map.get(key);
+        // 若未记录或发现更近目标，则更新
+        if (!existing || dist < existing.dist) {
+            map.set(key, {
+                startPoly: idxA,
+                endPoly: idxB,
+                dist: dist,
+                startPos: { ...ptA },
+                endPos: { ...ptB }
+            });
+        }
+    }
+    /**
+     * 调试绘制所有跳跃连接（线段 + 多边形边界）。
+     *
+     * WALK 类型显示为绿色，JUMP 类型显示为蓝色，多边形边界显示为品红色。
+     *
+     * @param {number} [duration=10] - 绘制持续时间（秒）
+     */
+    debugDraw(duration = 10) {
+        // 支持TypedArray结构
+        Instance.Msg("debug");
+        const { poly, pos, type, length } = this;
+        const mesh = this.mesh;
+        for (let i = 0; i < length; i++) {
+            const polyA = poly[i * 2];
+            const polyB = poly[i * 2 + 1];
+            const t = type[i];
+            const start = {
+                x: pos[i * 6],
+                y: pos[i * 6 + 1],
+                z: pos[i * 6 + 2]
+            };
+            const end = {
+                x: pos[i * 6 + 3],
+                y: pos[i * 6 + 4],
+                z: pos[i * 6 + 5]
+            };
+            Instance.DebugLine({
+                start,
+                end,
+                color: { r: 0, g: (t === 1 ? 255 : 0), b: 255 },
+                duration
+            });
+            // 可选：画起点终点球体
+            // Instance.DebugSphere({ center: start, radius: 4, color: { r: 0, g: 255, b: 0 }, duration });
+            // Instance.DebugSphere({ center: end, radius: 4, color: { r: 255, g: 0, b: 0 }, duration });
+            // 绘制PolyB边界
+            if (mesh && mesh.polys && mesh.verts) {
+                const startVertB = mesh.polys[polyB * 2];
+                const endVertB = mesh.polys[polyB * 2 + 1];
+                const vertCountB = endVertB - startVertB+1;
+                for (let j = 0; j < vertCountB; j++) {
+                    const vi0 = startVertB + j;
+                    const vi1 = startVertB + ((j + 1) % vertCountB);
+                    const v0 = {
+                        x: mesh.verts[vi0 * 3],
+                        y: mesh.verts[vi0 * 3 + 1],
+                        z: mesh.verts[vi0 * 3 + 2]
+                    };
+                    const v1 = {
+                        x: mesh.verts[vi1 * 3],
+                        y: mesh.verts[vi1 * 3 + 1],
+                        z: mesh.verts[vi1 * 3 + 2]
+                    };
+                    Instance.DebugLine({ start: v0, end: v1, color: { r: 255, g: 0, b: 255 }, duration });
+                }
+                // 绘制PolyA边界
+                const startVertA = mesh.polys[polyA * 2];
+                const endVertA = mesh.polys[polyA * 2 + 1];
+                const vertCountA = endVertA - startVertA + 1;
+                for (let j = 0; j < vertCountA; j++) {
+                    const vi0 = startVertA + j;
+                    const vi1 = startVertA + ((j + 1) % vertCountA);
+                    const v0 = {
+                        x: mesh.verts[vi0 * 3],
+                        y: mesh.verts[vi0 * 3 + 1],
+                        z: mesh.verts[vi0 * 3 + 2]
+                    };
+                    const v1 = {
+                        x: mesh.verts[vi1 * 3],
+                        y: mesh.verts[vi1 * 3 + 1],
+                        z: mesh.verts[vi1 * 3 + 2]
+                    };
+                    Instance.DebugLine({ start: v0, end: v1, color: { r: 255, g: 0, b: 255 }, duration });
+                }
+            }
+        }
+    }
+}
+
+/**
+ * @module 导航网格/瓦片
+ */
+
+/** @typedef {import("./path_manager").NavMeshMesh} NavMeshMesh */
+/** @typedef {import("./path_manager").NavMeshDetail} NavMeshDetail */
+/** @typedef {import("./path_manager").NavMeshLink} NavMeshLink */
+
+/**
+ * 单 Tile 构建编排器。
+ *
+ * 编排整个构建管线：
+ * OpenHeightfield → RegionGenerator → ContourBuilder
+ * → PolyMeshBuilder → PolyMeshDetailBuilder → JumpLinkBuilder。
+ * 返回 TileData，由 TileManager 负责跨 Tile 聚合。
+ *
+ * @navigationTitle Tile 构建器
+ */
+class tile {
+    constructor() {
+        /** @type {OpenHeightfield | undefined} 当前 Tile 的开放高度场 */
+        this.hf = undefined;
+        /** @type {RegionGenerator | undefined} 区域生成器 */
+        this.regionGen = undefined;
+        /** @type {ContourBuilder | undefined} 轮廓构建器 */
+        this.contourBuilder = undefined;
+        /** @type {PolyMeshBuilder | undefined} 多边形网格构建器 */
+        this.polyMeshGenerator = undefined;
+        /** @type {PolyMeshDetailBuilder | undefined} 细节网格构建器 */
+        this.polidetail = undefined;
+        /** @type {JumpLinkBuilder | undefined} 跳跃链接构建器 */
+        this.jumplinkbuilder = undefined;
+        /** @type {number} 边界体素填充宽度 */
+        this.tilePadding = Math.max(0, TILE_PADDING | 0);
+        /** @type {number} Tile 核心区大小（不含 padding） */
+        this.tileSize = Math.max(1, TILE_SIZE | 0);
+        /** @type {number} 全局网格一边的体素数 */
+        this.fullGrid = Math.floor(MESH_WORLD_SIZE_XY / MESH_CELL_SIZE_XY) + 1;
+        /** @type {number} X 方向 Tile 总数 */
+        this.tilesX = Math.ceil(this.fullGrid / this.tileSize);
+        /** @type {number} Y 方向 Tile 总数 */
+        this.tilesY = Math.ceil(this.fullGrid / this.tileSize);
+    }
+    /**
+     * 根据世界坐标获取其所在 Tile 的 ID 字符串。
+     * @param {{x:number,y:number,z:number}} pos - 世界坐标
+     * @returns {string} 格式为 "tx_ty" 的 Tile ID
+     */
+    fromPosGetTile(pos) {
+        const gx = Math.max(0, Math.min(this.fullGrid - 1, Math.floor((pos.x - origin.x) / MESH_CELL_SIZE_XY)));
+        const gy = Math.max(0, Math.min(this.fullGrid - 1, Math.floor((pos.y - origin.y) / MESH_CELL_SIZE_XY)));
+        const tx = Math.max(0, Math.min(this.tilesX - 1, Math.floor(gx / this.tileSize)));
+        const ty = Math.max(0, Math.min(this.tilesY - 1, Math.floor(gy / this.tileSize)));
+        return `${tx}_${ty}`;
+    }
+    /**
+     * 仅构建给定世界坐标所在的 Tile。
+     * @param {{x:number,y:number,z:number}} pos - 世界坐标
+     * @returns {import("./path_tilemanager").TileData} 构建结果
+     */
+    buildTileNavMeshAtPos(pos) {
+        const gx = Math.max(0, Math.min(this.fullGrid - 1, Math.floor((pos.x - origin.x) / MESH_CELL_SIZE_XY)));
+        const gy = Math.max(0, Math.min(this.fullGrid - 1, Math.floor((pos.y - origin.y) / MESH_CELL_SIZE_XY)));
+        const tx = Math.max(0, Math.min(this.tilesX - 1, Math.floor(gx / this.tileSize)));
+        const ty = Math.max(0, Math.min(this.tilesY - 1, Math.floor(gy / this.tileSize)));
+        return this.buildTile(tx, ty);
+    }
+
+    /**
+     * 构建指定坐标的单个 Tile，执行完整的构建管线。
+     *
+     * 流程：体素化 → 区域生成 → 轮廓提取 → 多边形构建 → 细节网格 → 跳跃链接。
+     * @param {number} tx - Tile X 坐标
+     * @param {number} ty - Tile Y 坐标
+     * @returns {any} 构建结果，包含 mesh/detail/links 和计时信息
+     */
+    buildTile(tx, ty) {
+        const nowMs = () => new Date().getTime();
+        const timing = {hfInit: 0,region: 0,contour: 0,poly: 0,detail: 0,merge: 0,jumpLinks: 0,};
+
+        let tileHasError = false;
+        const tileStartMs = nowMs();
+        Instance.Msg(`开始构建 Tile (${tx+1}/${this.tilesX},${ty+1}/${this.tilesY})`);
+        let phaseStartMs = nowMs();
+
+        this.hf = new OpenHeightfield(tx, ty, this.tileSize, this.fullGrid, this.tilePadding);
+        this.hf.init();
+        timing.hfInit += nowMs() - phaseStartMs;
+        phaseStartMs = nowMs();
+
+        this.regionGen = new RegionGenerator(this.hf);
+        this.regionGen.init();
+        timing.region += nowMs() - phaseStartMs;
+        phaseStartMs = nowMs();
+
+        this.contourBuilder = new ContourBuilder(this.hf);
+        this.contourBuilder.init();
+
+        if (this.contourBuilder.error) tileHasError = true;
+        timing.contour += nowMs() - phaseStartMs;
+        phaseStartMs = nowMs();
+
+        this.polyMeshGenerator = new PolyMeshBuilder(this.contourBuilder.contours);
+        this.polyMeshGenerator.init();
+
+        const tileMesh = this.polyMeshGenerator.return();
+        if (this.polyMeshGenerator.error) tileHasError = true;
+        timing.poly += nowMs() - phaseStartMs;
+        //if (POLY_DEBUG) {
+        //    this.polyMeshGenerator.debugDrawPolys(tileDebugDuration);
+        //    this.polyMeshGenerator.debugDrawAdjacency(tileDebugDuration);
+        //}
+
+        phaseStartMs = nowMs();
+
+        this.polidetail = new PolyMeshDetailBuilder(tileMesh, this.hf);
+        /** @type {NavMeshDetail} */
+        let tileDetail = this.polidetail.init();
+        //if(POLY_DETAIL_DEBUG)
+        //{
+        //    this.polidetail.debugDrawPolys(tileDebugDuration);
+        //}
+        if (this.polidetail.error) tileHasError = true;
+        timing.detail += nowMs() - phaseStartMs;
+
+        phaseStartMs = nowMs();
+        this.jumplinkbuilder = new JumpLinkBuilder(tileMesh);
+        /**
+         * @type {NavMeshLink}
+         */
+        let tileLinks = this.jumplinkbuilder.init();
+        //if(LINK_DEBUG)
+        //{
+           // this.jumplinkbuilder.debugDraw(tileDebugDuration);
+        //}
+        timing.jumpLinks += nowMs() - phaseStartMs;
+
+        OpenSpan.clearRange(1, this.hf.SPAN_ID + 2);
+        const tileCostMs = nowMs() - tileStartMs;
+        Instance.Msg(`完成 Tile (${tx+1}/${this.tilesX},${ty+1}/${this.tilesY}),耗时${tileCostMs}ms`);
+
+        return {tileId: `${tx}_${ty}`,tx,ty,mesh: tileMesh,detail: tileDetail,links: tileLinks,hasError: tileHasError,timing};
+    }
+
+    /**
+     * 调试绘制报错的 Tile 边界框。
+     * @param {{tx:number,ty:number}[]} tiles - 报错的 Tile 坐标列表
+     * @param {number} [duration=120] - 绘制持续时间（秒）
+     */
+    debugDrawErrorTiles(tiles, duration = 120) {
+        if (!tiles || tiles.length === 0) return;
+        const color = { r: 255, g: 255, b: 255 };
+
+        for (const tile of tiles) {
+            const coreMinX = tile.tx * this.tileSize;
+            const coreMinY = tile.ty * this.tileSize;
+            const coreMaxX = Math.min(this.fullGrid - 1, coreMinX + this.tileSize - 1);
+            const coreMaxY = Math.min(this.fullGrid - 1, coreMinY + this.tileSize - 1);
+
+            const minX = origin.x + coreMinX * MESH_CELL_SIZE_XY;
+            const minY = origin.y + coreMinY * MESH_CELL_SIZE_XY;
+            const maxX = origin.x + (coreMaxX + 1) * MESH_CELL_SIZE_XY;
+            const maxY = origin.y + (coreMaxY + 1) * MESH_CELL_SIZE_XY;
+
+            const z0 = origin.z + 8;
+            const z1 = origin.z + 500;
+
+            const a0 = { x: minX, y: minY, z: z0 };
+            const b0 = { x: maxX, y: minY, z: z0 };
+            const c0 = { x: maxX, y: maxY, z: z0 };
+            const d0 = { x: minX, y: maxY, z: z0 };
+            const a1 = { x: minX, y: minY, z: z1 };
+            const b1 = { x: maxX, y: minY, z: z1 };
+            const c1 = { x: maxX, y: maxY, z: z1 };
+            const d1 = { x: minX, y: maxY, z: z1 };
+
+            Instance.DebugLine({ start: a0, end: b0, color, duration });
+            Instance.DebugLine({ start: b0, end: c0, color, duration });
+            Instance.DebugLine({ start: c0, end: d0, color, duration });
+            Instance.DebugLine({ start: d0, end: a0, color, duration });
+
+            Instance.DebugLine({ start: a1, end: b1, color, duration });
+            Instance.DebugLine({ start: b1, end: c1, color, duration });
+            Instance.DebugLine({ start: c1, end: d1, color, duration });
+            Instance.DebugLine({ start: d1, end: a1, color, duration });
+
+            Instance.DebugLine({ start: a0, end: a1, color, duration });
+            Instance.DebugLine({ start: b0, end: b1, color, duration });
+            Instance.DebugLine({ start: c0, end: c1, color, duration });
+            Instance.DebugLine({ start: d0, end: d1, color, duration });
+
+            Instance.DebugLine({ start: a1, end: c1, color, duration });
+            Instance.DebugLine({ start: b1, end: d1, color, duration });
+        }
+    }
+
+}
+
+/**
+ * @module 导航网格/导航调试
+ */
+
+/**
+ * NavMesh 调试工具集。
+ *
+ * 在游戏中绘制 Debug 几何体（线条、球体）展示 NavMesh 各组件：
+ * - MESH：体素化/网格化
+ * - REGION：区域分割
+ * - CONTOUR：轮廓构建
+ * - POLY：多边形生成
+ * - DETAIL：细节层三角网
+ * - LINK：连接构建
+ * - PATH：路径生成与输出
+ *
+ * @navigationTitle NavMesh 调试工具
+ */
+class NavMeshDebugTools {
+    /**
+     * 初始化调试工具，绑定 NavMesh 实例。
+     * @param {import("./path_manager").NavMesh} nav
+     */
+    constructor(nav) {
+        /** @type {import("./path_manager").NavMesh} */
+        this.nav = nav;
+        /** @type {number[]} */
+        this._polyAreas = [];
+        /** @type {number[]} */
+        this._polyPrefix = [];
+        /** @type {number} */
+        this._totalPolyArea = 0;
+    }
+    /**
+     * 绘制 detail 层三角形（用于调试 detail 网格）。
+     * 期望 detail 使用 TypedArray 布局：`verts` 为 Float32Array，`tris` 为 Uint16Array，
+     * 并存在 `trislength` / `vertslength` 等计数字段。
+     * @param {number} [duration]
+     */
+    debugDrawMeshDetail(duration = 10) {
+        const detail = this.nav.meshdetail;
+        if (!detail) return;
+        // TypedArray 结构：detail.verts 为 Float32Array，detail.tris 为 Uint16Array，并存在 trislength/vertslength
+        for (let i = 0; i < detail.trislength; i++) {
+            const ia = detail.tris[i * 3];
+            const ib = detail.tris[i * 3 + 1];
+            const ic = detail.tris[i * 3 + 2];
+            const va = {
+                x: detail.verts[ia * 3],
+                y: detail.verts[ia * 3 + 1],
+                z: detail.verts[ia * 3 + 2]
+            };
+            const vb = {
+                x: detail.verts[ib * 3],
+                y: detail.verts[ib * 3 + 1],
+                z: detail.verts[ib * 3 + 2]
+            };
+            const vc = {
+                x: detail.verts[ic * 3],
+                y: detail.verts[ic * 3 + 1],
+                z: detail.verts[ic * 3 + 2]
+            };
+            const color = { r: 0, g: 180, b: 255 };
+            Instance.DebugLine({ start: va, end: vb, color, duration });
+            Instance.DebugLine({ start: vb, end: vc, color, duration });
+            Instance.DebugLine({ start: vc, end: va, color, duration });
+        }
+        return;
+    }
+    /**
+     * 绘制所有特殊连接点（跳点/梯子/传送门）。
+     *
+     * 用不同颜色区分类型：青色=跳点，橙色=梯子，蓝色=传送门。
+     *
+     * @param {number} [duration] 绘制持续时间（秒）
+     */
+    debugLinks(duration = 30) {
+        const links = this.nav.links;
+        const mesh = this.nav.mesh;
+        if (!links || !mesh || !mesh.polys || !mesh.verts) return;
+
+        for (let li = 0; li < links.length; li++) {
+            const type = links.type[li];
+            const isJump = type === PathState.JUMP;
+            const isLadder = type === PathState.LADDER;
+            const lineColor = isLadder
+                ? { r: 255, g: 165, b: 0 }
+                : (isJump ? { r: 0, g: 255, b: 255 } : { r: 0, g: 0, b: 255 });
+            const startColor = isLadder
+                ? { r: 255, g: 215, b: 0 }
+                : (isJump ? { r: 0, g: 255, b: 255 } : { r: 0, g: 255, b: 0 });
+
+            const posBase = li * 6;
+            const start = {
+                x: links.pos[posBase],
+                y: links.pos[posBase + 1],
+                z: links.pos[posBase + 2]
+            };
+            const end = {
+                x: links.pos[posBase + 3],
+                y: links.pos[posBase + 4],
+                z: links.pos[posBase + 5]
+            };
+
+            Instance.DebugLine({ start, end, color: lineColor, duration });
+            Instance.DebugSphere({ center: start, radius: 4, color: startColor, duration });
+
+            const pi = links.poly[(li << 1) + 1];
+            if (pi < 0 || pi >= mesh.polyslength) continue;
+
+            const startVert = mesh.polys[pi * 2];
+            const endVert = mesh.polys[pi * 2 + 1];
+            const vertCount = endVert - startVert + 1;
+            for (let i = 0; i < vertCount; i++) {
+                const vi0 = startVert + i;
+                const vi1 = startVert + ((i + 1) % vertCount);
+                const v0 = { x: mesh.verts[vi0 * 3], y: mesh.verts[vi0 * 3 + 1], z: mesh.verts[vi0 * 3 + 2] };
+                const v1 = { x: mesh.verts[vi1 * 3], y: mesh.verts[vi1 * 3 + 1], z: mesh.verts[vi1 * 3 + 2] };
+                Instance.DebugLine({ start: v0, end: v1, color: isLadder ? { r: 255, g: 140, b: 0 } : { r: 255, g: 0, b: 255 }, duration });
+            }
+        }
+    }
+    /**
+     * 绘制所有多边形（不展示 links），用于检查多边形边界。
+     * @param {number} duration
+     */
+    debugDrawMeshPolys(duration = 10) {
+        if (!this.nav.mesh) return;
+        const mesh = this.nav.mesh;
+        for (let pi = 0; pi < mesh.polyslength; pi++) {
+            const startVert = mesh.polys[pi * 2];
+            const endVert = mesh.polys[pi * 2 + 1];
+            const vertCount = endVert - startVert + 1;
+            if (vertCount < 3) continue;
+            const color = { r: 255, g: 0, b: 0 };
+            for (let i = 0; i < vertCount; i++) {
+                const vi0 = startVert + i;
+                const vi1 = startVert + ((i + 1) % vertCount);
+                const v0 = { x: mesh.verts[vi0 * 3], y: mesh.verts[vi0 * 3 + 1], z: mesh.verts[vi0 * 3 + 2] };
+                const v1 = { x: mesh.verts[vi1 * 3], y: mesh.verts[vi1 * 3 + 1], z: mesh.verts[vi1 * 3 + 2] };
+                Instance.DebugLine({ start: v0, end: v1, color, duration });
+            }
+        }
+    }
+
+    /**
+     * 绘制网格连通关系（多边形邻接），用于调试跨 tile 的边界匹配。
+     * 直接读取 `this.nav.mesh.neighbors` 结构并绘制连接线。
+     * @param {number} [duration]
+     */
+    debugDrawMeshConnectivity(duration = 15) {
+        if (!this.nav.mesh) return;
+        const mesh = this.nav.mesh;
+        const drawn = new Set();
+        for (let i = 0; i < mesh.polyslength; i++) {
+            const start = this._meshPolyCenter(i);
+            const pstart=this.nav.mesh.polys[i*2];
+            const pend=this.nav.mesh.polys[i*2+1];
+            const ecount=pend-pstart+1;
+            for (let e = 0; e < ecount; e++) {
+                const edgeNei = mesh.neighbors[i][e][0];
+                if(edgeNei==0)continue;
+                for(let j=1;j<=edgeNei;j++)
+                {
+                    const ni=mesh.neighbors[i][e][j];
+                    const a = Math.min(i, ni);
+                    const b = Math.max(i, ni);
+                    const k = `${a}|${b}`;
+                    if (drawn.has(k)) continue;
+                    drawn.add(k);
+
+                    const end = this._meshPolyCenter(ni);
+                    Instance.DebugLine({
+                        start,
+                        end,
+                        color: { r: 255, g: 0, b: 255 },
+                        duration
+                    });
+                }
+            }
+        }
+    }
+
+    /**
+     * 计算指定多边形的几何中心（用于调试绘制）。
+     * 适配 TypedArray 布局，返回 {x,y,z}。
+     * @param {number} polyIndex
+     */
+    _meshPolyCenter(polyIndex) {
+        const mesh = this.nav.mesh;
+        const startVert = mesh.polys[polyIndex * 2];
+        const endVert = mesh.polys[polyIndex * 2 + 1];
+        const vertCount = endVert - startVert + 1;
+        if (vertCount <= 0) return { x: 0, y: 0, z: 0 };
+        let x = 0, y = 0, z = 0;
+        for (let vi = startVert; vi <= endVert; vi++) {
+            x += mesh.verts[vi * 3];
+            y += mesh.verts[vi * 3 + 1];
+            z += mesh.verts[vi * 3 + 2];
+        }
+        return { x: x / vertCount, y: y / vertCount, z: z / vertCount };
+    }
+
+    /**
+     * 绘制 Funnel 生成的路径（用于调试 funnel 算法）。
+     * @param {{pos:{x:number,y:number,z:number},mode:number}[]} path
+     * @param {number} [duration]
+     */
+    debugDrawfunnelPath(path, duration = 10) {
+        if (!path || path.length < 2) {
+            Instance.Msg("No path to draw");
+            return;
+        }
+        const color = { r: 0, g: 255, b: 0 };
+        const colorJ = { r: 0, g: 255, b: 255 };
+
+        const last = path[0].pos;
+        Instance.DebugSphere({ center: { x: last.x, y: last.y, z: last.z }, radius: 3, color: { r: 255, g: 0, b: 0 }, duration });
+        for (let i = 1; i < path.length; i++) {
+            const a = path[i - 1].pos;
+            const b = path[i].pos;
+            Instance.DebugLine({
+                start: { x: a.x, y: a.y, z: a.z },
+                end: { x: b.x, y: b.y, z: b.z },
+                color: path[i].mode == PathState.WALK ? color:colorJ,
+                duration
+            });
+            Instance.DebugSphere({ center: { x: b.x, y: b.y, z: b.z }, radius: 3, color: path[i].mode == PathState.WALK ? color:colorJ, duration });
+        }
+    }
+
+    /**
+     * 绘制路径（包含不同模式的颜色区分，例如行走/跳跃/梯子）。
+     * @param {{pos:{x:number,y:number,z:number},mode:number}[]} path
+     * @param {number} [duration]
+     */
+    debugDrawPath(path, duration = 10) {
+        const color = { r: 0, g: 0, b: 255 };
+        const colorJ = { r: 255, g: 255, b: 0 };
+        if (!path || path.length == 2) {
+            if (path && path.length == 2) {
+                Instance.DebugSphere({ center: { x: path[0].pos.x, y: path[0].pos.y, z: path[0].pos.z }, radius: 3, color: { r: 0, g: 0, b: 255 }, duration });
+                Instance.DebugLine({
+                    start: { x: path[0].pos.x, y: path[0].pos.y, z: path[0].pos.z },
+                    end: { x: path[1].pos.x, y: path[1].pos.y, z: path[1].pos.z },
+                    color: path[1].mode == PathState.WALK ? color:colorJ,
+                    duration
+                });
+                Instance.DebugSphere({ center: { x: path[1].pos.x, y: path[1].pos.y, z: path[1].pos.z }, radius: 3, color: path[1].mode == PathState.WALK ? color:colorJ, duration });
+            } else Instance.Msg("No path to draw");
+            return;
+        }
+
+        const last = path[0].pos;
+        Instance.DebugSphere({ center: { x: last.x, y: last.y, z: last.z }, radius: 3, color: { r: 0, g: 0, b: 255 }, duration });
+        for (let i = 1; i < path.length; i++) {
+            const a = path[i - 1].pos;
+            const b = path[i].pos;
+            Instance.DebugLine({
+                start: { x: a.x, y: a.y, z: a.z },
+                end: { x: b.x, y: b.y, z: b.z },
+                color: path[i].mode == PathState.WALK ? color:colorJ,
+                duration
+            });
+            Instance.DebugSphere({ center: { x: b.x, y: b.y, z: b.z }, radius: 3, color: path[i].mode == PathState.WALK ? color:colorJ, duration });
+        }
+    }
+
+    /**
+     * 绘制多边形序列路径（A* 输出）。
+     *
+     * 用随机颜色绘制多边形中心连线，区分行走和跳跃模式。
+     *
+     * @param {{id:number,mode:number}[]} polyPath 多边形序列
+     * @param {number} [duration] 绘制持续时间
+     */
+    debugDrawPolyPath(polyPath, duration = 10) {
+        if (!polyPath || polyPath.length === 0 || !this.nav.mesh) return;
+        const mesh = this.nav.mesh;
+        let prev = null;
+        // 避免重复绘制相同路径段或中心点
+        const color = {
+            r: Math.floor(100 + Math.random() * 155),
+            g: Math.floor(100 + Math.random() * 155),
+            b: Math.floor(100 + Math.random() * 155),
+        };
+        const colorJ = {
+            r: Math.floor(100 + Math.random() * 155),
+            g: Math.floor(100 + Math.random() * 155),
+            b: Math.floor(100 + Math.random() * 155),
+        };
+        for (const pi of polyPath) {
+            // 适配 TypedArray 布局：mesh.polys 存为 start/end 对，mesh.verts 为扁平 Float32Array
+            const polyIndex = pi.id;
+            const startVert = mesh.polys[polyIndex * 2];
+            const endVert = mesh.polys[polyIndex * 2 + 1];
+            const vertCount = endVert - startVert + 1;
+            if (vertCount < 3) continue;
+            let cx = 0, cy = 0, cz = 0;
+            for (let vi = startVert; vi <= endVert; vi++) {
+                cx += mesh.verts[vi * 3];
+                cy += mesh.verts[vi * 3 + 1];
+                cz += mesh.verts[vi * 3 + 2];
+            }
+            cx /= vertCount;
+            cy /= vertCount;
+            cz /= vertCount;
+            const center = { x: cx, y: cy, z: cz };
+            if (pi.mode == 2) {
+                Instance.DebugSphere({ center, radius: 10, color: colorJ, duration });
+                if (prev) Instance.DebugLine({ start: prev, end: center, color: colorJ, duration });
+            } else {
+                Instance.DebugSphere({ center, radius: 10, color, duration });
+                if (prev) Instance.DebugLine({ start: prev, end: center, color, duration });
+            }
+            prev = center;
+        }
+    }
+    /**
+     * 绘制所有 Tile 的边界线框。
+     *
+     * @param {number} duration 绘制持续时间（秒）
+     */
+    debugDrawALLTiles(duration = 120) {
+        const color = { r: 255, g: 255, b: 255 };
+        const fullGrid=Math.floor(MESH_WORLD_SIZE_XY / MESH_CELL_SIZE_XY) + 1;
+        const tiles=Math.ceil(fullGrid / TILE_SIZE);
+        for (let ty = 0; ty < tiles; ty++) {
+            for (let tx = 0; tx < tiles; tx++) {
+                const coreMinX = tx * TILE_SIZE;
+                const coreMinY = ty * TILE_SIZE;
+                const coreMaxX = Math.min(fullGrid - 1, coreMinX + TILE_SIZE - 1);
+                const coreMaxY = Math.min(fullGrid - 1, coreMinY + TILE_SIZE - 1);
+
+                const minX = origin.x + coreMinX * MESH_CELL_SIZE_XY;
+                const minY = origin.y + coreMinY * MESH_CELL_SIZE_XY;
+                const maxX = origin.x + (coreMaxX + 1) * MESH_CELL_SIZE_XY;
+                const maxY = origin.y + (coreMaxY + 1) * MESH_CELL_SIZE_XY;
+
+                const z0 = origin.z + 8;
+                const z1 = origin.z + 500;
+
+                const a0 = { x: minX, y: minY, z: z0 };
+                const b0 = { x: maxX, y: minY, z: z0 };
+                const c0 = { x: maxX, y: maxY, z: z0 };
+                const d0 = { x: minX, y: maxY, z: z0 };
+                const a1 = { x: minX, y: minY, z: z1 };
+                const b1 = { x: maxX, y: minY, z: z1 };
+                const c1 = { x: maxX, y: maxY, z: z1 };
+                const d1 = { x: minX, y: maxY, z: z1 };
+
+                Instance.DebugLine({ start: a0, end: b0, color, duration });
+                Instance.DebugLine({ start: b0, end: c0, color, duration });
+                Instance.DebugLine({ start: c0, end: d0, color, duration });
+                Instance.DebugLine({ start: d0, end: a0, color, duration });
+
+                Instance.DebugLine({ start: a1, end: b1, color, duration });
+                Instance.DebugLine({ start: b1, end: c1, color, duration });
+                Instance.DebugLine({ start: c1, end: d1, color, duration });
+                Instance.DebugLine({ start: d1, end: a1, color, duration });
+
+                Instance.DebugLine({ start: a0, end: a1, color, duration });
+                Instance.DebugLine({ start: b0, end: b1, color, duration });
+                Instance.DebugLine({ start: c0, end: c1, color, duration });
+                Instance.DebugLine({ start: d0, end: d1, color, duration });
+
+                Instance.DebugLine({ start: a1, end: c1, color, duration });
+                Instance.DebugLine({ start: b1, end: d1, color, duration });
+            }
+        }
+    }
+}
+
+/**
+ * @module 导航网格/梯子链接构建
+ */
+/** @typedef {import("cs_script/point_script").Vector} Vector */
+/** @typedef {import("./path_manager").NavMeshMesh} NavMeshMesh */
+/** @typedef {import("./path_manager").NavMeshDetail} NavMeshDetail */
+/** @typedef {import("./path_manager").NavMeshLink} NavMeshLink */
+/**
+ * 梯子链接构建器。
+ *
+ * 从地图中查找 `navmesh_LADDER_*` 实体对，
+ * 创建梯子类型的导航链接。
+ *
+ * @navigationTitle 梯子链接构建
+ */
+//不多，可以每次都重新构建
+class LadderLinkBuilder {
+    /**
+     * 初始化梯子链接构建器，绑定多边形网格。
+     * @param {NavMeshMesh} polyMesh
+     */
+    constructor(polyMesh) {
+        /** @type {NavMeshMesh} 待分析的多边形网格引用 */
+        this.mesh = polyMesh;
+        /** @type {boolean} 构建过程中是否出现错误（点位不足、找不到 poly 等） */
+        this.error = false;
+        /** @type {Uint16Array} 每个 link 占 2 个 uint16：poly[i*2]=起始 poly, poly[i*2+1]=目标 poly */
+        this.poly = new Uint16Array(MAX_LINKS * 2);
+        /** @type {Float32Array} 每个 link 的寻路代价（梯子固定为 0，鼓励使用） */
+        this.cost = new Float32Array(MAX_LINKS);
+        /** @type {Uint8Array} 每个 link 的类型（PathState.LADDER） */
+        this.type = new Uint8Array(MAX_LINKS);
+        /** @type {Float32Array} 每个 link 占 6 个 float：起点 XYZ + 终点 XYZ */
+        this.pos = new Float32Array(MAX_LINKS * 6);
+        /** @type {number} 当前已写入的 link 数量 */
+        this.length = 0;
+    }
+
+    /**
+     * 返回当前构建的 NavMeshLink 结构。
+     *
+     * @returns {NavMeshLink}
+     */
+    return() {
+        return {
+            poly: this.poly,
+            cost: this.cost,
+            type: this.type,
+            pos: this.pos,
+            length: this.length
+        };
+    }
+
+    /**
+     * 将一条梯子连接写入 TypedArray。
+     *
+     * @param {number} polyA - 起始多边形索引
+     * @param {number} polyB - 目标多边形索引
+     * @param {Vector} posA - 起点世界坐标
+     * @param {Vector} posB - 终点世界坐标
+     * @param {number} cost - 寻路代价
+     */
+    pushLink(polyA, polyB, posA, posB, cost) {
+        const i = this.length;
+        const pi = i << 1;
+        const vi = i * 6;
+        this.poly[pi] = polyA;
+        this.poly[pi + 1] = polyB;
+        this.cost[i] = cost;
+        this.type[i] = PathState.LADDER;
+        this.pos[vi] = posA.x;
+        this.pos[vi + 1] = posA.y;
+        this.pos[vi + 2] = posA.z;
+        this.pos[vi + 3] = posB.x;
+        this.pos[vi + 4] = posB.y;
+        this.pos[vi + 5] = posB.z;
+        this.length++;
+    }
+
+    /**
+     * 从地图中查找所有 navmesh_LADDER_* 实体对，构建梯子连接。
+     *
+     * 每个标签组需要恰好 2 个点位，按 Z 轴从低到高配对，
+     * 通过 findNearestPoly 匹配到多边形后生成双向梯子 link。
+     *
+     * @returns {NavMeshLink}
+     */
+    init() {
+        this.error = false;
+        this.length = 0;
+        if (!this.mesh || !this.mesh.polys || this.mesh.polyslength === 0) return this.return();
+
+        /** @type {Map<string, Vector[]>} */
+        const groups = new Map();
+        const ents = Instance.FindEntitiesByClass("info_target");
+
+        for (const ent of ents) {
+            const name = ent.GetEntityName();
+            if (!name.startsWith("navmesh_LADDER_")) continue;
+
+            const tag = name.slice("navmesh_LADDER_".length);
+            if (!tag) continue;
+
+            const p = ent.GetAbsOrigin();
+            if (!p) continue;
+
+            if (!groups.has(tag)) groups.set(tag, []);
+            groups.get(tag)?.push({ x: p.x, y: p.y, z: p.z });
+        }
+        //let start=new Date();
+        let rawPairs = 0;
+        let validPairs = 0;
+
+        for (const [tag, points] of groups) {
+            if (points.length < 2) {
+                this.error = true;
+                Instance.Msg(`LadderLink: ${tag} 点位不足(=${points.length})，已跳过`);
+                continue;
+            }
+            if (points.length !== 2) {
+                this.error = true;
+                Instance.Msg(`LadderLink: ${tag} 点位数量过多(${points.length})，已跳过`);
+                continue;
+            }
+            const p0 = points[0], p1 = points[1];
+            const aPos = p0.z <= p1.z ? p0 : p1;
+            const bPos = p0.z <= p1.z ? p1 : p0;
+            //points.sort((a, b) => a.z - b.z);
+            //const aPos = points[0];
+            //const bPos = points[points.length - 1];
+            rawPairs++;
+            const aNearest = Tool.findNearestPoly(aPos, this.mesh);//,this.heightfixer);
+            const bNearest = Tool.findNearestPoly(bPos, this.mesh);//,this.heightfixer);
+            const aPoly = aNearest.poly;
+            const bPoly = bNearest.poly;
+            if (aPoly < 0 || bPoly < 0) {
+                this.error = true;
+                Instance.Msg(`LadderLink: ${tag} 找不到最近多边形，已跳过`);
+                continue;
+            }
+            if (aPoly === bPoly) {
+                this.error = true;
+                Instance.Msg(`LadderLink: ${tag} 两端落在同一 poly(${aPoly})，已跳过`);
+                continue;
+            }
+            const cost = 0;//鼓励走梯子
+            this.pushLink(aPoly, bPoly, aPos, bPos, cost);
+            validPairs++;
+        }
+        Instance.Msg(`LadderLink统计: group=${groups.size} pair=${rawPairs} link=${this.length} valid=${validPairs}`);
+        return this.return();
+    }
+
+    /**
+     * 调试绘制所有梯子连接（橙色线段 + 金色球体）。
+     *
+     * @param {number} [duration=30] - 绘制持续时间（秒）
+     */
+    debugDraw(duration = 30) {
+        for (let i = 0; i < this.length; i++) {
+            const vi = i * 6;
+            const start = {
+                x: this.pos[vi],
+                y: this.pos[vi + 1],
+                z: this.pos[vi + 2]
+            };
+            const end = {
+                x: this.pos[vi + 3],
+                y: this.pos[vi + 4],
+                z: this.pos[vi + 5]
+            };
+            Instance.DebugLine({
+                start,
+                end,
+                color: { r: 255, g: 165, b: 0 },
+                duration
+            });
+            Instance.DebugSphere({ center: start, radius: 4, color: { r: 255, g: 215, b: 0 }, duration });
+            Instance.DebugSphere({ center: end, radius: 4, color: { r: 255, g: 215, b: 0 }, duration });
+        }
+    }
+}
+
+/**
+ * @module 导航网格/地图跳跃链接
+ */
+/** @typedef {import("cs_script/point_script").Vector} Vector */
+/** @typedef {import("./path_manager").NavMeshMesh} NavMeshMesh */
+/** @typedef {import("./path_manager").NavMeshDetail} NavMeshDetail */
+/** @typedef {import("./path_manager").NavMeshLink} NavMeshLink */
+/**
+ * 手动跳跃链接构建器。
+ *
+ * 从地图中查找 `navmesh_JUMP_*` 实体对，
+ * 创建人工标记的跳跃链接。
+ *
+ * @navigationTitle 手动跳跃链接
+ */
+//手动跳点
+class MapJUMPLinkBuilder {
+    /**
+     * 初始化手动跳跃链接构建器，绑定多边形网格。
+     * @param {NavMeshMesh} polyMesh
+     */
+    constructor(polyMesh) {
+        /** @type {NavMeshMesh} 待分析的多边形网格引用 */
+        this.mesh = polyMesh;
+        /** @type {boolean} 构建过程中是否出现错误（点位不足、找不到 poly 等） */
+        this.error = false;
+        /** @type {Uint16Array} 每个 link 占 2 个 uint16：poly[i*2]=起始 poly, poly[i*2+1]=目标 poly */
+        this.poly = new Uint16Array(MAX_LINKS * 2);
+        /** @type {Float32Array} 每个 link 的寻路代价（基于两点距离平方，至少为 1） */
+        this.cost = new Float32Array(MAX_LINKS);
+        /** @type {Uint8Array} 每个 link 的类型（PathState.JUMP） */
+        this.type = new Uint8Array(MAX_LINKS);
+        /** @type {Float32Array} 每个 link 占 6 个 float：起点 XYZ + 终点 XYZ */
+        this.pos = new Float32Array(MAX_LINKS * 6);
+        /** @type {number} 当前已写入的 link 数量 */
+        this.length = 0;
+    }
+
+    /**
+     * 返回当前构建的 NavMeshLink 结构。
+     *
+     * @returns {NavMeshLink}
+     */
+    return() {
+        return {
+            poly: this.poly,
+            cost: this.cost,
+            type: this.type,
+            pos: this.pos,
+            length: this.length
+        };
+    }
+
+    /**
+     * 将一条手动跳跃连接写入 TypedArray。
+     *
+     * @param {number} polyA - 起始多边形索引
+     * @param {number} polyB - 目标多边形索引
+     * @param {Vector} posA - 起点世界坐标
+     * @param {Vector} posB - 终点世界坐标
+     * @param {number} cost - 寻路代价
+     */
+    pushLink(polyA, polyB, posA, posB, cost) {
+        const i = this.length;
+        const pi = i << 1;
+        const vi = i * 6;
+        this.poly[pi] = polyA;
+        this.poly[pi + 1] = polyB;
+        this.cost[i] = cost;
+        this.type[i] = PathState.JUMP;
+        this.pos[vi] = posA.x;
+        this.pos[vi + 1] = posA.y;
+        this.pos[vi + 2] = posA.z;
+        this.pos[vi + 3] = posB.x;
+        this.pos[vi + 4] = posB.y;
+        this.pos[vi + 5] = posB.z;
+        this.length++;
+    }
+
+    /**
+     * 从地图中查找所有 navmesh_JUMP_* 实体对，构建手动跳跃连接。
+     *
+     * 每个标签组需要恰好 2 个点位，按 Z 轴从低到高配对，
+     * 通过 findNearestPoly 匹配到多边形后生成跳跃 link。
+     *
+     * @returns {NavMeshLink}
+     */
+    init() {
+        this.error = false;
+        this.length = 0;
+        if (!this.mesh || !this.mesh.polys || this.mesh.polyslength === 0) return this.return();
+
+        /** @type {Map<string, Vector[]>} */
+        const groups = new Map();
+        const ents = Instance.FindEntitiesByClass("info_target");
+
+        for (const ent of ents) {
+            const name = ent.GetEntityName();
+            if (!name.startsWith("navmesh_JUMP_")) continue;
+
+            const tag = name.slice("navmesh_JUMP_".length);
+            if (!tag) continue;
+
+            const p = ent.GetAbsOrigin();
+            if (!p) continue;
+
+            if (!groups.has(tag)) groups.set(tag, []);
+            groups.get(tag)?.push({ x: p.x, y: p.y, z: p.z });
+        }
+        //let start=new Date();
+        let rawPairs = 0;
+        let validPairs = 0;
+
+        for (const [tag, points] of groups) {
+            if (points.length < 2) {
+                this.error = true;
+                Instance.Msg(`MapJUMPLink: ${tag} 点位不足(=${points.length})，已跳过`);
+                continue;
+            }
+            if (points.length !== 2) {
+                this.error = true;
+                Instance.Msg(`MapJUMPLink: ${tag} 点位数量过多(${points.length})，已跳过`);
+                continue;
+            }
+            const p0 = points[0], p1 = points[1];
+            const aPos = p0.z <= p1.z ? p0 : p1;
+            const bPos = p0.z <= p1.z ? p1 : p0;
+            //points.sort((a, b) => a.z - b.z);
+            //const aPos = points[0];
+            //const bPos = points[points.length - 1];
+            rawPairs++;
+            const aNearest = Tool.findNearestPoly(aPos, this.mesh);//,this.heightfixer);
+            const bNearest = Tool.findNearestPoly(bPos, this.mesh);//,this.heightfixer);
+            const aPoly = aNearest.poly;
+            const bPoly = bNearest.poly;
+            if (aPoly < 0 || bPoly < 0) {
+                this.error = true;
+                Instance.Msg(`MapJUMPLink: ${tag} 找不到最近多边形，已跳过`);
+                continue;
+            }
+            if (aPoly === bPoly) {
+                this.error = true;
+                Instance.Msg(`MapJUMPLink: ${tag} 两端落在同一 poly(${aPoly})，已跳过`);
+                continue;
+            }
+            const cost = Math.max(1, vec.lengthsq(aNearest.pos, bNearest.pos));
+            this.pushLink(aPoly, bPoly, aPos, bPos, cost);
+            validPairs++;
+        }
+        Instance.Msg(`MapJUMPLink统计: group=${groups.size} pair=${rawPairs} link=${this.length} valid=${validPairs}`);
+        return this.return();
+    }
+
+    /**
+     * 调试绘制所有手动跳跃连接（橙色线段 + 青色球体）。
+     *
+     * @param {number} [duration=30] - 绘制持续时间（秒）
+     */
+    debugDraw(duration = 30) {
+        for (let i = 0; i < this.length; i++) {
+            const vi = i * 6;
+            const start = {
+                x: this.pos[vi],
+                y: this.pos[vi + 1],
+                z: this.pos[vi + 2]
+            };
+            const end = {
+                x: this.pos[vi + 3],
+                y: this.pos[vi + 4],
+                z: this.pos[vi + 5]
+            };
+            Instance.DebugLine({
+                start,
+                end,
+                color: { r: 255, g: 165, b: 0 },
+                duration
+            });
+            Instance.DebugSphere({ center: start, radius: 4, color: { r: 0, g: 215, b: 255 }, duration });
+            Instance.DebugSphere({ center: end, radius: 4, color: { r: 0, g: 215, b: 255 }, duration });
+        }
+    }
+}
+
+/**
+ * @module 导航网格/传送门链接构建
+ */
+/** @typedef {import("cs_script/point_script").Vector} Vector */
+/** @typedef {import("./path_manager").NavMeshMesh} NavMeshMesh */
+/** @typedef {import("./path_manager").NavMeshDetail} NavMeshDetail */
+/** @typedef {import("./path_manager").NavMeshLink} NavMeshLink */
+/**
+ * 传送门链接构建器。
+ *
+ * 从地图中查找 `navmesh_PORTAL_*` 实体对，
+ * 创建零代价的传送连接（Teleport）。
+ *
+ * @navigationTitle 传送门链接构建
+ */
+//手动传送点
+class PortalLinkBuilder {
+    /**
+     * 初始化传送门链接构建器，绑定多边形网格。
+     * @param {NavMeshMesh} polyMesh
+     */
+    constructor(polyMesh) {
+        /** @type {NavMeshMesh} 待分析的多边形网格引用 */
+        this.mesh = polyMesh;
+        /** @type {boolean} 构建过程中是否出现错误（点位不足、找不到 poly 等） */
+        this.error = false;
+        /** @type {Uint16Array} 每个 link 占 2 个 uint16：poly[i*2]=起始 poly, poly[i*2+1]=目标 poly */
+        this.poly = new Uint16Array(MAX_LINKS * 2);
+        /** @type {Float32Array} 每个 link 的寻路代价（传送门固定为 0，鼓励使用） */
+        this.cost = new Float32Array(MAX_LINKS);
+        /** @type {Uint8Array} 每个 link 的类型（PathState.PORTAL） */
+        this.type = new Uint8Array(MAX_LINKS);
+        /** @type {Float32Array} 每个 link 占 6 个 float：起点 XYZ + 终点 XYZ */
+        this.pos = new Float32Array(MAX_LINKS * 6);
+        /** @type {number} 当前已写入的 link 数量 */
+        this.length = 0;
+    }
+
+    /**
+     * 返回当前构建的 NavMeshLink 结构。
+     *
+     * @returns {NavMeshLink}
+     */
+    return() {
+        return {
+            poly: this.poly,
+            cost: this.cost,
+            type: this.type,
+            pos: this.pos,
+            length: this.length
+        };
+    }
+
+    /**
+     * 将一条传送门连接写入 TypedArray。
+     *
+     * @param {number} polyA - 起始多边形索引
+     * @param {number} polyB - 目标多边形索引
+     * @param {Vector} posA - 起点世界坐标
+     * @param {Vector} posB - 终点世界坐标
+     * @param {number} cost - 寻路代价
+     */
+    pushLink(polyA, polyB, posA, posB, cost) {
+        const i = this.length;
+        const pi = i << 1;
+        const vi = i * 6;
+        this.poly[pi] = polyA;
+        this.poly[pi + 1] = polyB;
+        this.cost[i] = cost;
+        this.type[i] = PathState.PORTAL;
+        this.pos[vi] = posA.x;
+        this.pos[vi + 1] = posA.y;
+        this.pos[vi + 2] = posA.z;
+        this.pos[vi + 3] = posB.x;
+        this.pos[vi + 4] = posB.y;
+        this.pos[vi + 5] = posB.z;
+        this.length++;
+    }
+
+    /**
+     * 从地图中查找所有 navmesh_PORTAL_* 实体对，构建零代价传送连接。
+     *
+     * 每个标签组需要恰好 2 个点位，按 Z 轴从低到高配对，
+     * 通过 findNearestPoly 匹配到多边形后生成传送门 link。
+     *
+     * @returns {NavMeshLink}
+     */
+    init() {
+        this.error = false;
+        this.length = 0;
+        if (!this.mesh || !this.mesh.polys || this.mesh.polyslength === 0) return this.return();
+
+        /** @type {Map<string, Vector[]>} */
+        const groups = new Map();
+        const ents = Instance.FindEntitiesByClass("info_target");
+
+        for (const ent of ents) {
+            const name = ent.GetEntityName();
+            if (!name.startsWith("navmesh_PORTAL_")) continue;
+
+            const tag = name.slice("navmesh_PORTAL_".length);
+            if (!tag) continue;
+
+            const p = ent.GetAbsOrigin();
+            if (!p) continue;
+
+            if (!groups.has(tag)) groups.set(tag, []);
+            groups.get(tag)?.push({ x: p.x, y: p.y, z: p.z });
+        }
+        //let start=new Date();
+        let rawPairs = 0;
+        let validPairs = 0;
+
+        for (const [tag, points] of groups) {
+            if (points.length < 2) {
+                this.error = true;
+                Instance.Msg(`PortalLink: ${tag} 点位不足(=${points.length})，已跳过`);
+                continue;
+            }
+            if (points.length !== 2) {
+                this.error = true;
+                Instance.Msg(`PortalLink: ${tag} 点位数量过多(${points.length})，已跳过`);
+                continue;
+            }
+            const p0 = points[0], p1 = points[1];
+            const aPos = p0.z <= p1.z ? p0 : p1;
+            const bPos = p0.z <= p1.z ? p1 : p0;
+            //points.sort((a, b) => a.z - b.z);
+            //const aPos = points[0];
+            //const bPos = points[points.length - 1];
+            rawPairs++;
+            const aNearest = Tool.findNearestPoly(aPos, this.mesh);//,this.heightfixer);
+            const bNearest = Tool.findNearestPoly(bPos, this.mesh);//,this.heightfixer);
+            const aPoly = aNearest.poly;
+            const bPoly = bNearest.poly;
+            if (aPoly < 0 || bPoly < 0) {
+                this.error = true;
+                Instance.Msg(`PortalLink: ${tag} 找不到最近多边形，已跳过`);
+                continue;
+            }
+            if (aPoly === bPoly) {
+                this.error = true;
+                Instance.Msg(`PortalLink: ${tag} 两端落在同一 poly(${aPoly})，已跳过`);
+                continue;
+            }//鼓励走传送门
+            this.pushLink(aPoly, bPoly, aPos, bPos, 0);
+            validPairs++;
+        }
+        Instance.Msg(`PortalLink统计: group=${groups.size} pair=${rawPairs} link=${this.length} valid=${validPairs}`);
+        return this.return();
+    }
+
+    /**
+     * 调试绘制所有传送门连接（橙色线段 + 青色球体）。
+     *
+     * @param {number} [duration=30] - 绘制持续时间（秒）
+     */
+    debugDraw(duration = 30) {
+        for (let i = 0; i < this.length; i++) {
+            const vi = i * 6;
+            const start = {
+                x: this.pos[vi],
+                y: this.pos[vi + 1],
+                z: this.pos[vi + 2]
+            };
+            const end = {
+                x: this.pos[vi + 3],
+                y: this.pos[vi + 4],
+                z: this.pos[vi + 5]
+            };
+            Instance.DebugLine({
+                start,
+                end,
+                color: { r: 255, g: 165, b: 0 },
+                duration
+            });
+            Instance.DebugSphere({ center: start, radius: 4, color: { r: 0, g: 215, b: 255 }, duration });
+            Instance.DebugSphere({ center: end, radius: 4, color: { r: 0, g: 215, b: 255 }, duration });
+        }
+    }
+}
+
+/**
+ * @module 导航网格/瓦片管理器
+ */
+/** @typedef {import("./path_manager").NavMeshMesh} NavMeshMesh */
+/** @typedef {import("./path_manager").NavMeshDetail} NavMeshDetail */
+/** @typedef {import("./path_manager").NavMeshLink} NavMeshLink */
+/** @typedef {import("./path_manager").NavMesh} NavMesh */
+/** @typedef {import("./path_tile").tile} tile */
+
+/**
+ * @typedef {{
+ *  tileId:string,
+ *  tx:number,
+ *  ty:number,
+ *  mesh:NavMeshMesh,
+ *  detail:NavMeshDetail,
+ *  links:NavMeshLink
+ * }} TileData
+ */
+/**
+ * 创建一个空的 NavMeshMesh 结构（TypedArray 预分配）。
+ */
+function newmesh()
+{
+    return {
+        verts: new Float32Array(MAX_VERTS*3),
+        vertslength: 0,
+        polys: new Int32Array(MAX_POLYS*2),
+        polyslength: 0,
+        regions: new Int16Array(0),///这里和之后都不会用到，先放个空数组占位
+        neighbors: new Array(MAX_POLYS)
+    };
+}
+/**
+ * 创建一个空的 NavMeshDetail 结构（TypedArray 预分配）。
+ */
+function newdetailmesh()
+{
+    return {
+        verts: new Float32Array(MAX_TRIS*3*3),
+        vertslength: 0,
+        tris: new Uint16Array(MAX_TRIS*3),
+        trislength: 0,
+        triTopoly: new Uint16Array(MAX_TRIS),
+        baseVert: new Uint16Array(MAX_POLYS),
+        vertsCount: new Uint16Array(MAX_POLYS),
+        baseTri: new Uint16Array(MAX_POLYS),
+        triCount: new Uint16Array(MAX_POLYS)
+    };
+}
+/**
+ * 创建一个空的 NavMeshLink 结构（TypedArray 预分配）。
+ */
+function newlink()
+{
+    return {
+        poly:new Uint16Array(MAX_LINKS*2),
+        cost:new Float32Array(MAX_LINKS),
+        type:new Uint8Array(MAX_LINKS),
+        pos:new Float32Array(MAX_LINKS*6),
+        length:0
+    };
+}
+/**
+ * Tile 管理器。
+ *
+ * 动态加载 / 卸载 / 更新多个 Tile，维护全局 mesh / detail / link 数组。
+ * 支持 lazy-loading：按需构建单个 Tile，自动建立跨 Tile 邻接关系，
+ * 并通过可达性裁剪（pruneUnreachablePolys）清除孤立多边形。
+ *
+ * @navigationTitle Tile 管理器
+ */
+class TileManager {
+    /**
+     * 初始化 Tile 管理器，绑定所属 NavMesh 实例。
+     * @param {NavMesh} nav
+     */
+    constructor(nav) {
+        /** @type {NavMesh} 所属的 NavMesh 管理器实例，用于在 updatemesh() 中回写全局导航数据 */
+        this.nav=nav;
+        /** @type {Map<string, TileData>} 以 "tx_ty" 为键存储每个已加载 Tile 的原始数据（mesh/detail/links），用于增量更新与邻居查询 */
+        this.tiles = new Map();
+        /** @type {NavMeshMesh} 全局合并后的多边形网格（所有已加载 Tile 的顶点/多边形/邻接拼合在一起），未经可达性裁剪 */
+        this.mesh=newmesh();
+        /** @type {NavMeshDetail} 全局合并后的细节网格（高分辨率三角形），与 mesh 的 poly 索引对齐 */
+        this.meshdetail=newdetailmesh();
+        /** @type {NavMeshLink} 全局合并后的连接（baseLinks + Extlink + supprlink 三者拼合），供寻路使用 */
+        this.links= newlink();
+
+        /** @type {NavMeshMesh} 经可达性裁剪后的多边形网格，仅保留从种子点可达的多边形；启用 TILE_OPTIMIZATION_1 时由 pruneUnreachablePolys() 写入 */
+        this.prunemesh;
+        /** @type {NavMeshDetail} 经可达性裁剪后的细节网格，与 prunemesh 索引对齐 */
+        this.prunemeshdetail;
+        /** @type {NavMeshLink} 经可达性裁剪后的连接数组，仅包含两端 poly 均可达的连接 */
+        this.prunelinks;
+
+        /** @type {NavMeshLink} 补充连接（梯子 + 地图跳跃点 + 传送门），由 buildSupperLinksForMesh() 生成 */
+        this.supprlink= newlink();//ladder连接
+        /** @type {NavMeshLink} 跨 Tile 跳跃连接，由 JumpLinkBuilder.initInterTileIn() 增量生成 */
+        this.Extlink = newlink();//tile间连接
+        /** @type {NavMeshLink} Tile 内部连接（每个 Tile 自身构建时产生的 links 合并），作为最终合并的基础层 */
+        this.baseLinks =newlink();//tile内连接
+
+        /** @type {Map<string, {vertBase:number,vertCount:number,polyBase:number,polyCount:number,detailVertBase:number,detailVertCount:number,triBase:number,triCount:number,meshRecBase:number,meshRecCount:number}>} 记录每个 Tile 在全局 mesh/detail 数组中的偏移与长度，用于移除/重映射 */
+        this.tileRanges = new Map();
+    }
+
+    /**
+     * 添加（或替换）一个 Tile 到管理器。
+     *
+     * 若该 key 已存在，先调用 removetile 移除旧 Tile，再将新数据追加到全局数组。
+     * 追加完成后自动执行增量跨 Tile 连接生成（_rebuildDeferredLinks）。
+     *
+     * @param {string} key - Tile 唯一标识，格式 "tx_ty"
+     * @param {number} tx - Tile 在网格中的列索引
+     * @param {number} ty - Tile 在网格中的行索引
+     * @param {NavMeshMesh} tileMesh - Tile 的多边形网格
+     * @param {NavMeshDetail} tileDetail - Tile 的细节三角网格
+     * @param {NavMeshLink} tileLinks - Tile 内部生成的连接
+     */
+    addtile(key, tx, ty, tileMesh, tileDetail, tileLinks) {
+        if (this.tiles.has(key)) {
+            this.removetile(key);
+        }
+        this.tiles.set(key, {
+            tileId: key,
+            tx,
+            ty,
+            mesh: tileMesh,
+            detail: tileDetail,
+            links: tileLinks
+        });
+        this._appendTileData(key, tileMesh, tileDetail, tileLinks);
+        this._rebuildDeferredLinks(true,true,key);
+    }
+
+    /**
+     * 从管理器中移除指定 Tile。
+     *
+     * 调用 _removeTileData 从全局数组中删除该 Tile 占用的数据并重映射所有索引，
+     * 然后重建补充连接（_rebuildDeferredLinks）。
+     *
+     * @param {string} key - 要移除的 Tile 标识
+     */
+    removetile(key) {
+        if (!this.tiles.has(key)) return;
+        this.tiles.delete(key);
+        this._removeTileData(key);
+        this._rebuildDeferredLinks(false,false);
+    }
+
+    /**
+     * 更新指定 Tile（先移除旧数据再添加新数据）。
+     *
+     * 内部直接委托给 addtile，后者会检测重复 key 并先 removetile。
+     *
+     * @param {string} key - Tile 标识
+     * @param {number} tx - 列索引
+     * @param {number} ty - 行索引
+     * @param {NavMeshMesh} tileMesh - 新的多边形网格
+     * @param {NavMeshDetail} tileDetail - 新的细节网格
+     * @param {NavMeshLink} tileLinks - 新的 Tile 内连接
+     */
+    updatetile(key, tx, ty, tileMesh, tileDetail, tileLinks) {
+        this.addtile(key, tx, ty, tileMesh, tileDetail, tileLinks);//48ms
+    }
+    /**
+     * 为全局合并后的 mesh 构建所有补充连接（梯子 + 地图跳跃点 + 传送门）。
+     *
+     * 依次调用 LadderLinkBuilder、MapJUMPLinkBuilder、PortalLinkBuilder 的 init()，
+     * 再通过 copyLinks 将结果合并为一个 NavMeshLink。
+     *
+     * @param {NavMeshMesh} mesh - 要分析的全局多边形网格
+     * @returns {NavMeshLink} 合并后的补充连接
+     */
+    buildSupperLinksForMesh(mesh) {
+        let merged = this.copyLinks(new LadderLinkBuilder(mesh).init(), new MapJUMPLinkBuilder(mesh).init());
+        return this.copyLinks(merged, new PortalLinkBuilder(mesh).init());
+    }
+    /**
+     * 将当前最终的 mesh/detail/links 回写到 NavMesh 管理器。
+     *
+     * 调用 return() 获取最终数据（裁剪或未裁剪），直接赋值给 nav.mesh / nav.meshdetail / nav.links，
+     * 使寻路系统立即可用最新导航网格。
+     */
+    updatemesh()
+    {
+        const merged = this.return();
+        this.nav.mesh = merged.mesh;
+        this.nav.meshdetail = merged.meshdetail;
+        this.nav.links = merged.links;
+    }
+    /**
+     * 返回最终可用的导航数据包。
+     *
+     * 当 TILE_OPTIMIZATION_1 开启时返回经可达性裁剪后的 prunemesh/prunemeshdetail/prunelinks；
+     * 否则返回未裁剪的原始全局合并数据。
+     *
+     * @returns {{mesh: NavMeshMesh, meshdetail: NavMeshDetail, links: NavMeshLink}}
+     */
+    return() {
+        return {
+                mesh: this.prunemesh,
+                meshdetail: this.prunemeshdetail,
+                links: this.prunelinks
+            }
+    }
+
+    /**
+     * 从零开始重建所有 Tile。
+     *
+     * 清空现有数据，遍历 tileBuilder 的网格坐标依次调用 buildTile 构建每个 Tile，
+     * 追加到全局数组并增量生成跨 Tile 连接。全部完成后执行补充连接生成、
+     * 可达性裁剪，并统计各阶段耗时。若有 Tile 报错则高亮显示。
+     *
+     * @param {tile} tileBuilder - Tile 构建器实例，提供 tilesX/tilesY 和 buildTile()
+     * @returns {{timing: Object, errorTiles: any[]}} 各阶段耗时统计 + 报错 Tile 列表
+     */
+    rebuildAll(tileBuilder) {
+        this.tiles.clear();
+        this.tileRanges.clear();
+        this.mesh=newmesh();
+        this.meshdetail = newdetailmesh();
+        this.links = newlink();
+        this.supprlink = newlink();
+        this.Extlink=newlink();
+        this.baseLinks =newlink();
+        
+        const timing = {
+            hfInit: 0,
+            region: 0,
+            contour: 0,
+            poly: 0,
+            detail: 0,
+            merge: 0,
+            jumpLinks: 0,
+        };
+
+        /** @type {{tx:number,ty:number}[]} */
+        const errorTiles = [];
+
+        for (let ty = 0; ty < tileBuilder.tilesY; ty++) {
+            for (let tx = 0; tx < tileBuilder.tilesX; tx++) {
+                const tileData = tileBuilder.buildTile(tx, ty);
+                timing.hfInit += tileData.timing.hfInit;
+                timing.region += tileData.timing.region;
+                timing.contour += tileData.timing.contour;
+                timing.poly += tileData.timing.poly;
+                timing.detail += tileData.timing.detail;
+                timing.merge += tileData.timing.merge;
+                timing.jumpLinks += tileData.timing.jumpLinks;
+                if (tileData.hasError) errorTiles.push({ tx, ty });
+                const key = tileData.tileId;
+                this.tiles.set(key, {
+                    tileId: key,
+                    tx: tileData.tx,
+                    ty: tileData.ty,
+                    mesh: tileData.mesh,
+                    detail: tileData.detail,
+                    links: tileData.links
+                });
+                this._appendTileData(key, tileData.mesh, tileData.detail, tileData.links);
+                this._rebuildDeferredLinks(true,false,key);
+            }
+        }
+        this._rebuildDeferredLinks(false,true);
+        if (errorTiles.length > 0) {
+            const dedup = new Map();
+            for (const tile of errorTiles) dedup.set(`${tile.tx}|${tile.ty}`, tile);
+            const drawTiles = Array.from(dedup.values());
+            tileBuilder.debugDrawErrorTiles(drawTiles, 60);
+            Instance.Msg(`Tile报错统计: ${drawTiles.length} 个tile存在步骤报错，已在地图高亮`);
+        }
+        this.pruneUnreachablePolys();
+        Instance.Msg(`Tile阶段耗时统计: 体素化=${timing.hfInit}ms, 区域=${timing.region}ms, 轮廓=${timing.contour}ms, 多边形=${timing.poly}ms, 细节=${timing.detail}ms, 合并=${timing.merge}ms`);
+        return { timing, errorTiles };
+    }
+
+    /**
+     * 将一个 Tile 的 mesh/detail/links 追加到全局数组末尾。
+     *
+     * 具体步骤：
+     * 1. 记录 vertBase/polyBase/detailVertBase/triBase 等全局基址
+     * 2. 追加 polys/verts（每个 poly 的顶点顺序复制，并重映射邻接关系）
+     * 3. 追加 detail verts/tris/triTopoly 和每个 poly 的 mesh record
+     * 4. 追加 baseLinks（Tile 内连接）并重映射 poly 索引
+     * 5. 在 tileRanges 中记录该 Tile 的范围
+     * 6. 调用 _linkTileWithNeighborTiles 建立跨 Tile 邻接
+     *
+     * @param {string} tileId - Tile 标识
+     * @param {NavMeshMesh} tileMesh - Tile 的多边形网格
+     * @param {NavMeshDetail} tileDetail - Tile 的细节网格
+     * @param {NavMeshLink} tileLinks - Tile 内连接
+     */
+    _appendTileData(tileId, tileMesh, tileDetail, tileLinks) {
+        const mesh = this.mesh;
+        const meshdetail = this.meshdetail;
+        const baseLinks = this.baseLinks;
+        // 记录本次追加前的全局基址（用于后续写入时做偏移）
+        const vertBase = mesh.vertslength; // 顶点基址（顶点数，不是浮点数长度）
+        const polyBase = mesh.polyslength; // 多边形基址（多边形计数）
+
+        // 记录 detail 层的基址（细节顶点与细节三角）
+        const detailVertBase = meshdetail.vertslength;
+        const triBase = meshdetail.trislength;
+        const meshRecBase = polyBase; // mesh record 基址与 polyBase 对齐（每个 poly 一条 record）
+        
+        // =========================
+        // 1) 追加多边形：把 tile 的每个 poly 的顶点按顺序追加到全局 verts 中，
+        //    并在 polys 中记录该 poly 在 verts 中的 start/end 索引区间
+        // =========================
+        // append polys
+        for (let i = 0; i < tileMesh.polyslength; i++) {
+            const tstart = tileMesh.polys[i<<1];
+            const tend = tileMesh.polys[(i<<1)+1];
+            // poly 在全局 verts 中的起始顶点索引
+            const start= mesh.vertslength;
+            for (let k = tstart; k <= tend; k++) {
+
+                const sx = tileMesh.verts[k * 3];
+                const sy = tileMesh.verts[k * 3 + 1];
+                const sz = tileMesh.verts[k * 3 + 2];
+                const writeIndex = (mesh.vertslength) * 3;
+                mesh.verts[writeIndex] = sx;
+                mesh.verts[writeIndex + 1] = sy;
+                mesh.verts[writeIndex + 2] = sz;
+
+                mesh.vertslength++;
+            }
+            const end = mesh.vertslength - 1;
+            // 将该 poly 的 start/end 写入 polys（每个 poly 占两个 Int32）
+            const pi = mesh.polyslength * 2;
+            mesh.polys[pi] = start;
+            mesh.polys[pi + 1] = end;
+            
+
+            // 把 tile 本地的邻接关系（如果有）映射到全局 poly 索引空间
+            const vertCount = tend - tstart + 1;
+            mesh.neighbors[mesh.polyslength]=new Array(vertCount);
+            for (let ei = 0; ei < vertCount; ei++) 
+            {
+                const nc=tileMesh.neighbors[i][ei][0];
+                mesh.neighbors[mesh.polyslength][ei]=new Int16Array(100);
+                mesh.neighbors[mesh.polyslength][ei][0]=nc;
+                for(let ni=1;ni<=nc;ni++)
+                {
+                    const nei = tileMesh.neighbors[i][ei][ni];
+                    const mappedNei = polyBase + nei;
+                    mesh.neighbors[mesh.polyslength][ei][ni] = mappedNei;
+                }
+            }
+            mesh.polyslength++;
+        }
+
+        meshdetail.verts.set(tileDetail.verts.subarray(0, tileDetail.vertslength * 3), detailVertBase * 3);
+        meshdetail.vertslength+=tileDetail.vertslength;
+        // =========================
+        // 3) 追加 detail 三角形（tris）和 tri->poly 映射（triTopoly）到 TypedArray
+        //    tris 以三元组存储顶点索引（每个值指向 meshdetail.verts 的顶点索引）
+        // =========================
+
+        for (let i = 0; i < tileDetail.trislength; i++) {
+
+            let a = detailVertBase + tileDetail.tris[i * 3];
+            let b = detailVertBase + tileDetail.tris[i * 3 + 1];
+            let c = detailVertBase + tileDetail.tris[i * 3 + 2];
+
+            const writeIdx = meshdetail.trislength * 3;
+            meshdetail.tris[writeIdx] = a;
+            meshdetail.tris[writeIdx + 1] = b;
+            meshdetail.tris[writeIdx + 2] = c;
+
+            meshdetail.triTopoly[meshdetail.trislength] = polyBase + tileDetail.triTopoly[i];
+            meshdetail.trislength++;
+        }
+
+        // =========================
+        // 4) 追加每个 poly 对应的 mesh record（baseVert, vertsCount, baseTri, triCount）
+        //    这些数组以 poly 索引为下标，存储该 poly 的细节数据在全局数组中的起点与计数
+        // =========================
+        for (let i = 0; i < tileMesh.polyslength; i++) {
+
+            const gi = meshRecBase + i;
+
+            meshdetail.baseVert[gi] = detailVertBase + tileDetail.baseVert[i];
+            meshdetail.vertsCount[gi] = tileDetail.vertsCount[i];
+            meshdetail.baseTri[gi] = triBase + tileDetail.baseTri[i];
+            meshdetail.triCount[gi] = tileDetail.triCount[i];
+        }
+        // 追加link
+        const blid=baseLinks.length;
+        baseLinks.cost.set(tileLinks.cost.subarray(0, tileLinks.length), blid);
+        baseLinks.type.set(tileLinks.type.subarray(0, tileLinks.length), blid);
+        baseLinks.pos.set(tileLinks.pos.subarray(0, tileLinks.length * 6), blid * 6);
+
+        for (let i=0;i<tileLinks.length;i++)
+        {
+            baseLinks.poly[(blid+i)<<1]=polyBase+tileLinks.poly[i<<1];
+            baseLinks.poly[((blid+i)<<1)+1]=polyBase+tileLinks.poly[(i<<1)+1];
+        }
+        baseLinks.length+=tileLinks.length;
+        //记录 tile 在全局 mesh/detail 中的范围
+        this.tileRanges.set(tileId, {
+            vertBase,
+            vertCount: mesh.vertslength-vertBase,
+            polyBase,
+            polyCount: tileMesh.polyslength,
+            detailVertBase,
+            detailVertCount: tileDetail.vertslength,
+            triBase,
+            triCount: tileDetail.trislength,
+            meshRecBase,
+            meshRecCount: tileMesh.polyslength
+        });
+        this._linkTileWithNeighborTiles(tileId);
+    }
+
+    /**
+     * 新 Tile 追加后，增量补齐其与周围 4 个邻居 Tile 的跨 Tile 邻接关系。
+     *
+     * 算法流程：
+     * 1. 收集邻居 Tile 中所有多边形的开放边（无邻接的边），按主轴方向 + bucket 分组
+     * 2. 遍历当前 Tile 的开放边，通过 findOpenEdgesByOverlap 与邻居边进行模糊匹配
+     * 3. 对匹配成功的边对调用 addNeighborLink 双向连接
+     *
+     * @param {string} tileId - 新追加的 Tile 标识
+     */
+    _linkTileWithNeighborTiles(tileId) {
+        const tileData = this.tiles.get(tileId);
+        const curRange = this.tileRanges.get(tileId);
+        if (!tileData || !curRange || curRange.polyCount <= 0) return;
+
+        const neighborTiles = this._collectNeighborTiles(tileData.tx, tileData.ty);
+        if (neighborTiles.length === 0) return;
+        //邻居 tile 的“开放边”
+        const openEdgeStorebuckets = new Map();
+        // =========================
+        // 1️⃣ 收集邻居 tile 的开放边
+        // =========================
+        //收集所有邻居中的多边形的开放边(无邻居边)
+        for (const nei of neighborTiles) {
+            const neiRange = this.tileRanges.get(nei);
+            if (!neiRange || neiRange.polyCount <= 0) continue;
+
+            const end = neiRange.polyBase + neiRange.polyCount;
+            for (let poly = neiRange.polyBase; poly < end; poly++) {
+                const polyStart = this.mesh.polys[poly << 1];
+                const polyEnd   = this.mesh.polys[(poly << 1) + 1];
+                const vertCount = polyEnd - polyStart + 1;
+                for (let edge = 0; edge < vertCount; edge++) 
+                {
+                    if (this.mesh.neighbors[poly][edge][0] > 0) continue; // 有邻居
+                    const va = polyStart + edge;
+                    const vb = polyStart + ((edge + 1) % vertCount);
+                    const edgeRec = this.buildOpenEdgeRecord(this.mesh, poly, edge, va, vb);
+
+                    const bucketKey = `${edgeRec.major}|${edgeRec.bucketId}`;
+                    const bucket = Tool.getOrCreateArray(openEdgeStorebuckets, bucketKey);
+                    bucket.push(edgeRec);
+                }
+            }
+        }
+        // =========================
+        // 2️⃣ 当前 tile 尝试匹配
+        // =========================
+        const dedup = new Set();
+        /**
+         * @type {any[]}
+         */
+        const candidates=[];
+        const curEnd = curRange.polyBase + curRange.polyCount;
+        for (let poly = curRange.polyBase; poly < curEnd; poly++) {
+            const polyStart = this.mesh.polys[poly << 1];
+            const polyEnd   = this.mesh.polys[(poly << 1) + 1];
+            const vertCount = polyEnd - polyStart + 1;
+            for (let edge = 0; edge < vertCount; edge++) 
+            {
+                if (this.mesh.neighbors[poly][edge][0] > 0) continue;
+                dedup.clear();
+                candidates.length = 0;
+                // ===== 2️⃣ 模糊匹配 =====
+                this.findOpenEdgesByOverlap(
+                    this.mesh,
+                    openEdgeStorebuckets,
+                    poly,
+                    edge,
+                    curRange.polyBase,
+                    candidates,
+                    dedup
+                );
+
+                for (const cand of candidates) {
+                    this.addNeighborLink(this.mesh, poly, edge, cand.poly, cand.edge);
+                }
+                //可以维护一个所有tile的边界边
+            }
+        }
+    }
+
+    /**
+     * 收集指定 Tile 坐标周围的已加载邻居 Tile 标识。
+     *
+     * 默认只返回上下左右 4 个方向；开启 includeDiagonal 后
+     * 返回 8 个方向加自身（共 9 个），用于跨 Tile 连接生成时的范围查询。
+     *
+     * @param {number} tx - 中心 Tile 列索引
+     * @param {number} ty - 中心 Tile 行索引
+     * @param {boolean} [includeDiagonal] - 是否包含对角线邻居和自身
+     * @returns {string[]} 已加载的邻居 Tile 标识数组
+     */
+    _collectNeighborTiles(tx, ty, includeDiagonal = false) {
+        /** @type {string[]} */
+        const out = [];
+        // 4/8邻居偏移
+        const offsets = includeDiagonal
+            ? [
+                [-1, -1], [0, -1], [1, -1],
+                [-1,  0], [0,  0], [1,  0],
+                [-1,  1], [0,  1], [1,  1]
+            ]
+            : [
+                [0, -1], [-1, 0], [1, 0], [0, 1]
+            ];
+        for (const [dx, dy] of offsets) {
+            const ntx = tx + dx;
+            const nty = ty + dy;
+            // 构造 tileId，需与 addtile 时一致
+            const tileId = `${ntx}_${nty}`;
+            if (this.tiles.has(tileId)) out.push(tileId);
+        }
+        return out;
+    }
+
+    /**
+     * 从全局数组中删除指定 Tile 的数据并重映射所有索引。
+     *
+     * 共 10 个步骤：
+     * 1-2. 删除 mesh verts、polys（copyWithin 左移 + 长度减少）
+     * 3. 重映射剩余 poly 的顶点索引
+     * 4. 重映射所有 neighbors 中的 poly 索引（删除指向被移除 Tile 的邻接）
+     * 5-6. 删除 detail verts/tris
+     * 7-8. 重映射 detail tris 顶点索引和 triTopoly
+     * 9. 重映射三套 links（baseLinks/Extlink/supprlink）中的 poly 索引
+     * 10. 更新其他 Tile 在 tileRanges 中的偏移
+     *
+     * @param {string} tileId - 要移除的 Tile 标识
+     */
+    _removeTileData(tileId) {
+        // 1) 读取该 tile 在全局数组中的范围；没有范围说明未被 append，直接返回。
+        const range = this.tileRanges.get(tileId);
+        if (!range) return;
+        const mesh = this.mesh;
+        const detail = this.meshdetail;
+
+        // 2) 预先计算被删除区间的右边界，用于后续索引重映射判断。
+        const vertEnd = range.vertBase + range.vertCount;
+        const polyEnd = range.polyBase + range.polyCount;
+        const dVertEnd = range.detailVertBase + range.detailVertCount;
+        const triEnd = range.triBase + range.triCount;
+
+        // 3) 从主 mesh 中删除该 tile 占用的顶点/多边形/邻接记录。
+        // =========================
+        // 1️⃣ 删除 mesh verts（float x3）
+        // =========================
+        const vertMoveCount = mesh.vertslength - vertEnd;
+        if (vertMoveCount > 0) {
+            mesh.verts.copyWithin(
+                range.vertBase * 3,
+                vertEnd * 3,
+                mesh.vertslength * 3
+            );
+        }
+        mesh.vertslength -= range.vertCount;
+        // =========================
+        // 2️⃣ 删除 polys
+        // =========================
+        const polyMoveCount = mesh.polyslength - polyEnd;
+        const oldpolylen=mesh.polyslength;
+        if (polyMoveCount > 0) {
+            mesh.polys.copyWithin(
+                range.polyBase * 2,
+                polyEnd * 2,
+                mesh.polyslength * 2
+            );
+        }
+        mesh.polyslength -= range.polyCount;
+
+        // neighbors 也要左移
+        mesh.neighbors.splice(range.polyBase, range.polyCount);
+
+        // =========================
+        // 3️⃣ 重映射 poly 顶点索引
+        // =========================
+        for (let i = range.polyBase; i < mesh.polyslength; i++) {
+
+            const pi = i << 1;
+
+            let start = mesh.polys[pi];
+            let end   = mesh.polys[pi + 1];
+
+            if (start >= vertEnd) {
+                start -= range.vertCount;
+                end   -= range.vertCount;
+                mesh.polys[pi] = start;
+                mesh.polys[pi + 1] = end;
+            }
+        }
+        // =========================
+        // 4️⃣ 重映射 neighbors poly index
+        // =========================
+        for (let p = 0; p < mesh.polyslength; p++) {
+
+            const ppolyStart = mesh.polys[p << 1];
+            const ppolyEnd   = mesh.polys[(p << 1) + 1];
+            const vertCount = ppolyEnd - ppolyStart + 1;
+
+            for (let e = 0; e < vertCount; e++) {
+
+                const list = mesh.neighbors[p][e];
+                const count = list[0];
+
+                let write = 1;
+
+                for (let i = 1; i <= count; i++) {
+
+                    const n = list[i];
+
+                    if (n >= range.polyBase && n < polyEnd) {
+                        continue; // 删除
+                    }
+
+                    list[write++] = n >= polyEnd
+                        ? n - range.polyCount
+                        : n;
+                }
+
+                list[0] = write - 1;
+            }
+        }
+
+        // =========================
+        // 5️⃣ 删除 detail verts
+        // =========================
+        const dMove = detail.vertslength - dVertEnd;
+        if (dMove > 0) {
+            detail.verts.copyWithin(
+                range.detailVertBase * 3,
+                dVertEnd * 3,
+                detail.vertslength * 3
+            );
+        }
+        detail.vertslength -= range.detailVertCount;
+        // =========================
+        // 6️⃣ 删除 detail tris
+        // =========================
+        const triMove = detail.trislength - triEnd;
+        if (triMove > 0) {
+            detail.tris.copyWithin(
+                range.triBase * 3,
+                triEnd * 3,
+                detail.trislength * 3
+            );
+
+            detail.triTopoly.copyWithin(
+                range.triBase,
+                triEnd,
+                detail.trislength
+            );
+        }
+        detail.trislength -= range.triCount;
+
+        // =========================
+        // 7️⃣ 重映射 detail tris 顶点
+        // =========================
+        for (let i = range.triBase*3; i < detail.trislength * 3; i++) {
+            const v = detail.tris[i];
+            if (v >= dVertEnd) {
+                detail.tris[i] = v - range.detailVertCount;
+            }
+        }
+
+        // =========================
+        // 8️⃣ 重映射 triTopoly
+        // =========================
+        for (let i = range.triBase; i < detail.trislength; i++) {
+            const p = detail.triTopoly[i];
+            if (p >= polyEnd) {
+                detail.triTopoly[i] = p - range.polyCount;
+            }
+        }
+
+        detail.baseVert.copyWithin(range.polyBase, polyEnd, oldpolylen);
+        detail.vertsCount.copyWithin(range.polyBase, polyEnd, oldpolylen);
+        detail.baseTri.copyWithin(range.polyBase, polyEnd, oldpolylen);
+        detail.triCount.copyWithin(range.polyBase, polyEnd, oldpolylen);
+        for (let i = range.polyBase; i < mesh.polyslength; i++) {
+            if (detail.baseVert[i] >= dVertEnd) detail.baseVert[i] -= range.detailVertCount;
+            if (detail.baseTri[i]  >= triEnd)   detail.baseTri[i]  -= range.triCount;
+        }
+
+        // =========================
+        // 9️⃣ 重映射 Links（TypedArray 版本）
+        // =========================
+        const remapLinks = (/** @type {NavMeshLink} */ linkSet) => {
+
+            let write = 0;
+
+            for (let i = 0; i < linkSet.length; i++) {
+
+                const a = linkSet.poly[i << 1];
+                const b = linkSet.poly[(i << 1) + 1];
+
+                if (
+                    (a >= range.polyBase && a < polyEnd) ||
+                    (b >= range.polyBase && b < polyEnd)
+                ) {
+                    continue;
+                }
+
+                linkSet.poly[write << 1] =
+                    a >= polyEnd ? a - range.polyCount : a;
+
+                linkSet.poly[(write << 1) + 1] =
+                    b >= polyEnd ? b - range.polyCount : b;
+
+                linkSet.cost[write] = linkSet.cost[i];
+                linkSet.type[write] = linkSet.type[i];
+
+                for (let k = 0; k < 6; k++) {
+                    linkSet.pos[write * 6 + k] =
+                        linkSet.pos[i * 6 + k];
+                }
+
+                write++;
+            }
+
+            linkSet.length = write;
+        };
+
+        remapLinks(this.baseLinks);
+        remapLinks(this.Extlink);
+        remapLinks(this.supprlink);
+
+        // =========================
+        // 🔟 更新 tileRanges
+        // =========================
+        this.tileRanges.delete(tileId);
+
+        for (const [k, r] of this.tileRanges.entries()) {
+
+            if (r.vertBase > range.vertBase)
+                r.vertBase -= range.vertCount;
+
+            if (r.polyBase > range.polyBase)
+                r.polyBase -= range.polyCount;
+
+            if (r.detailVertBase > range.detailVertBase)
+                r.detailVertBase -= range.detailVertCount;
+
+            if (r.triBase > range.triBase)
+                r.triBase -= range.triCount;
+
+            if (r.meshRecBase > range.meshRecBase)
+                r.meshRecBase -= range.meshRecCount;
+
+            this.tileRanges.set(k, r);
+        }
+    }
+    /**
+     * 获取指定 Tile 及其邻居（含对角线）的所有开放边（无邻接的多边形边）。
+     *
+     * 返回的 result 数组每 3 个元素为一条边 [poly, vertA, vertB]，
+     * tilemark 记录每个 poly 属于目标 Tile (2) 还是邻居 Tile (1)，
+     * 用于 JumpLinkBuilder.initInterTileIn() 判断跨 Tile 连接方向。
+     *
+     * @param {string} targettileId - 目标 Tile 标识
+     * @returns {{edgeCount: number, result: Uint16Array, tilemark: Uint8Array}}
+     */
+    getedgebytileid(targettileId)
+    {
+        /**
+         * @type {string[]}
+         */
+        let neitileid = [];
+        const tileData = this.tiles.get(targettileId);
+        if (tileData) neitileid=this._collectNeighborTiles(tileData.tx, tileData.ty, true);
+        const tilemark=new Uint8Array(4096*3);
+        const result = new Uint16Array(4096 * 3);
+        let edgeCount = 0;
+        for (const tileId of neitileid) {
+            const range=this.tileRanges.get(tileId);
+            if(!range)continue;
+            const end = range.polyBase + range.polyCount;
+            for (let p = range.polyBase; p < end; p++) {
+                const polyStart = this.mesh.polys[p << 1];
+                const polyEnd   = this.mesh.polys[(p << 1) + 1];
+                const vertCount = polyEnd - polyStart + 1;
+                if(targettileId===tileId)tilemark[p]=2;
+                else tilemark[p]=1;
+                for (let j = 0; j < vertCount; j++) {
+                    // 如果没有邻居，就是边界边
+                    if (this.mesh.neighbors[p][j][0] === 0) {
+                        const vi1 = polyStart + j;
+                        const vi2 = polyStart + ((j + 1) % vertCount);
+                        const idx =  edgeCount*3;
+                        result[idx] = p;
+                        result[idx+1] = vi1;
+                        result[idx + 2] = vi2;
+                        edgeCount++;
+                   }
+                }
+            }
+        }
+        return { edgeCount, result, tilemark };
+    }
+    /**
+     * 重建延迟连接（跨 Tile 跳跃 + 补充连接），并将所有连接合并到 this.links。
+     *
+     * Extjump=true 时根据 targettileId 增量生成跨 Tile 跳跃连接；
+     * Supperlink=true 时为全局 mesh 重建梯子/地图跳跃点/传送门连接。
+     * 最后将 baseLinks + Extlink + supprlink 三层合并为 this.links。
+     *
+     * @param {boolean} Extjump - 是否生成跨 Tile 跳跃连接
+     * @param {boolean} Supperlink - 是否重建补充连接（梯子/传送门等）
+     * @param {string} [targettileId] - 指定 Tile 时仅对其增量生成；不传则触发全局重建
+     */
+    _rebuildDeferredLinks(Extjump,Supperlink,targettileId) {
+        if(Extjump&&targettileId)
+        {
+            const { edgeCount, result, tilemark } = this.getedgebytileid(targettileId);
+            if(Extjump)this.Extlink = new JumpLinkBuilder(this.mesh).initInterTileIn(edgeCount,result,tilemark,this.Extlink);//15ms
+        }
+        if(Supperlink)
+        {
+            Tool.buildSpatialIndex(this.mesh);//ladder最后才会运行，弄完后才会裁剪，裁剪也会使用这个
+            this.supprlink= this.buildSupperLinksForMesh(this.mesh);
+        }
+        let merged = this.copyLinks(this.baseLinks, this.Extlink);
+        merged = this.copyLinks(merged, this.supprlink);
+        this.links = merged;
+    }
+    /**
+     * 把 b 追加到 a 后面，返回新的 link
+     * @param {NavMeshLink} a
+     * @param {NavMeshLink} b
+     * @returns {NavMeshLink}
+     */
+    copyLinks(a, b) {
+        const total = a.length + b.length;
+        /** @type {NavMeshLink} */
+        const merged = {
+            poly: new Uint16Array(total * 2),
+            cost: new Float32Array(total),
+            type: new Uint8Array(total),
+            pos:  new Float32Array(total * 6),
+            length: total
+        };
+
+        let linkOff = 0;
+        let polyOff = 0;
+        let posOff  = 0;
+
+        const append = (/** @type {NavMeshLink} */ src) => {
+            if (!src || src.length === 0) return;
+
+            merged.poly.set(src.poly.subarray(0, src.length * 2), polyOff);
+            merged.cost.set(src.cost.subarray(0, src.length), linkOff);
+            merged.type.set(src.type.subarray(0, src.length), linkOff);
+            merged.pos.set(src.pos.subarray(0, src.length * 6), posOff);
+
+            polyOff += src.length * 2;
+            linkOff += src.length;
+            posOff  += src.length * 6;
+        };
+
+        append(a); // 先 a
+        append(b); // 再 b（追加到后面）
+        return merged;
+    }
+    /**
+     * 构建 poly 索引→Tile 标识的映射数组。
+     *
+     * 如果传入 targettileId，仅填充该 Tile 及其 8 邻居的多边形；
+     * 否则遍历所有 tileRanges 填充整个数组。
+     * 返回的数组长度等于 mesh.polyslength，索引为 poly ID。
+     *
+     * @param {string} [targettileId] - 可选的目标 Tile 标识
+     * @returns {string[]} 每个 poly 对应的 tileId
+     */
+    _buildPolyTileKeys(targettileId) {
+        /**
+         * @type {string[]}
+         */
+        let neitileid = [];
+        const polyTileKeys = new Array(this.mesh.polyslength);
+        
+        if (targettileId) {
+            const tileData = this.tiles.get(targettileId);
+            if (tileData) neitileid=this._collectNeighborTiles(tileData.tx, tileData.ty, true);
+            for (const tileId of neitileid) {
+                const range=this.tileRanges.get(tileId);
+                if(!range)continue;
+                const end = range.polyBase + range.polyCount;
+                for (let p = range.polyBase; p < end; p++) {
+                    polyTileKeys[p] = tileId;
+                }
+            }
+        }
+        else {
+            for (const [tileId, range] of this.tileRanges.entries()) {
+                const end = range.polyBase + range.polyCount;
+                for (let p = range.polyBase; p < end; p++) {
+                    polyTileKeys[p] = tileId;
+                }
+            }
+        }
+        return polyTileKeys;
+    }
+
+    /**
+     * 根据世界坐标重建其所在的 Tile。
+     *
+     * 调用 tileBuilder.buildTileNavMeshAtPos 构建 Tile，然后 updatetile 更新全局数据。
+     * 若开启 TILE_OPTIMIZATION_1 则进行可达性裁剪。
+     *
+     * @param {tile} tileBuilder - Tile 构建器
+     * @param {{x:number,y:number,z:number}} pos - 世界坐标
+     * @returns {TileData|null} 新构建的 Tile 数据，或 null
+     */
+    rebuildAtPos(tileBuilder, pos) {
+        const tileData = tileBuilder.buildTileNavMeshAtPos(pos);
+        if (!tileData) return null;
+        this.updatetile(tileData.tileId, tileData.tx, tileData.ty, tileData.mesh, tileData.detail, tileData.links);
+        this.pruneUnreachablePolys();
+        return tileData;
+    }
+
+    /**
+     * 切换 pos 所在 Tile 的加载状态。
+     *
+     * 若该 Tile 已存在则移除（返回 false），若不存在则构建并添加（返回 true）。
+     * 开启 TILE_OPTIMIZATION_1 时自动执行可达性裁剪。
+     *
+     * @param {tile} tileBuilder - Tile 构建器
+     * @param {{x:number,y:number,z:number}} pos - 世界坐标
+     * @returns {boolean} true 表示添加，false 表示移除
+     */
+    reversetile(tileBuilder, pos) {
+        const tileId = tileBuilder.fromPosGetTile(pos);
+        if (this.tiles.has(tileId)) {
+            this.removetile(tileId);
+            this.pruneUnreachablePolys();
+            return false;
+        }
+        const tileData = tileBuilder.buildTileNavMeshAtPos(pos);
+        this.addtile(tileId, tileData.tx, tileData.ty, tileData.mesh, tileData.detail, tileData.links || []);
+        this.pruneUnreachablePolys();
+        return true;
+    }
+
+    /**
+     * 可达性裁剪：以场景中 name="navmesh" 的 info_target 为种子，
+     * BFS 遍历 neighbors + links，删除所有不可达的多边形。
+     *
+     * 具体步骤：
+     * 1. 查找种子 poly（离 info_target 最近的 poly）
+     * 2. 建立 links 的 poly 邻接表
+     * 3. BFS 标记所有可达 poly
+     * 4. 构建 oldToNewPoly 重映射表
+     * 5. 拷贝可达的 verts、polys、neighbors 到 prunemesh
+     * 6. 拷贝可达的 detail verts/tris 到 prunemeshdetail
+     * 7. 拷贝两端均可达的 links 到 prunelinks
+     */
+    pruneUnreachablePolys() {//15ms
+        const mesh = this.mesh;
+        const detail = this.meshdetail;
+        const polyCount = mesh.polyslength;
+
+        if (polyCount === 0) return;
+        /** @type {number[]} */
+        const seedPolys = [];
+        const slist = Instance.FindEntitiesByClass("info_target");
+        for (const ent of slist) {
+            if (ent.GetEntityName() === "navmesh") {
+                const seed = Tool.findNearestPoly(ent.GetAbsOrigin(), this.mesh).poly;
+                if (seed >= 0 && seed < polyCount) seedPolys.push(seed);
+            }
+        }
+        if (seedPolys.length === 0) {
+            Instance.Msg("可达性筛选跳过: 未找到 info_target{name=navmesh} 种子");
+            return;
+        }
+        const reachable = new Uint8Array(polyCount);
+        const queue = new Int32Array(polyCount);
+        let keepCount = 0;
+        let qh = 0, qt = 0;
+        // 入队 seed
+        for (const s of seedPolys) {
+            if (reachable[s]) continue;
+            reachable[s] = 1;
+            keepCount++;
+            queue[qt++] = s;
+        }
+
+        // 先把 links 建成按 poly 的邻接（一次性）
+        const linkAdj = new Array(polyCount);
+        for (let i = 0; i < polyCount; i++) linkAdj[i] = [];
+        for (let i = 0; i < this.links.length; i++) 
+        {
+            const a = this.links.poly[i << 1];
+            const b = this.links.poly[(i << 1) + 1];
+            if (a >= 0 && a < polyCount && b >= 0 && b < polyCount)
+            {
+                linkAdj[a].push(b);
+                linkAdj[b].push(a);
+            }
+        }
+
+        // BFS
+        while (qh < qt) 
+        {
+            const p = queue[qh++];
+
+            // 走 neighbors
+            const ps = mesh.polys[p << 1];
+            const pe = mesh.polys[(p << 1) + 1];
+            const edgeCount = pe - ps + 1;
+            const edges = mesh.neighbors[p];
+            for (let e = 0; e < edgeCount; e++) 
+            {
+                const list = edges[e];
+                const count = list[0] | 0;
+                for (let k = 1; k <= count; k++) {
+                const n = list[k];
+                if (n < 0 || n >= polyCount || reachable[n]) continue;
+                reachable[n] = 1;
+                keepCount++;
+                queue[qt++] = n;
+                }
+            }
+
+            // 走 links
+            const la = linkAdj[p];
+            for (let i = 0; i < la.length; i++) 
+            {
+                const n = la[i];
+                if (reachable[n]) continue;
+                reachable[n] = 1;
+                keepCount++;
+                queue[qt++] = n;
+            }
+        }
+
+        const oldToNewPoly = new Int32Array(polyCount).fill(-1);
+
+        let newPolyCount = 0;
+        for (let i = 0; i < polyCount; i++) {
+            if (reachable[i]) oldToNewPoly[i] = newPolyCount++;
+        }
+        // =========================
+        // 5️⃣ 统计新 verts 数量
+        // =========================
+
+        const vertUsed = new Uint8Array(mesh.vertslength);
+        let newVertCount = 0;
+
+        for (let p = 0; p < polyCount; p++) {
+
+            if (!reachable[p]) continue;
+
+            const start = mesh.polys[p<<1];
+            const end   = mesh.polys[(p<<1)+1];
+
+            for (let v = start; v <= end; v++) {
+                if (!vertUsed[v]) {
+                    vertUsed[v] = 1;
+                    newVertCount++;
+                }
+            }
+        }
+
+        const vertRemap = new Int32Array(mesh.vertslength).fill(-1);
+
+        let writeV = 0;
+        for (let i = 0; i < mesh.vertslength; i++) {
+            if (vertUsed[i])
+                vertRemap[i] = writeV++;
+        }
+        // =========================
+        // 6️⃣ 构建 prunemesh
+        // =========================
+        /** @type {NavMeshMesh} */
+        const newMesh = {
+            verts: new Float32Array(newVertCount * 3),
+            polys: new Int32Array(newPolyCount * 2),
+            neighbors: new Array(newPolyCount),
+            regions: new Int16Array(0),//无用
+            polyslength: newPolyCount,
+            vertslength: newVertCount
+        };
+        // verts copy
+        for (let i = 0; i < mesh.vertslength; i++) {
+
+            if (!vertUsed[i]) continue;
+
+            const nv = vertRemap[i];
+
+            newMesh.verts[nv*3]     = mesh.verts[i*3];
+            newMesh.verts[nv*3 + 1] = mesh.verts[i*3 + 1];
+            newMesh.verts[nv*3 + 2] = mesh.verts[i*3 + 2];
+        }
+        // polys copy
+        for (let p = 0; p < polyCount; p++) {
+
+            if (!reachable[p]) continue;
+
+            const np = oldToNewPoly[p];
+
+            const start = mesh.polys[p<<1];
+            const end   = mesh.polys[(p<<1)+1];
+
+            newMesh.polys[np<<1]     = vertRemap[start];
+            newMesh.polys[(np<<1)+1] = vertRemap[end];
+
+            // neighbors
+            //////////////////////
+            const edgeList = mesh.neighbors[p];
+            const vertCount = end - start + 1;
+            const newEdges = new Array(vertCount);
+
+            for (let e = 0; e < vertCount; e++) {
+
+                const list = edgeList[e];
+                const count = list[0];
+
+                const newList = new Int16Array(count + 1);
+
+                let w = 1;
+
+                for (let i = 1; i <= count; i++) {
+
+                    const newIdx = oldToNewPoly[list[i]];
+                    if (newIdx !== -1)newList[w++] = newIdx;
+                }
+
+                newList[0] = w - 1;
+                newEdges[e] = newList;
+            }
+
+            newMesh.neighbors[np] = newEdges;
+        }
+        // =========================
+        // 7️⃣ 统计 tri 数量
+        // =========================
+
+        let newTriCount = 0;
+
+        for (let p = 0; p < polyCount; p++) {
+
+            if (!reachable[p]) continue;
+            newTriCount += detail.triCount[p];
+        }
+        let newDetailVertCount = 0;
+
+        const detailVertRemap = new Int32Array(detail.vertslength);
+        detailVertRemap.fill(-1);
+        for (let t = 0; t < detail.trislength; t++) {
+            if (!reachable[detail.triTopoly[t]]) continue;
+            const base = t * 3;
+            detailVertRemap[detail.tris[base]]     = newDetailVertCount++;
+            detailVertRemap[detail.tris[base + 1]] = newDetailVertCount++;
+            detailVertRemap[detail.tris[base + 2]] = newDetailVertCount++;
+        }
+
+        /**@type {NavMeshDetail} */
+        const newDetail = {
+            verts: new Float32Array(newDetailVertCount * 3),
+            vertslength: newDetailVertCount,
+            tris: new Uint16Array(newTriCount * 3),
+            triTopoly: new Uint16Array(newTriCount),
+            trislength: newTriCount,
+            baseVert: new Uint16Array(newPolyCount),
+            vertsCount: new Uint16Array(newPolyCount),
+            baseTri: new Uint16Array(newPolyCount),
+            triCount: new Uint16Array(newPolyCount)
+        };
+        for (let i = 0; i < detail.vertslength; i++) {
+
+            const newIdx = detailVertRemap[i];
+            if (newIdx === -1) continue;
+
+            newDetail.verts[newIdx*3]     = detail.verts[i*3];
+            newDetail.verts[newIdx*3 + 1] = detail.verts[i*3 + 1];
+            newDetail.verts[newIdx*3 + 2] = detail.verts[i*3 + 2];
+        }
+        let writeTri = 0;
+
+        for (let oldP = 0; oldP < polyCount; oldP++) {
+            if (!reachable[oldP]) continue;
+            const newP = oldToNewPoly[oldP];
+
+            const triBase  = detail.baseTri[oldP];
+            const triCount = detail.triCount[oldP];
+
+            newDetail.baseVert[newP] = detail.baseVert[oldP];
+            newDetail.vertsCount[newP] = detail.vertsCount[oldP];
+            newDetail.baseTri[newP] = writeTri;
+            newDetail.triCount[newP] = triCount;
+
+            for (let t = 0; t < triCount; t++) {
+
+                const oldTriIdx = triBase + t;
+
+                const baseOld = oldTriIdx * 3;
+                const baseNew = writeTri * 3;
+
+                newDetail.tris[baseNew] =
+                    detailVertRemap[detail.tris[baseOld]];
+
+                newDetail.tris[baseNew + 1] =
+                    detailVertRemap[detail.tris[baseOld + 1]];
+
+                newDetail.tris[baseNew + 2] =
+                    detailVertRemap[detail.tris[baseOld + 2]];
+
+                newDetail.triTopoly[writeTri] = newP;
+
+                writeTri++;
+            }
+        }
+        this.prunemesh = newMesh;
+        this.prunemeshdetail = newDetail;
+        // =========================
+        // 8️⃣ link copy
+        // =========================
+
+        const linkSet = this.links;
+
+        let newLinkCount = 0;
+
+        for (let i = 0; i < linkSet.length; i++) {
+            const a = oldToNewPoly[linkSet.poly[i<<1]];
+            const b = oldToNewPoly[linkSet.poly[(i<<1)+1]];
+            if (a !== -1 && b !== -1)
+                newLinkCount++;
+        }
+        /**@type {NavMeshLink} */
+        const newLinks = {
+            poly: new Uint16Array(newLinkCount * 2),
+            cost: new Float32Array(newLinkCount),
+            type: new Uint8Array(newLinkCount),
+            pos:  new Float32Array(newLinkCount * 6),
+            length: newLinkCount
+        };
+
+        let w = 0;
+
+        for (let i = 0; i < linkSet.length; i++) {
+
+            const na = oldToNewPoly[linkSet.poly[i<<1]];
+            const nb = oldToNewPoly[linkSet.poly[(i<<1)+1]];
+
+            if (na === -1 || nb === -1) continue;
+
+            newLinks.poly[w<<1]     = na;
+            newLinks.poly[(w<<1)+1] = nb;
+            newLinks.cost[w] = linkSet.cost[i];
+            newLinks.type[w] = linkSet.type[i];
+
+            for (let k=0;k<6;k++)
+                newLinks.pos[w*6+k] = linkSet.pos[i*6+k];
+
+            w++;
+        }
+        this.prunelinks = newLinks;
+        Instance.Msg(`可达性筛选完成: ${polyCount} -> ${keepCount}`);
+    }
+    /**
+     * 为一条开放边构建空间查询记录，用于跨 Tile 邻接匹配。
+     *
+     * 计算边的主轴方向（X 或 Y）、在副轴上的 lineCoord（用于 bucket 分组）、
+     * 在主轴上的投影区间 [projMin, projMax]、单位方向向量、中心 Z 等信息。
+     * bucket 分组策略基于 MESH_CELL_SIZE_XY × 0.6 的缩放因子。
+     *
+     * @param {NavMeshMesh} mesh - 全局多边形网格
+     * @param {number} poly - 多边形索引
+     * @param {number} edge - 边索引
+     * @param {number} va - 边起点的全局顶点索引
+     * @param {number} vb - 边终点的全局顶点索引
+     * @returns {{poly:number, edge:number, va:number, vb:number, exactKey:string, major:number, lineCoord:number, projMin:number, projMax:number, dirX:number, dirY:number, centerZ:number, bucketId:number}}
+     */
+    buildOpenEdgeRecord(mesh, poly, edge, va, vb) {
+        const ax = mesh.verts[va * 3];
+        const ay = mesh.verts[va * 3 + 1];
+        const az = mesh.verts[va * 3 + 2];
+
+        const bx = mesh.verts[vb * 3];
+        const by = mesh.verts[vb * 3 + 1];
+        const bz = mesh.verts[vb * 3 + 2];
+
+        const dx = bx - ax;
+        const dy = by - ay;
+
+        const len = Math.hypot(dx, dy);
+        const major = Math.abs(dx) >= Math.abs(dy) ? 0 : 1;
+        const lineCoord = major === 0
+        ? (ay + by) * 0.5
+        : (ax + bx) * 0.5;
+
+        const pa = major === 0 ? ax : ay;
+        const pb = major === 0 ? bx : by;
+
+        const projMin = Math.min(pa, pb);
+        const projMax = Math.max(pa, pb);
+        const invLen = len > 1e-6 ? 1 / len : 0;
+
+        const dirX = dx * invLen;
+        const dirY = dy * invLen;
+
+        const centerZ = (az + bz) * 0.5;
+
+        const bucketScale = Math.max(1e-4, MESH_CELL_SIZE_XY * 0.6);
+        const bucketId = Math.round(lineCoord / bucketScale);
+
+        return { poly, edge, va, vb, exactKey: `${va}|${vb}`, major, lineCoord, projMin, projMax, dirX, dirY, centerZ, bucketId, };
+    }
+
+    /**
+     * 跨 Tile 边界的模糊匹配：在 bucket 中查找与当前边方向相反、XY/Z 投影重叠的候选边。
+     *
+     * 匹配条件：
+     * - 主轴相同且 lineCoord 误差在 lineTol 内
+     * - 方向点积 < -0.8（近似反向）
+     * - XY 投影间距 < maxProjGapXY 且主轴重叠 >= minXYOverlap
+     * - Z 重叠区间间距 < maxZDiff（可行走高度）
+     *
+     * @param {NavMeshMesh} mesh - 全局多边形网格
+     * @param {Map<string,any[]>} buckets - 由 buildOpenEdgeRecord 产生的空间 bucket 分组
+     * @param {number} poly - 当前多边形索引
+     * @param {number} edge - 当前边索引
+     * @param {number} tilePolyStart - 当前 Tile 的 poly 起始索引，避免自匹配
+     * @param {any[]} candidates - 输出：匹配到的候选边记录
+     * @param {Set<string>} dedup - 去重集合
+     */
+    findOpenEdgesByOverlap(mesh, buckets, poly, edge, tilePolyStart,candidates,dedup) {
+
+        const polys = mesh.polys;
+        const verts = mesh.verts;
+
+        const polyStart = polys[poly << 1];
+        const polyEnd   = polys[(poly << 1) + 1];
+        const vertCount = polyEnd - polyStart + 1;
+
+        const va = polyStart + edge;
+        const vb = polyStart + ((edge + 1) % vertCount);
+
+        const ax = verts[va * 3];
+        const ay = verts[va * 3 + 1];
+        const az = verts[va * 3 + 2];
+
+        const bx = verts[vb * 3];
+        const by = verts[vb * 3 + 1];
+        const bz = verts[vb * 3 + 2];
+
+        const dx = bx - ax;
+        const dy = by - ay;
+
+        const len = Math.hypot(dx, dy);
+        const invLen = len > 1e-6 ? 1 / len : 0;
+
+        const dirX = dx * invLen;
+        const dirY = dy * invLen;
+
+        const major = Math.abs(dx) >= Math.abs(dy) ? 0 : 1;
+
+        const lineCoord = major === 0
+            ? (ay + by) * 0.5
+            : (ax + bx) * 0.5;
+
+        const pa = major === 0 ? ax : ay;
+        const pb = major === 0 ? bx : by;
+
+        const projMin = pa < pb ? pa : pb;
+        const projMax = pa > pb ? pa : pb;
+
+        const bucketScale = Math.max(1e-4, MESH_CELL_SIZE_XY * 0.6);
+        const bucketId = Math.round(lineCoord / bucketScale);
+
+        const lineTol = MESH_CELL_SIZE_XY * 0.6;
+        const maxProjGapXY = MESH_CELL_SIZE_XY;
+        const minXYOverlap = 0.1;
+        const maxZDiff = MAX_WALK_HEIGHT * MESH_CELL_SIZE_Z;
+
+        for (let b = bucketId - 1; b <= bucketId + 1; b++) {
+
+            const bucketKey = `${major}|${b}`;
+            const bucket = buckets.get(bucketKey);
+            if (!bucket) continue;
+
+            for (let i = 0; i < bucket.length; i++) {
+
+                const candidate = bucket[i];
+
+                if (candidate.poly === poly) continue;
+                if (candidate.poly >= tilePolyStart) continue;
+                if (Math.abs(candidate.lineCoord - lineCoord) > lineTol) continue;
+
+                const dot = dirX * candidate.dirX + dirY * candidate.dirY;
+                if (dot > -0.8) continue;
+
+                // ===== XY 投影 gap =====
+
+                const cva = candidate.va;
+                const cvb = candidate.vb;
+
+                const cax = verts[cva * 3];
+                const cay = verts[cva * 3 + 1];
+                const caz = verts[cva * 3 + 2];
+
+                const cbx = verts[cvb * 3];
+                const cby = verts[cvb * 3 + 1];
+                const cbz = verts[cvb * 3 + 2];
+
+                const curXMin = ax < bx ? ax : bx;
+                const curXMax = ax > bx ? ax : bx;
+                const curYMin = ay < by ? ay : by;
+                const curYMax = ay > by ? ay : by;
+
+                const candXMin = cax < cbx ? cax : cbx;
+                const candXMax = cax > cbx ? cax : cbx;
+                const candYMin = cay < cby ? cay : cby;
+                const candYMax = cay > cby ? cay : cby;
+
+                const gapX = Math.max(0, Math.max(curXMin, candXMin) - Math.min(curXMax, candXMax));
+                const gapY = Math.max(0, Math.max(curYMin, candYMin) - Math.min(curYMax, candYMax));
+
+                if (Math.hypot(gapX, gapY) >= maxProjGapXY) continue;
+
+                // ===== 主轴 overlap =====
+
+                const overlapMin = projMin > candidate.projMin ? projMin : candidate.projMin;
+                const overlapMax = projMax < candidate.projMax ? projMax : candidate.projMax;
+
+                if (overlapMax <= overlapMin) continue;
+                if ((overlapMax - overlapMin) < minXYOverlap) continue;
+
+                // ===== Z overlap =====
+
+                const ca = major === 0 ? ax : ay;
+                const cb = major === 0 ? bx : by;
+                const cdc = cb - ca;
+
+                let zMinA, zMaxA;
+
+                if (Math.abs(cdc) <= 1e-6) {
+                    zMinA = az < bz ? az : bz;
+                    zMaxA = az > bz ? az : bz;
+                } else {
+                    const inv = 1 / cdc;
+                    const t0 = (overlapMin - ca) * inv;
+                    const t1 = (overlapMax - ca) * inv;
+
+                    const z0 = az + (bz - az) * t0;
+                    const z1 = az + (bz - az) * t1;
+
+                    zMinA = z0 < z1 ? z0 : z1;
+                    zMaxA = z0 > z1 ? z0 : z1;
+                }
+
+                const cca = major === 0 ? cax : cay;
+                const ccb = major === 0 ? cbx : cby;
+                const cdc2 = ccb - cca;
+
+                let zMinB, zMaxB;
+
+                if (Math.abs(cdc2) <= 1e-6) {
+                    zMinB = caz < cbz ? caz : cbz;
+                    zMaxB = caz > cbz ? caz : cbz;
+                } else {
+                    const inv2 = 1 / cdc2;
+                    const t0 = (overlapMin - cca) * inv2;
+                    const t1 = (overlapMax - cca) * inv2;
+
+                    const z0 = caz + (cbz - caz) * t0;
+                    const z1 = caz + (cbz - caz) * t1;
+
+                    zMinB = z0 < z1 ? z0 : z1;
+                    zMaxB = z0 > z1 ? z0 : z1;
+                }
+
+                const gapZ = Math.max(0, Math.max(zMinA, zMinB) - Math.min(zMaxA, zMaxB));
+                if (gapZ >= maxZDiff) continue;
+
+                const key = candidate.poly + "|" + candidate.edge;
+                if (dedup.has(key)) continue;
+
+                dedup.add(key);
+                candidates.push(candidate);
+            }
+        }
+
+        return ;
+    }
+    /**
+     * 为两个多边形的指定边双向添加邻接关系。
+     *
+     * 在 mesh.neighbors[polyA][edgeA] 中追加 polyB，
+     * 同时在 mesh.neighbors[polyB][edgeB] 中追加 polyA。
+     * 带匹配去重：已存在的邻接关系不会重复添加。
+     *
+     * @param {NavMeshMesh} mesh - 全局多边形网格
+     * @param {number} polyA - 第一个多边形索引
+     * @param {number} edgeA - polyA 的边索引
+     * @param {number} polyB - 第二个多边形索引
+     * @param {number} edgeB - polyB 的边索引
+     */
+    addNeighborLink(mesh, polyA, edgeA, polyB, edgeB) {
+        const listA = mesh.neighbors[polyA][edgeA];
+        const listB = mesh.neighbors[polyB][edgeB];
+        // list[0] 存数量
+        const countA = listA[0];
+        let exists = false;
+
+        for (let i = 1; i <= countA; i++) {
+            if (listA[i] === polyB) {
+                exists = true;
+                break;
+            }
+        }
+
+        if (!exists) {
+            listA[0]++;
+            listA[listA[0]] = polyB;
+        }
+
+        const countB = listB[0];
+        exists = false;
+
+        for (let i = 1; i <= countB; i++) {
+            if (listB[i] === polyA) {
+                exists = true;
+                break;
+            }
+        }
+
+        if (!exists) {
+            listB[0]++;
+            listB[listB[0]] = polyA;
+        }
+    }
+}
+
+/**
+ * @module 导航网格/导航管理器
+ */
+/** @typedef {import("cs_script/point_script").Vector} Vector */
+/** @typedef {import("./path_tilemanager").TileData} TileData */
+/**
+ * @typedef {{
+ *  verts: Float32Array<ArrayBufferLike>,
+ *  vertslength: number,
+ *  polys: Int32Array<ArrayBufferLike>,
+ *  polyslength: number,
+ *  regions: Int16Array<ArrayBufferLike>,
+ *  neighbors: Int16Array<ArrayBufferLike>[][]
+ * }} NavMeshMesh
+ */
+
+/**
+ * @typedef {{
+ *  verts: Float32Array<ArrayBufferLike>,
+ *  vertslength: number,
+ *  tris: Uint16Array<ArrayBufferLike>,
+ *  trislength: number,
+ *  triTopoly: Uint16Array<ArrayBufferLike>,
+ *  baseVert: Uint16Array<ArrayBufferLike>,
+ *  vertsCount: Uint16Array<ArrayBufferLike>,
+ *  baseTri: Uint16Array<ArrayBufferLike>,
+ *  triCount: Uint16Array<ArrayBufferLike>
+ * }} NavMeshDetail
+ */
+
+/**
+ * @typedef {{
+ *  poly: Uint16Array,
+ *  cost: Float32Array,
+ *  type: Uint8Array,
+ *  pos: Float32Array,
+ *  length: number
+ * }} NavMeshLink
+ */
+
+/**
+ * @typedef {{
+ *  PolyA:number,
+ *  PolyB:number,
+ *  PosA:Vector,
+ *  PosB:Vector,
+ *  cost:number,
+ *  type:number
+ * }} NavMeshLinkARRAY
+ */
+/**
+ * 主导航网格管理器（核心 API）。
+ *
+ * 协调所有 Navmesh 子系统，提供统一的寻路接口：
+ * - `init()` — 加载静态数据 / 实时构建 Tile。
+ * - `findPath(start, end)` — A* + Funnel + 高度修正 → 最终路径。
+ * - `tick()` / `debug()` — 每帧更新和调试可视化。
+ * - `exportNavData()` / `importNavData()` — 导航数据存档。
+ *
+ * 持有 TileManager、PolyGraphAStar、FunnelPath、FunnelHeightFixer、
+ * NavMeshDebugTools 和 NVplugin（可选）。
+ *
+ * @navigationTitle 导航网格管理器
+ */
+class NavMesh {
+    constructor() {
+        /**@type {PolyGraphAStar} A* 多边形图寻路器，init 后初始化 */
+        this.astar;
+        /**@type {NavMeshMesh} 合并后的全局多边形网格（顶点/多边形/邻接） */
+        this.mesh;
+        /**@type {NavMeshDetail} 全局细节三角网 */
+        this.meshdetail;
+        /**@type {FunnelPath} 漏斗路径平滑器 */
+        this.funnel;
+        /**@type {FunnelHeightFixer} 路径高度修正器 */
+        this.heightfixer;
+        /**@type {NavMeshLink} 特殊连接点数据（跳点/梯子/传送门） */
+        this.links;
+        /** @type {TileManager} 瓦片管理器，负责拆分/合并/重建 Tile */
+        this.tileManager = new TileManager(this);
+        /** @type {tile} 单个 Tile 构建器（体素化 → 区域 → 轮廓 → 多边形） */
+        this.tile = new tile();
+        /** @type {NavMeshDebugTools} 调试可视化工具 */
+        this.debugTools = new NavMeshDebugTools(this);
+        //删除prop_door_rotating实体？也许应该弄一个目录，让作者把门一类的实体名字放里面
+    }
+    /**
+     * 导出导航网格数据为 JSON 文本（按行截断输出到控制台）。
+     *
+     * 将所有 Tile 序列化为 JSON 字符串，并按 charsPerLine 切块
+     * 输出到游戏控制台，便于复制粘贴存档。
+     */
+    exportNavData() {
+        const charsPerLine = 500;
+        const data = {
+            tiles: Array.from(this.tileManager.tiles, ([key, td]) => [key, Tool._compactTileData(td)])
+        };
+        // 使用 JSON 序列化
+        const jsonStr = JSON.stringify(data);
+        // 2. 将字符串切割成指定长度的块
+        Instance.Msg("--- NAV DATA START ---");
+        for (let i = 0; i < jsonStr.length; i += charsPerLine) {
+            Instance.Msg("+`"+jsonStr.substring(i, i + charsPerLine)+"`");
+        }
+        Instance.Msg("--- NAV DATA END ---");
+    }
+    /**
+     * 从 JSON 文本恢复导航网格。
+     *
+     * 解析 Tile 数据并注入 TileManager，重建 Link 和空间索引。
+     *
+     * @param {string} jsonStr 序列化的导航数据
+     * @returns {boolean} 是否加载成功
+     */
+    importNavData(jsonStr) {
+        try {
+            const cleanJson = jsonStr.replace(/\s/g, "");
+
+            const data = JSON.parse(cleanJson);
+
+            // 1. 恢复核心网格数据
+            for (const tile of data.tiles) {
+                const tiledata=tile[1];
+                const key = tiledata.tileId;
+                const mesh = Tool.toTypedMesh(tiledata.mesh);
+                const detail = Tool.toTypedDetail(tiledata.detail);
+                const links = Tool.toTypedLinks(tiledata.links);
+                this.tileManager.tiles.set(key, {
+                    tileId: key,
+                    tx: tiledata.tx,
+                    ty: tiledata.ty,
+                    mesh: mesh,
+                    detail: detail,
+                    links: links
+                });
+                this.tileManager._appendTileData(key, mesh, detail, links);
+                this.tileManager._rebuildDeferredLinks(true,false,key);
+            }
+            this.tileManager._rebuildDeferredLinks(false,true);
+            if (TILE_OPTIMIZATION_1)this.tileManager.pruneUnreachablePolys();
+            this.tileManager.updatemesh();
+            Instance.Msg(`导航数据加载成功！多边形数量: ${this.mesh.polyslength-1}`);
+            return true;
+        } catch (e) {
+            Instance.Msg(`加载导航数据失败: ${e}`);
+            return false;
+        }
+    }
+    /**
+     * 初始化导航网格。
+     *
+     * 根据配置决定加载预烘焕的静态数据或实时构建所有 Tile。
+     * 完成后初始化 A*、Funnel、HeightFixer 等运行时组件。
+     */
+    init() {
+        this.tileManager = new TileManager(this);
+        {
+            this.importNavData(new StaticData().Data);
+        }
+        this._refreshRuntime();
+    }
+    /**
+     * 更新指定位置所在 Tile 的导航网格。
+     * 重建该 Tile 并刷新运行时组件（A*\\Funnel\\HeightFixer）。
+     * @param {Vector} pos 世界坐标
+     */
+    update(pos)
+    {
+        this.tileManager.rebuildAtPos(this.tile, pos);
+        this.tileManager.updatemesh();
+        this._refreshRuntime();
+    }
+    /**
+     * 刷新运行时组件。
+     *
+     * 根据当前全局 mesh / links 重建空间索引、A*、Funnel、HeightFixer。
+     */
+    _refreshRuntime() {
+        Tool.buildSpatialIndex(this.mesh);
+        
+//        /** @type {Map<number, number>} */
+//        const degree = new Map();
+//        const globalLinks = this.links;
+//        const globalLen = globalLinks?.length ?? 0;
+//
+//        // 1) 先统计每个 poly 需要多少条 link（双向展开）
+//        for (let i = 0; i < globalLen; i++) {
+//            const a = globalLinks.poly[i * 2];
+//            const b = globalLinks.poly[i * 2 + 1];
+//            if (a < 0 || b < 0) continue;
+//
+//            degree.set(a, (degree.get(a) ?? 0) + 1);
+//            degree.set(b, (degree.get(b) ?? 0) + 1);
+//        }
+//
+//        /**@type {NavMeshLink[]} */
+//        const links=new Array();
+//        // 2) 按统计容量分配，避免固定 32 溢出
+//        for (const [poly, cnt] of degree.entries()) {
+//            links[poly] = {
+//                poly: new Uint16Array(cnt * 2),
+//                cost: new Float32Array(cnt),
+//                type: new Uint8Array(cnt),
+//                pos: new Float32Array(cnt * 6),
+//                length: 0
+//            };
+//        }
+//
+//        // 3) 写入双向 link（reverse 方向要交换 start/end）
+//        for (let i = 0; i < globalLen; i++) {
+//            const polyA = globalLinks.poly[i * 2];
+//            const polyB = globalLinks.poly[i * 2 + 1];
+//            if (polyA < 0 || polyB < 0) continue;
+//
+//            const cost = globalLinks.cost[i] * OFF_MESH_LINK_COST_SCALE;
+//            const type = globalLinks.type[i];
+//            const srcPosBase = i * 6;
+//
+//            const la = links[polyA];
+//            const lb = links[polyB];
+//            if (!la || !lb) continue;
+//
+//            // A -> B
+//            let wa = la.length;
+//            la.poly[wa * 2] = polyA;
+//            la.poly[wa * 2 + 1] = polyB;
+//            la.cost[wa] = cost;
+//            la.type[wa] = type;
+//            la.pos[wa * 6] = globalLinks.pos[srcPosBase];
+//            la.pos[wa * 6 + 1] = globalLinks.pos[srcPosBase + 1];
+//            la.pos[wa * 6 + 2] = globalLinks.pos[srcPosBase + 2];
+//            la.pos[wa * 6 + 3] = globalLinks.pos[srcPosBase + 3];
+//            la.pos[wa * 6 + 4] = globalLinks.pos[srcPosBase + 4];
+//            la.pos[wa * 6 + 5] = globalLinks.pos[srcPosBase + 5];
+//            la.length = wa + 1;
+//
+//            // B -> A（交换端点）
+//            let wb = lb.length;
+//            lb.poly[wb * 2] = polyB;
+//            lb.poly[wb * 2 + 1] = polyA;
+//            lb.cost[wb] = cost;
+//            lb.type[wb] = type;
+//            lb.pos[wb * 6] = globalLinks.pos[srcPosBase + 3];
+//            lb.pos[wb * 6 + 1] = globalLinks.pos[srcPosBase + 4];
+//            lb.pos[wb * 6 + 2] = globalLinks.pos[srcPosBase + 5];
+//            lb.pos[wb * 6 + 3] = globalLinks.pos[srcPosBase];
+//            lb.pos[wb * 6 + 4] = globalLinks.pos[srcPosBase + 1];
+//            lb.pos[wb * 6 + 5] = globalLinks.pos[srcPosBase + 2];
+//            lb.length = wb + 1;
+//        }
+        /**@type {Map<number,NavMeshLinkARRAY[]>} */
+        const links = new Map();
+        for (let i = 0; i < this.links.length; i++) {
+            const polyA = this.links.poly[i * 2];
+            const polyB = this.links.poly[i * 2 + 1];
+            if (polyA < 0 || polyB < 0) continue;
+            const cost = this.links.cost[i] * OFF_MESH_LINK_COST_SCALE;
+            const type = this.links.type[i];
+            const srcPosBase = i * 6;
+            if (!links.has(polyA)) links.set(polyA, []);
+            if (!links.has(polyB)) links.set(polyB, []);
+            const link={
+                PolyA: polyA,
+                PolyB: polyB,
+                PosA: {
+                    x: this.links.pos[srcPosBase],
+                    y: this.links.pos[srcPosBase + 1],
+                    z: this.links.pos[srcPosBase + 2]
+                },
+                PosB: {
+                    x: this.links.pos[srcPosBase + 3],
+                    y: this.links.pos[srcPosBase + 4],
+                    z: this.links.pos[srcPosBase + 5]
+                },
+                cost: cost,
+                type: type
+            };
+            links.get(polyA)?.push(link);
+            links.get(polyB)?.push(link);
+        }
+        this.heightfixer = new FunnelHeightFixer(this.mesh, this.meshdetail, ADJUST_HEIGHT_DISTANCE);
+        this.astar = new PolyGraphAStar(this.mesh, links, this.heightfixer);
+        this.funnel = new FunnelPath(this.mesh, this.astar.centers, links);
+    }
+    /**
+     * 每帧更新。
+     *
+     * 驱动插件 tick，若开启 TILE_DEBUG 则显示当前所在 TileKey。
+     *
+     * @param {Vector} [pos] 玩家当前位置
+     */
+    tick(pos)
+    {
+    }
+    /**
+     * 调试可视化。
+     *
+     * 根据全局开关绘制多边形、细节三角网、Tile 边界、
+     * 连接点和邻接关系等调试信息。
+     *
+     * @param {number} duration 调试绘制持续时间（秒）
+     */
+    debug(duration = 60) {
+    }
+    /**
+     * 寻路主入口。
+     *
+     * A* 多边形搜索 → Funnel 路径平滑 → 可选高度修正，
+     * 返回带移动模式的世界坐标航路点列表。
+     *
+     * @param {Vector} start 起点世界坐标
+     * @param {Vector} end 终点世界坐标
+     * @returns {{pos:Vector,mode:number}[]} 最终路径
+     */
+    findPath(start, end) {
+        //Instance.DebugLine({start,end,duration:1,color:{r:0,g:255,b:0}});
+        const polyPath=this.astar.findPath(start,end);
+        //this.debugTools.debugDrawPolyPath(polyPath.path,1);
+        //if (!polyPath || polyPath.path.length === 0) return [];
+        const funnelPath = this.funnel.build(polyPath.path, polyPath.start, polyPath.end);
+        //this.debugTools.debugDrawfunnelPath(funnelPath,0.5);
+        return funnelPath;
+        //if (!ans || ans.length === 0) return [];
+        //多边形总数：649跳点数：82
+        //100次A*           30ms
+        //100次funnelPath   46ms-30=16ms
+        //100次200fixHeight    100ms-46=54ms
+    }
+}
+
+/**
+ * @module 区域效果/效果配置
+ */
+
+/**
+ * 区域效果命中目标类型。
+ * @typedef {"player"|"monster"} areaEffectTargetType
+ */
+
+/**
+ * 区域效果创建描述。
+ * @typedef {object} areaEffectDesc
+ * @property {string} effectType - 区域效果类型标识
+ * @property {{x:number,y:number,z:number}} position - 区域中心点
+ * @property {number} radius - 区域半径
+ * @property {number} duration - 总持续时间（秒）
+ * @property {number} applyInterval - 对同一目标重复命中的最小间隔（秒）
+ * @property {string} buffTypeId - 命中后要施加的 Buff 类型
+ * @property {Record<string,any>} buffParams - Buff 参数对象
+ * @property {{monsterId:number, monsterType:string, skillTypeId:string}|Record<string,any>} source - 来源信息
+ * @property {string} [particleId] - 需要创建的粒子系统 id
+ * @property {number} [particleLifetime] - 粒子持续时间；缺省时沿用区域持续时间
+ * @property {areaEffectTargetType[]} targetTypes - 该区域效果可命中的目标类型
+ */
+
+/**
+ * 区域效果每帧检测上下文。
+ * @typedef {object} areaEffectTickContext
+ * @property {import("cs_script/point_script").CSPlayerPawn[]} players - 当帧可被命中的玩家列表
+ * @property {import("../monster/monster/monster").Monster[]} monsters - 当帧可被命中的怪物列表
+ */
+
+/**
+ * 区域效果命中事件负载。
+ * @typedef {object} areaEffectHitPayload
+ * @property {number} effectId - 区域效果实例 id
+ * @property {string} effectType - 区域效果类型标识
+ * @property {string} buffTypeId - 命中后施加的 Buff 类型
+ * @property {Record<string,any>} buffParams - Buff 参数对象副本
+ * @property {{monsterId:number, monsterType:string, skillTypeId:string}|Record<string,any>} source - 来源信息副本
+ */
+
+/**
+ * 区域效果请求粒子系统时的负载。
+ * @typedef {object} areaEffectParticleRequest
+ * @property {string} particleId - 粒子配置 id
+ * @property {{x:number,y:number,z:number}} position - 粒子生成位置
+ * @property {number} lifetime - 粒子持续时间
+ * @property {number} effectId - 区域效果实例 id
+ * @property {string} effectType - 区域效果类型标识
+ * @property {{monsterId:number, monsterType:string, skillTypeId:string}|Record<string,any>} source - 来源信息副本
+ */
+
+/**
+ * 区域效果持有的粒子句柄。只要求提供 stop 接口即可。
+ * @typedef {object} areaEffectParticleHandle
+ * @property {(() => void)} [stop] - 停止并清理粒子
+ */
+
+/**
+ * @callback areaEffectHitPlayerCallback
+ * @param {import("cs_script/point_script").CSPlayerPawn} targetPawn
+ * @param {areaEffectHitPayload} payload
+ * @returns {void}
+ */
+
+/**
+ * @callback areaEffectHitMonsterCallback
+ * @param {import("../monster/monster/monster").Monster} targetMonster
+ * @param {areaEffectHitPayload} payload
+ * @returns {void}
+ */
+
+/**
+ * @callback areaEffectParticleRequestCallback
+ * @param {areaEffectParticleRequest} request
+ * @returns {areaEffectParticleHandle|null|undefined}
+ */
+
+/**
+ * 区域效果目标类型常量。
+ */
+const AreaEffectTargetType = Object.freeze({
+    Player: "player",
+    Monster: "monster",
+});
+
+/**
+ * 默认命中的目标类型。当前为了兼容 poisongas，默认只命中玩家。
+ */
+const DEFAULT_AREA_EFFECT_TARGET_TYPES = Object.freeze([
+    AreaEffectTargetType.Player,
+]);
+
+/**
+ * @module 区域效果/单个区域效果
+ */
+
+/**
+ * 单个区域效果实例（毒区、燃烧地面等）。
+ *
+ * 完全独立于怪物生命周期，由 AreaEffectManager 统一驱动。
+ * 每个实例包含位置、半径、持续时间、施加间隔和 Buff 参数，
+ * 在每帧 tick 中检测半径内的目标，并按冷却时间触发命中回调。
+ * 超时后自动销毁并清理关联的粒子效果句柄。
+ *
+ * @navigationTitle 区域效果实例
+ */
+class AreaEffect {
+    static _nextId = 1;
+
+    /**
+     * 创建区域效果实例。
+     * @param {import("./area_manager").AreaEffectManager|null} manager
+     * @param {import("./area_const").areaEffectDesc} desc
+     */
+    constructor(manager, desc) {
+        /** 所属管理器。
+         * @type {import("./area_manager").AreaEffectManager|null} */
+        this._manager = manager;
+        /** 自增唯一 ID。 */
+        this.id = AreaEffect._nextId++;
+        /** 效果类型标识（如 "poisongas"）。 */
+        this.effectType = desc.effectType;
+        /** 效果中心世界坐标。 */
+        this.position = desc.position;
+        /** 影响半径。 */
+        this.radius = desc.radius;
+        /** 总持续时间（秒）。 */
+        this.duration = desc.duration;
+        /** 对同一目标施加效果的最小间隔（秒）。 */
+        this.applyInterval = desc.applyInterval;
+        /** Buff 类型 ID。 */
+        this.buffTypeId = desc.buffTypeId;
+        /** Buff 参数对象。 */
+        this.buffParams = desc.buffParams;
+        /** 来源信息（怪物 ID、怪物类型、技能 ID）。 */
+        this.source = desc.source;
+        /** 命中目标类型数组。
+         * @type {import("./area_const").areaEffectTargetType[]} */
+        this.targetTypes = desc.targetTypes;
+        /** 关联的粒子效果 id。
+         * @type {string|null} */
+        this.particleId = desc.particleId ?? null;
+        /** 粒子持续时间。缺省时沿用区域持续时间。
+         * @type {number} */
+        this.particleLifetime = desc.particleLifetime ?? desc.duration;
+
+        /** 创建时的游戏时间戳。由 `start()` 设置，用于超时判定。 */
+        this.startTime = 0;
+        /** 是否存活。由 `start()` 置为 true，`stop()` 置为 false。 */
+        this.alive = false;
+
+        /**
+         * 每个目标的命中冷却记录。键采用：
+         * - 玩家：`p:${slot}`
+         * - 怪物：`m:${monsterId}`
+         * @type {Map<string, number>}
+         */
+        this._hitCooldowns = new Map();
+
+        /**
+         * 关联的粒子效果句柄。销毁时自动调用 stop。
+         * @type {import("./area_const").areaEffectParticleHandle|null}
+         */
+        this._particleHandle = null;
+    }
+
+    /**
+     * 启动区域效果实例。
+     * 由 AreaEffectManager.create 调用。
+     * @returns {boolean}
+     */
+    start() {
+        if (this.alive) {
+            this.stop();
+        }
+
+        this._hitCooldowns.clear();
+        this.startTime = Instance.GetGameTime();
+        this.alive = true;
+        this._requestParticle();
+
+        Instance.Msg(`[AreaEffect] #${this.id} ${this.effectType} 创建于 (${this.position.x.toFixed(0)},${this.position.y.toFixed(0)},${this.position.z.toFixed(0)}) 半径=${this.radius} 持续=${this.duration}s`);
+        return true;
+    }
+
+    /**
+     * 每次由 manager 驱动调用。
+     * @param {number} now
+     * @param {import("./area_const").areaEffectTickContext} tickContext
+     */
+    tick(now, tickContext) {
+        if (!this.alive) return;
+
+        if (now - this.startTime >= this.duration) {
+            this.stop();
+            return;
+        }
+
+        const r2 = this.radius * this.radius;
+        if (this.targetTypes.includes(AreaEffectTargetType.Player)) {
+            this._tickPlayers(now, tickContext?.players ?? [], r2);
+        }
+        if (this.targetTypes.includes(AreaEffectTargetType.Monster)) {
+            this._tickMonsters(now, tickContext?.monsters ?? [], r2);
+        }
+    }
+
+    /**
+     * 停止效果并清理粒子句柄。
+     */
+    stop() {
+        if (!this.alive && !this._particleHandle && this._hitCooldowns.size === 0) return;
+
+        this.alive = false;
+        this._stopParticle();
+        this._hitCooldowns.clear();
+        this.startTime = 0;
+
+        Instance.Msg(`[AreaEffect] #${this.id} ${this.effectType} 已停止销毁`);
+    }
+
+    /** @returns {boolean} 当前实例是否仍处于存活状态 */
+    isAlive() {
+        return this.alive;
+    }
+
+    /**
+     * 处理玩家命中判定。
+     * @param {number} now
+     * @param {import("cs_script/point_script").CSPlayerPawn[]} players
+     * @param {number} r2
+     */
+    _tickPlayers(now, players, r2) {
+        for (const pawn of players) {
+            const pos = pawn?.GetAbsOrigin?.();
+            if (!pos || vec$1.lengthsq(pos, this.position) > r2) continue;
+
+            const slot = pawn.GetPlayerController?.()?.GetPlayerSlot?.() ?? -1;
+            if (slot < 0) continue;
+
+            const cooldownKey = `p:${slot}`;
+            if (this._isInCooldown(cooldownKey, now)) continue;
+
+            this._hitCooldowns.set(cooldownKey, now);
+            try {
+                this._manager?._emitHitPlayer(pawn, this._createHitPayload());
+            } catch (error) {
+                Instance.Msg(`AreaEffect: 玩家命中回调失败 #${this.id}: ${error}\n`);
+            }
+
+            const name = pawn.GetPlayerController?.()?.GetPlayerName?.() ?? "?";
+            Instance.Msg(`[AreaEffect] #${this.id} 命中玩家 ${name}`);
+        }
+    }
+
+    /**
+     * 处理怪物命中判定。
+     * @param {number} now
+     * @param {import("../monster/monster/monster").Monster[]} monsters
+     * @param {number} r2
+     */
+    _tickMonsters(now, monsters, r2) {
+        for (const monster of monsters) {
+            const monsterId = monster?.id;
+            const pos = monster?.model?.GetAbsOrigin?.();
+            if (typeof monsterId !== "number" || !pos || vec$1.lengthsq(pos, this.position) > r2) continue;
+
+            const cooldownKey = `m:${monsterId}`;
+            if (this._isInCooldown(cooldownKey, now)) continue;
+
+            this._hitCooldowns.set(cooldownKey, now);
+            try {
+                this._manager?._emitHitMonster(monster, this._createHitPayload());
+            } catch (error) {
+                Instance.Msg(`AreaEffect: 怪物命中回调失败 #${this.id}: ${error}\n`);
+            }
+            Instance.Msg(`[AreaEffect] #${this.id} 命中怪物 #${monsterId}`);
+        }
+    }
+
+    /**
+     * 判断某个目标是否处于命中冷却中。
+     * @param {string} cooldownKey
+     * @param {number} now
+     * @returns {boolean}
+     */
+    _isInCooldown(cooldownKey, now) {
+        const lastApply = this._hitCooldowns.get(cooldownKey) ?? -Infinity;
+        return now - lastApply < this.applyInterval;
+    }
+
+    /**
+     * 构造命中事件负载。每次都返回一份新对象，避免外部修改内部状态。
+     * @returns {import("./area_const").areaEffectHitPayload}
+     */
+    _createHitPayload() {
+        return {
+            effectId: this.id,
+            effectType: this.effectType,
+            buffTypeId: this.buffTypeId,
+            buffParams: { ...this.buffParams },
+            source: this.source && typeof this.source === "object" ? { ...this.source } : this.source,
+        };
+    }
+
+    /** 按需向管理器请求粒子系统。 */
+    _requestParticle() {
+        if (!this.particleId || !this._manager) return;
+
+        let handle = null;
+        try {
+            handle = this._manager._requestParticle({
+                particleId: this.particleId,
+                position: { ...this.position },
+                lifetime: this.particleLifetime,
+                effectId: this.id,
+                effectType: this.effectType,
+                source: this.source && typeof this.source === "object" ? { ...this.source } : this.source,
+            });
+        } catch (error) {
+            Instance.Msg(`AreaEffect: 请求粒子失败 #${this.id}: ${error}\n`);
+            return;
+        }
+
+        if (handle && typeof handle.stop === "function") {
+            this._particleHandle = handle;
+        }
+    }
+
+    /** 停止并释放粒子句柄。 */
+    _stopParticle() {
+        if (!this._particleHandle) return;
+
+        try {
+            this._particleHandle.stop?.();
+        } catch (error) {
+            Instance.Msg(`AreaEffect: 停止粒子失败 #${this.id}: ${error}\n`);
+        }
+        this._particleHandle = null;
+    }
+}
+
+/**
+ * @module 区域效果/区域效果管理器
+ */
+
+
+/**
+ * 区域效果管理器级别的服务。
+ *
+ * 负责创建、驱动和清理所有独立于怪物生命周期的持续区域效果。
+ * 模块内部只关心：
+ * - 区域效果实例集合
+ * - 每帧 tick 统一驱动
+ * - 命中回调桥接
+ * - 粒子请求桥接
+ *
+ * @navigationTitle 区域效果服务
+ */
+class AreaEffectManager {
+    constructor() {
+        /** 所有活跃的区域效果实例。尾部追加，失活后在 tick 中移除。
+         * @type {AreaEffect[]} */
+        this._effects = [];
+
+        /**
+         * 命中玩家回调。
+         * @type {import("./area_const").areaEffectHitPlayerCallback|null}
+         */
+        this._onHitPlayer = null;
+
+        /**
+         * 命中怪物回调。
+         * @type {import("./area_const").areaEffectHitMonsterCallback|null}
+         */
+        this._onHitMonster = null;
+
+        /**
+         * 粒子请求回调。区域效果需要粒子时通过这里向外部请求。
+         * @type {import("./area_const").areaEffectParticleRequestCallback|null}
+         */
+        this._onParticleRequest = null;
+    }
+
+    /**
+     * 注册命中玩家回调。
+     * @param {import("./area_const").areaEffectHitPlayerCallback} callback
+     */
+    setOnHitPlayer(callback) {
+        this._onHitPlayer = callback;
+    }
+
+    /**
+     * 注册命中怪物回调。
+     * @param {import("./area_const").areaEffectHitMonsterCallback} callback
+     */
+    setOnHitMonster(callback) {
+        this._onHitMonster = callback;
+    }
+
+    /**
+     * 注册粒子请求回调。
+     * @param {import("./area_const").areaEffectParticleRequestCallback} callback
+     */
+    setOnParticleRequest(callback) {
+        this._onParticleRequest = callback;
+    }
+
+    /**
+     * 创建一个新的区域效果。
+     * @param {import("./area_const").areaEffectDesc} desc
+     * @returns {AreaEffect}
+     */
+    create(desc) {
+        const normalizedDesc = this._normalizeDesc(desc);
+        const effect = new AreaEffect(this, normalizedDesc);
+        effect.start();
+        this._register(effect);
+        return effect;
+    }
+
+    /**
+     * 每帧由外部主循环或上层 manager 调用。
+     * @param {number} now
+     * @param {import("./area_const").areaEffectTickContext} tickContext
+     */
+    tick(now, tickContext) {
+        const normalizedTickContext = this._normalizeTickContext(tickContext);
+        for (let i = this._effects.length - 1; i >= 0; i--) {
+            const effect = this._effects[i];
+            if (!effect) {
+                this._effects.splice(i, 1);
+                continue;
+            }
+            if (!effect.isAlive()) {
+                this._unregister(effect);
+                continue;
+            }
+
+            effect.tick(now, normalizedTickContext);
+            if (!effect.isAlive()) {
+                this._unregister(effect);
+            }
+        }
+    }
+
+    /** 清理所有区域效果 */
+    cleanup() {
+        for (let i = this._effects.length - 1; i >= 0; i--) {
+            this._effects[i]?.stop();
+        }
+        this._effects.length = 0;
+    }
+
+    /** @returns {number} 当前活跃区域效果数量 */
+    get count() {
+        return this._effects.length;
+    }
+
+    /** @returns {AreaEffect[]} 当前所有活跃效果的只读快照 */
+    getAll() {
+        return [...this._effects];
+    }
+
+    /**
+     * 标准化创建描述，补齐默认值并做浅拷贝，避免外部对象被内部修改。
+     * @param {import("./area_const").areaEffectDesc} desc
+     * @returns {import("./area_const").areaEffectDesc}
+     */
+    _normalizeDesc(desc) {
+        const candidateTargetTypes = Array.isArray(desc.targetTypes) ? desc.targetTypes : DEFAULT_AREA_EFFECT_TARGET_TYPES;
+        const normalizedTargetTypes = [...new Set(candidateTargetTypes.filter((targetType) => {
+            return targetType === AreaEffectTargetType.Player || targetType === AreaEffectTargetType.Monster;
+        }))];
+
+        return {
+            ...desc,
+            position: desc.position ? { ...desc.position } : { x: 0, y: 0, z: 0 },
+            buffParams: desc.buffParams ? { ...desc.buffParams } : {},
+            source: desc.source && typeof desc.source === "object" ? { ...desc.source } : desc.source,
+            targetTypes: normalizedTargetTypes.length > 0 ? normalizedTargetTypes : [...DEFAULT_AREA_EFFECT_TARGET_TYPES],
+        };
+    }
+
+    /**
+     * 标准化每帧上下文，保证 players / monsters 至少是空数组。
+     * @param {import("./area_const").areaEffectTickContext|undefined|null} tickContext
+     * @returns {import("./area_const").areaEffectTickContext}
+     */
+    _normalizeTickContext(tickContext) {
+        return {
+            players: Array.isArray(tickContext?.players) ? tickContext.players : [],
+            monsters: Array.isArray(tickContext?.monsters) ? tickContext.monsters : [],
+        };
+    }
+
+    /**
+     * 注册单个区域效果实例。
+     * @param {AreaEffect} effect
+     */
+    _register(effect) {
+        if (effect && !this._effects.includes(effect)) {
+            this._effects.push(effect);
+        }
+    }
+
+    /**
+     * 从集合中移除单个区域效果实例。
+     * @param {AreaEffect} effect
+     */
+    _unregister(effect) {
+        const idx = this._effects.indexOf(effect);
+        if (idx !== -1) this._effects.splice(idx, 1);
+    }
+
+    /**
+     * 向外转发玩家命中事件。
+     * @param {import("cs_script/point_script").CSPlayerPawn} targetPawn
+     * @param {import("./area_const").areaEffectHitPayload} payload
+     */
+    _emitHitPlayer(targetPawn, payload) {
+        this._onHitPlayer?.(targetPawn, payload);
+    }
+
+    /**
+     * 向外转发怪物命中事件。
+     * @param {import("../monster/monster/monster").Monster} targetMonster
+     * @param {import("./area_const").areaEffectHitPayload} payload
+     */
+    _emitHitMonster(targetMonster, payload) {
+        this._onHitMonster?.(targetMonster, payload);
+    }
+
+    /**
+     * 向外请求粒子系统句柄。
+     * @param {import("./area_const").areaEffectParticleRequest} request
+     * @returns {import("./area_const").areaEffectParticleHandle|null}
+     */
+    _requestParticle(request) {
+        if (!this._onParticleRequest) return null;
+        return this._onParticleRequest(request) ?? null;
+    }
+}
+
+/**
+ * @module 粒子系统/粒子配置
+ */
+//===================粒子配置========================
+/** @type {Record<string, import("../util/definition").particleConfig>} */
+const particleConfigs = {
+    poisongas: {
+        id: "poisongas",
+        spawnTemplateName: "poisongas_particle_template",
+        middleEntityName: "poisongas_particle",
+    },
+    // 后续在此添加更多粒子，例如：
+    // explosion: { id: "explosion", spawnTemplateName: "explosion_particle_template" },
+};
+
+/**
+ * @module 粒子系统/单个粒子
+ */
+
+class Particle {
+    /**
+     * 创建单个粒子实例。
+     * @param {import("./particle_manager").ParticleManager|null} manager
+     * @param {import("../util/definition").particleConfig} config
+     * @param {{lifetime?: number, followEntity?: import("cs_script/point_script").Entity}} [options]
+     */
+    constructor(manager, config, options) {
+        /** @type {import("./particle_manager").ParticleManager|null} */
+        this._manager = manager;
+        /** @type {import("../util/definition").particleConfig} */
+        this.config = config;
+        /** @type {import("cs_script/point_script").Entity[]} 本次 spawn 产生的全部实体 */
+        this._spawnedEntities = [];
+        /** @type {import("cs_script/point_script").Entity|null} 目标 info_particle_system */
+        this._particleEntity = null;
+        /** @type {boolean} 粒子当前是否处于存活状态 */
+        this._alive = false;
+
+        /** 活动时间（秒），null/undefined = 无限期，仅外部 stop */
+        this.lifetime = options?.lifetime ?? config.lifetime ?? null;
+        /** 跟随实体，创建后对粒子实体 SetParent */
+        this.followEntity = options?.followEntity ?? null;
+        /** 创建时的游戏时间戳 */
+        this._startTime = 0;
+    }
+
+    /**
+     * 在指定位置生成粒子实体。
+     * 若已生成过，会先 stop 再重建。
+     * @param {{x:number, y:number, z:number}} position
+     * @returns {boolean}
+     */
+    start(position) {
+        if (this._alive) this.stop();
+
+        const template = Instance.FindEntityByName(this.config.spawnTemplateName);
+        if (!template || !(template instanceof PointTemplate)) {
+            Instance.Msg(`Particle: 找不到 PointTemplate "${this.config.spawnTemplateName}"\n`);
+            return false;
+        }
+
+        const spawned = template.ForceSpawn(position);
+        if (!spawned || spawned.length === 0) {
+            Instance.Msg(`Particle: ForceSpawn 未返回实体 (template="${this.config.spawnTemplateName}")\n`);
+            return false;
+        }
+
+        this._spawnedEntities = spawned;
+        this._particleEntity = this._findParticleEntity(spawned);
+
+        if (!this._particleEntity) {
+            Instance.Msg(`Particle: 生成实体中未找到 info_particle_system (template="${this.config.spawnTemplateName}")\n`);
+            this._cleanup();
+            return false;
+        }
+
+        if (this.followEntity && this.followEntity.IsValid()) {
+            this._particleEntity.SetParent(this.followEntity);
+        }
+
+        this._startTime = Instance.GetGameTime();
+        this._alive = true;
+        this._register();
+        return true;
+    }
+
+    /**
+     * 每帧由 ParticleManager 调用。检查有效性与超时。
+     * @param {number} now
+     */
+    tick(now) {
+        if (!this._alive) return;
+
+        if (!this._particleEntity || !this._particleEntity.IsValid()) {
+            this.stop();
+            return;
+        }
+
+        if (this.lifetime != null && now - this._startTime >= this.lifetime) {
+            this.stop();
+        }
+    }
+
+    /**
+     * 停止粒子并删除本次 spawn 产生的全部实体。
+     * @returns {boolean} 是否成功移除（已停止/不存在返回 false）
+     */
+    stop() {
+        if (!this._alive) return false;
+        this._unregister();
+        this._cleanup();
+        return true;
+    }
+
+    /** @returns {boolean} 粒子是否存活 */
+    isAlive() {
+        if (!this._alive) {
+            this._unregister();
+            return false;
+        }
+        if (!this._particleEntity || !this._particleEntity.IsValid()) {
+            this._unregister();
+            this._cleanup();
+            return false;
+        }
+        return true;
+    }
+
+    /** @returns {import("cs_script/point_script").Entity|null} */
+    getEntity() {
+        return this._particleEntity;
+    }
+
+    /** 注册到所属的 ParticleManager */
+    _register() {
+        if (this._manager) {
+            this._manager._register(this);
+        }
+    }
+
+    /** 从所属的 ParticleManager 中移除 */
+    _unregister() {
+        if (this._manager) {
+            this._manager._unregister(this);
+        }
+    }
+
+    /**
+     * 从生成实体列表中识别目标 info_particle_system。
+     * @param {import("cs_script/point_script").Entity[]} entities
+     * @returns {import("cs_script/point_script").Entity|null}
+     */
+    _findParticleEntity(entities) {
+        const targetName = this.config.middleEntityName;
+        let fallback = null;
+
+        for (const ent of entities) {
+            if (ent.GetClassName() !== "info_particle_system") continue;
+            if (targetName && ent.GetEntityName() === targetName) return ent;
+            if (!fallback) fallback = ent;
+        }
+
+        if (fallback && targetName) {
+            Instance.Msg(`Particle: 未精确匹配 middleEntityName "${targetName}"，使用第一个 info_particle_system\n`);
+        }
+        return fallback;
+    }
+
+    /** 删除本次 spawn 产生的全部实体并重置状态 */
+    _cleanup() {
+        for (const ent of this._spawnedEntities) {
+            if (ent && ent.IsValid()) ent.Remove();
+        }
+        this._spawnedEntities = [];
+        this._particleEntity = null;
+        this._startTime = 0;
+        this._alive = false;
+    }
+}
+
+/**
+ * @module 粒子系统/粒子管理器
+ */
+/**
+ * 粒子管理器。
+ *
+ * 只负责管理当前所有活跃的单粒子系统实例：
+ * - create: 按粒子配置创建并启动单个 Particle
+ * - tickAll: 每帧统一驱动粒子生命周期
+ * - stopAll / cleanup: 统一销毁所有活跃粒子
+ *
+ * 单个粒子的具体逻辑在 `particle.js` 中实现。
+ */
+class ParticleManager {
+    constructor() {
+        /**
+         * 当前管理器持有的活跃粒子池。
+         * @type {Particle[]}
+         */
+        this.activeParticles = [];
+    }
+
+    /**
+     * 按粒子 id 创建并立即在指定位置生成粒子。
+     * @param {string} particleId  particleConfigs 中的 key
+     * @param {{x:number, y:number, z:number}} position
+     * @param {{lifetime?: number, followEntity?: import("cs_script/point_script").Entity}} [options]
+     * @returns {Particle|null}
+     */
+    create(particleId, position, options) {
+        const config = particleConfigs[particleId];
+        if (!config) {
+            Instance.Msg(`Particle: 未找到粒子配置 "${particleId}"\n`);
+            return null;
+        }
+
+        const p = new Particle(this, config, options);
+        if (!p.start(position)) return null;
+        return p;
+    }
+
+    /**
+     * 每帧调用，驱动所有活跃粒子的生命周期。
+     * @param {number} now  当前游戏时间（Instance.GetGameTime()）
+     */
+    tickAll(now) {
+        for (let i = this.activeParticles.length - 1; i >= 0; i--) {
+            const particle = this.activeParticles[i];
+            if (!particle) {
+                this.activeParticles.splice(i, 1);
+                continue;
+            }
+            if (!particle.isAlive()) {
+                continue;
+            }
+            particle.tick(now);
+        }
+    }
+
+    /** 停止并清理当前管理器中的全部粒子。 */
+    stopAll() {
+        for (let i = this.activeParticles.length - 1; i >= 0; i--) {
+            const particle = this.activeParticles[i];
+            if (particle) {
+                particle.stop();
+            }
+        }
+        this.activeParticles.length = 0;
+    }
+
+    /** cleanup 语义等同于 stopAll，便于和其他 manager 模块保持一致。 */
+    cleanup() {
+        this.stopAll();
+    }
+
+    /** @returns {number} 当前活跃粒子数量 */
+    get count() {
+        return this.activeParticles.length;
+    }
+
+    /** @returns {Particle[]} 当前所有活跃粒子的只读快照 */
+    getAll() {
+        return [...this.activeParticles];
+    }
+
+    /**
+     * 注册单个粒子到活跃池。
+     * @param {Particle} particle
+     */
+    _register(particle) {
+        if (particle && !this.activeParticles.includes(particle)) {
+            this.activeParticles.push(particle);
+        }
+    }
+
+    /**
+     * 从活跃池中注销单个粒子。
+     * @param {Particle} particle
+     */
+    _unregister(particle) {
+        const idx = this.activeParticles.indexOf(particle);
+        if (idx !== -1) this.activeParticles.splice(idx, 1);
+    }
+}
+
+/**
+ * @module 输入系统/输入检测器
+ */
+
+/**
+ * 当前输入模块要监听的全部键位。
+ * 顺序同时决定多键同帧按下时的输出顺序。
+ *
+ * @type {{ key: string, binding: number }[]}
+ */
+const MONITORED_INPUTS = [
+    { key: "W", binding: CSInputs.FORWARD },
+    { key: "A", binding: CSInputs.LEFT },
+    { key: "S", binding: CSInputs.BACK },
+    { key: "D", binding: CSInputs.RIGHT },
+    { key: "Walk", binding: CSInputs.WALK },
+    { key: "Duck", binding: CSInputs.DUCK },
+    { key: "Jump", binding: CSInputs.JUMP },
+    { key: "Use", binding: CSInputs.USE },
+    { key: "Attack", binding: CSInputs.ATTACK },
+    { key: "Attack2", binding: CSInputs.ATTACK2 },
+    { key: "Reload", binding: CSInputs.RELOAD },
+    { key: "ShowScores", binding: CSInputs.SHOW_SCORES },
+    { key: "InspectWeapon", binding: CSInputs.LOOK_AT_WEAPON },
+];
+
+/**
+ * 按键边沿检测器。
+ *
+ * 消费外部传入的 pawn 引用，把"当前是否按下"转换成"本帧刚按下"的一次性事件。
+ * 模块本身不持有 Player 或 PlayerManager 引用，只依赖引擎 CSInputs API。
+ *
+ * @navigationTitle 输入检测器
+ */
+class InputDetector {
+    constructor() {
+        /** @type {Record<string, boolean>} */
+        this.pressedState = this._createInitialState();
+    }
+
+    /**
+     * 返回当前支持监听的键位名称。
+     * @returns {string[]}
+     */
+    getSupportedKeys() {
+        return MONITORED_INPUTS.map((item) => item.key);
+    }
+
+    /**
+     * 清空全部锁存状态。
+     */
+    reset() {
+        this.pressedState = this._createInitialState();
+    }
+
+    /**
+     * 轮询指定 pawn 的输入，返回本帧所有"新按下"的键位。
+     *
+     * @param {import("cs_script/point_script").CSPlayerPawn | null | undefined} pawn
+     * @returns {string[]}
+     */
+    pollJustPressed(pawn) {
+        if (!pawn || !pawn.IsValid() || !pawn.IsAlive()) {
+            this.reset();
+            return [];
+        }
+
+        /** @type {string[]} */
+        const justPressed = [];
+        for (const item of MONITORED_INPUTS) {
+            const isPressed = pawn.IsInputPressed(item.binding);
+            if (isPressed && !this.pressedState[item.key]) {
+                justPressed.push(item.key);
+            }
+            this.pressedState[item.key] = isPressed;
+        }
+        return justPressed;
+    }
+
+    /**
+     * 创建默认全 false 的按键状态表。
+     * @returns {Record<string, boolean>}
+     */
+    _createInitialState() {
+        /** @type {Record<string, boolean>} */
+        const state = {};
+        for (const item of MONITORED_INPUTS) {
+            state[item.key] = false;
+        }
+        return state;
+    }
+}
+
+/**
+ * @module 输入系统/输入管理器
+ */
+
+/**
+ * 输入管理器。
+ *
+ * @navigationTitle 输入管理器
+ */
+class InputManager {
+    constructor() {
+        /**
+         * 输入源表。slot → 输入源
+         * 输入源由 InputDetector + 绑定的 Pawn 组成，Pawn 用于查询当前按键状态（如是否被 UI 锁定）。
+         * @type {Map<number, { detector: InputDetector, pawn: import("cs_script/point_script").CSPlayerPawn | null, use: boolean }>}
+         */
+        this._sources = new Map();
+
+        /** 
+         * 输入事件回调。参数为玩家槽位和原始键名，由外部决定如何映射成具体操作。
+         * @type {((slot: number, key: string) => void) | null}
+         */
+        this._onInput = null;
+    }
+    /**
+     * 启用输入检测
+     * @param {number} slot - 玩家槽位
+     * @param {import("cs_script/point_script").CSPlayerPawn} pawn
+     */
+    start(slot, pawn)
+    {
+        const source = this._getOrCreateSource(slot);
+        source.pawn = pawn;
+        source.use = true;
+    }
+    /**
+     * 停止输入检测
+     * @param {number} slot - 玩家槽位
+     */
+    stop(slot)
+    {
+        const source = this._getOrCreateSource(slot);
+        source.use = false;
+        source.pawn = null;
+        source.detector.reset();
+    }
+    /**
+     * 每 tick 轮询全部已注册输入源，逐个回调新按键。
+     */
+    tick() {
+        for (const [slot, source] of this._sources) {
+            if (!source.use) continue;
+            const justPressed = source.detector.pollJustPressed(source.pawn);
+            for (const key of justPressed) {
+                this._onInput?.(slot, key);
+            }
+        }
+    }
+
+    /**
+     * 设置输入事件回调。
+     * @param {(slot: number, key: string) => void} callback
+     */
+    setOnInput(callback) {
+        this._onInput = callback;
+    }
+
+    /**
+     * 获取或创建指定玩家的输入源。
+     * @param {number} slot
+     * @returns {{ detector: InputDetector, pawn: import("cs_script/point_script").CSPlayerPawn | null, use: boolean }}
+     */
+    _getOrCreateSource(slot) {
+        let source = this._sources.get(slot);
+        if (!source) {
+            source = {
+                detector: new InputDetector(),
+                pawn: null,
+                use: false,
+            };
+            this._sources.set(slot, source);
+        }
+        return source;
+    }
+}
+
+/**
+ * @module 商店系统/商店常量
+ */
+
+
+const ShopAction = {
+    UP: "up",
+    DOWN: "down",
+    PAGE_PREV: "page_prev",
+    PAGE_NEXT: "page_next",
+    CONFIRM: "confirm",
+    BACK: "back",
+};
+
+const SHOP_KEY_MAP = {
+    W: "up",
+    A: "page_prev",
+    S: "down",
+    D: "page_next",
+    Use: "confirm",
+    Walk: "back",
+};
+
+const SHOP_ITEMS_PER_PAGE = 4;
+
+const ShopState = {
+    CLOSED: "closed",
+    OPEN: "open",
+};
+
+const ShopResult = {
+    SUCCESS: "success",
+    ITEM_NOT_FOUND: "item_not_found",
+    LEVEL_NOT_MET: "level_not_met",
+    MONEY_NOT_ENOUGH: "money_not_enough",
+    GRANT_FAILED: "grant_failed",
+    SHOP_NOT_OPEN: "shop_not_open",
+    PLAYER_NOT_FOUND: "player_not_found",
+};
+
+/**
+ * @typedef {object} ShopItemConfig
+ * @property {string} id
+ * @property {string} displayName
+ * @property {number} cost
+ * @property {number} requiredLevel
+ * @property {Record<string, any>} [payload]
+ */
+
+/** @type {ShopItemConfig[]} */
+const BASE_SHOP_ITEMS = [
+    { id: "heal_small",  displayName: "小型治疗包", cost: 200,  requiredLevel: 1, payload: { type: "heal",  amount: 30 } },
+    { id: "heal_large",  displayName: "大型治疗包", cost: 500,  requiredLevel: 3, payload: { type: "heal",  amount: 80 } },
+    { id: "armor_small", displayName: "轻型护甲",   cost: 300,  requiredLevel: 1, payload: { type: "armor", amount: 50 } },
+    { id: "armor_full",  displayName: "重型护甲",   cost: 800,  requiredLevel: 5, payload: { type: "armor", amount: 100 } },
+    { id: "buff_attack", displayName: "强攻增益",   cost: 600,  requiredLevel: 2, payload: { type: "buff",  buffTypeId: "attack_up", params: { duration: 30, multiplier: 1.35 } } },
+    { id: "weapon_ak47", displayName: "AK-47",      cost: 2700, requiredLevel: 4, payload: { type: "weapon", weaponName: "weapon_ak47" } },
+];
+
+const DEFAULT_SHOP_ITEMS = BASE_SHOP_ITEMS.filter((item) => {
+    if (TEMP_DISABLE.playerBuffs && item.payload?.type === "buff") {
+        return false;
+    }
+    return true;
+});
+
+/**
+ * @typedef {object} ShopPlayerInfo
+ * @property {number} money
+ * @property {number} level
+ * @property {number} health
+ * @property {number} armor
+ * @property {string[]} weapons
+ */
+
+/**
+ * @typedef {object} ShopPurchaseContext
+ * @property {number} selectedIndex
+ * @property {number} price
+ * @property {number} openedAt
+ * @property {number} purchasedAt
+ * @property {ShopPlayerInfo} playerInfo
+ */
+
+/**
+ * @typedef {object} ShopGrantResult
+ * @property {boolean} success
+ * @property {string} [message]
+ */
+
+/**
+ * @module 商店系统/商店会话
+ */
+
+/**
+ * 单玩家商店会话。
+ *
+ * 维护一个玩家在商店中的全部运行时状态：
+ * 打开/关闭、当前选中项索引、HUD 渲染、购买校验链。
+ *
+ * 商店会话本身不做按键检测，只接收抽象动作（{@link ShopAction}）。
+ * 玩家信息获取和奖励发放全部通过外部回调完成。
+ *
+ * @navigationTitle 商店会话
+ */
+class ShopSession {
+    /**
+     * @param {number} slot - 玩家槽位
+     * @param {import("./shop_const").ShopItemConfig[]} items - 商品列表
+     * @param {(slot: number) => import("./shop_const").ShopPlayerInfo | null} getPlayerInfo - 获取玩家信息回调
+     * @param {(slot: number, item: import("./shop_const").ShopItemConfig, ctx: import("./shop_const").ShopPurchaseContext) => import("./shop_const").ShopGrantResult} grantReward - 发奖回调
+     * @param {(slot: number, pawn: import("cs_script/point_script").CSPlayerPawn) => void} openShop - 渲染 HUD 回调
+     * @param {(slot: number, pawn: import("cs_script/point_script").CSPlayerPawn, text: string) => void} refreshShop 
+     * @param {(slot: number) => void} closeShop - 隐藏 HUD 回调
+     */
+    constructor(slot, items, getPlayerInfo, grantReward, openShop,refreshShop, closeShop) {
+        /**
+         * 玩家槽位。
+         * @type {number} 
+         */
+        this.slot = slot;
+        /** @type {import("./shop_const").ShopItemConfig[]} */
+        this._items = items;
+        /** @type {(slot: number) => import("./shop_const").ShopPlayerInfo | null} */
+        this._getPlayerInfo = getPlayerInfo;
+        /** @type {(slot: number, item: import("./shop_const").ShopItemConfig, ctx: import("./shop_const").ShopPurchaseContext) => import("./shop_const").ShopGrantResult} */
+        this._grantReward = grantReward;
+        /** @type {(slot: number, pawn: import("cs_script/point_script").CSPlayerPawn) => void} */
+        this._openShop = openShop;
+        /** @type {(slot: number, pawn: import("cs_script/point_script").CSPlayerPawn, text: string) => void} */
+        this._refreshShop = refreshShop;
+        /** @type {(slot: number) => void} */
+        this._closeShop = closeShop;
+        /**
+         * 当前商店状态
+         * @type {string} 
+         */
+        this.state = ShopState.CLOSED;
+        /**
+         * 当前选中项索引
+         * @type {number} 
+         */
+        this.selectedIndex = 0;
+        /**
+         * 每页显示数量。
+         * @type {number}
+         */
+        this._itemsPerPage = SHOP_ITEMS_PER_PAGE;
+        /** 
+         * 商店打开时的游戏时间
+         * @type {number} 
+         */
+        this._openedAt = 0;
+        /** @type {import("cs_script/point_script").CSPlayerPawn | null} */
+        this._pawn = null;
+        /**
+         * 最近一次操作反馈（显示在 HUD 底部）
+         * @type {string} 
+         * */
+        this._lastMessage = "";
+    }
+
+    /**
+     * 打开商店。
+     *
+     * 若已打开则仅刷新 HUD 内容，不重复创建。
+     *
+     * @param {import("cs_script/point_script").CSPlayerPawn} pawn - 玩家 Pawn
+     */
+    open(pawn) {
+        this._pawn = pawn;
+        this._openedAt = Instance.GetGameTime();
+        this.selectedIndex = 0;
+        this._lastMessage = "";
+        this.state = ShopState.OPEN;
+        this._openShop(this.slot,pawn);
+        this._refreshHud();
+    }
+
+    /**
+     * 关闭商店，禁用 HUD 并清空会话状态。
+     */
+    close() {
+        this._closeShop(this.slot);
+        this.state = ShopState.CLOSED;
+        this._pawn = null;
+        this._lastMessage = "";
+    }
+
+    /**
+     * 每 tick 推进一次商店会话。
+     *
+     * 每 tick 都会重新获取一次玩家信息并刷新页面，
+     * 同时保持 HUD 像旧版 hud.js 一样贴脸显示。
+     */
+    tick() {
+        if (this.state !== ShopState.OPEN || !this._pawn) return;
+        this._refreshHud();
+    }
+
+    /**
+     * 接收抽象动作并分发处理。
+     *
+     * 这是输入层与商店核心逻辑的唯一桥梁。
+     * 外部只需把键位映射成 ShopAction 后调用此方法。
+     *
+     * @param {string} action - {@link ShopAction} 中定义的动作
+     * @returns {{ result: string, message?: string }} 操作结果
+     */
+    handleAction(action) {
+        if (this.state !== ShopState.OPEN) {
+            return { result: ShopResult.SHOP_NOT_OPEN };
+        }
+
+        switch (action) {
+            case ShopAction.UP:
+                this._moveSelection(-1);
+                this._refreshHud();
+                return { result: "moved" };
+
+            case ShopAction.DOWN:
+                this._moveSelection(1);
+                this._refreshHud();
+                return { result: "moved" };
+
+            case ShopAction.PAGE_PREV:
+                this._movePage(-1);
+                this._refreshHud();
+                return { result: "page_changed" };
+
+            case ShopAction.PAGE_NEXT:
+                this._movePage(1);
+                this._refreshHud();
+                return { result: "page_changed" };
+
+            case ShopAction.CONFIRM:
+                return this._tryPurchase();
+
+            case ShopAction.BACK:
+                this.close();
+                return { result: "closed" };
+
+            default:
+                return { result: "unknown_action" };
+        }
+    }
+
+    // ——— 内部方法 ———
+
+    /**
+     * 移动当前选中索引（循环滚动）。
+     * @param {number} delta - 移动量（-1 上移，+1 下移）
+     */
+    _moveSelection(delta) {
+        if (this._items.length === 0) return;
+        this.selectedIndex = (this.selectedIndex + delta + this._items.length) % this._items.length;
+    }
+
+    /**
+     * 按页移动，并尽量保留页内光标位置。
+     * @param {number} deltaPage
+     */
+    _movePage(deltaPage) {
+        if (this._items.length === 0) return;
+
+        const pageCount = this._getPageCount();
+        const currentPage = this._getCurrentPageIndex();
+        const pageOffset = this.selectedIndex % this._itemsPerPage;
+        const nextPage = (currentPage + deltaPage + pageCount) % pageCount;
+        const nextPageStart = nextPage * this._itemsPerPage;
+        const nextPageEnd = Math.min(nextPageStart + this._itemsPerPage, this._items.length) - 1;
+        this.selectedIndex = Math.min(nextPageStart + pageOffset, nextPageEnd);
+    }
+
+    _getPageCount() {
+        return Math.max(1, Math.ceil(this._items.length / this._itemsPerPage));
+    }
+
+    _getCurrentPageIndex() {
+        return Math.floor(this.selectedIndex / this._itemsPerPage);
+    }
+
+    /**
+     * 执行购买校验链并调用外部发奖回调。
+     *
+     * 校验顺序：商品存在 → 玩家信息有效 → 等级 → 金币 → 调用 grantReward。
+     *
+     * @returns {{ result: string, message?: string }}
+     */
+    _tryPurchase() {
+        const item = this._items[this.selectedIndex];
+        if (!item) {
+            this._lastMessage = "商品不存在";
+            this._refreshHud();
+            return { result: ShopResult.ITEM_NOT_FOUND, message: this._lastMessage };
+        }
+
+        const info = this._getPlayerInfo(this.slot);
+        if (!info) {
+            this._lastMessage = "无法获取玩家信息";
+            this._refreshHud();
+            return { result: ShopResult.PLAYER_NOT_FOUND, message: this._lastMessage };
+        }
+
+        if (info.level < item.requiredLevel) {
+            this._lastMessage = `等级不足: 需要 ${item.requiredLevel} 级 (当前 ${info.level} 级)`;
+            this._refreshHud();
+            return { result: ShopResult.LEVEL_NOT_MET, message: this._lastMessage };
+        }
+
+        if (info.money < item.cost) {
+            this._lastMessage = `金币不足: 需要 $${item.cost} (当前 $${info.money})`;
+            this._refreshHud();
+            return { result: ShopResult.MONEY_NOT_ENOUGH, message: this._lastMessage };
+        }
+
+        /** @type {import("./shop_const").ShopPurchaseContext} */
+        const ctx = {
+            selectedIndex: this.selectedIndex,
+            price: item.cost,
+            openedAt: this._openedAt,
+            purchasedAt: Instance.GetGameTime(),
+            playerInfo: { ...info },
+        };
+
+        const grantResult = this._grantReward(this.slot, item, ctx);
+
+        if (!grantResult || !grantResult.success) {
+            this._lastMessage = grantResult?.message ?? "购买失败";
+            this._refreshHud();
+            return { result: ShopResult.GRANT_FAILED, message: this._lastMessage };
+        }
+
+        this._lastMessage = grantResult.message ?? `购买成功: ${item.displayName}`;
+        this._refreshHud();
+        return { result: ShopResult.SUCCESS, message: this._lastMessage };
+    }
+
+    /**
+     * 刷新 HUD 文本。
+     *
+     * 文案固定分为四段：玩家摘要、商店标题、商品列表、操作反馈/提示。
+     */
+    _refreshHud() {
+        if (!this._pawn || this.state !== ShopState.OPEN) return;
+
+        const info = this._getPlayerInfo(this.slot);
+
+        // —— 玩家摘要 ——
+        let text = "";
+        if (info) {
+            text += `等级: ${info.level}  金币: $${info.money}  `;
+            text += `生命: ${info.health}  护甲: ${info.armor}\n`;
+        }
+
+        // —— 商店标题 ——
+        text += `═══ 商  店 ═══\n`;
+        text += `第 ${this._getCurrentPageIndex() + 1}/${this._getPageCount()} 页\n`;
+
+        // —— 商品列表 ——
+        if (this._items.length === 0) {
+            text += `(无商品)\n`;
+        } else {
+            const pageStart = this._getCurrentPageIndex() * this._itemsPerPage;
+            const pageEnd = Math.min(pageStart + this._itemsPerPage, this._items.length);
+            for (let i = pageStart; i < pageEnd; i++) {
+                const item = this._items[i];
+                const prefix = i === this.selectedIndex ? "► " : "  ";
+                const levelTag = item.requiredLevel > 1 ? ` [Lv${item.requiredLevel}]` : "";
+                text += `${prefix}${item.displayName}  $${item.cost}${levelTag}\n`;
+            }
+        }
+
+        // —— 操作反馈 / 提示 ——
+        if (this._lastMessage) {
+            text += `\n${this._lastMessage}\n`;
+        }
+        text += `\n[W/S 选中] [A/D 翻页] [E 确认] [SHIFT 返回]`;
+
+        this._refreshShop(this.slot, this._pawn, text);
+    }
+
+    /**
+     * 当前是否打开中。
+     * @returns {boolean}
+     */
+    get isOpen() {
+        return this.state === ShopState.OPEN;
+    }
+}
+
+/**
+ * @module 商店系统/商店管理器
+ */
+
+/**
+ * 商店管理器。
+ *
+ * 对外暴露两个接口（{@link openShop} / {@link closeShop}），
+ * 依赖两个外部回调（getPlayerInfo / grantReward）。
+ *
+ * 管理器维护每个玩家 slot 的 {@link ShopSession}，
+ * 负责创建/复用会话、转发抽象动作、以及批量关闭。
+ *
+ * 商店层不直接操作 Buff、武器或玩家经济系统，
+ * 所有实际效果均通过 {@link _grantReward} 回调由外部决定。
+ *
+ * @navigationTitle 商店管理器
+ */
+class ShopManager {
+    constructor() {
+        /**
+         * 商店商品列表。
+         * @type {import("./shop_const").ShopItemConfig[]}
+         */
+        this._items = DEFAULT_SHOP_ITEMS;
+
+        /**
+         *  玩家槽位 → 商店会话 映射表
+         *  @type {Map<number, ShopSession>}
+         */
+        this._sessions = new Map();
+
+        // ——— 外部回调 ———
+
+        /**
+         * 获取玩家信息回调。
+         *
+         * 由外部注入，返回指定 slot 的玩家摘要信息。
+         * 返回 null 表示玩家不存在或不可读。
+         *
+         * @type {((slot: number) => import("./shop_const").ShopPlayerInfo | null) | null}
+         */
+        this._getPlayerInfo = null;
+
+        /**
+         * 发奖回调。
+         *
+         * 由外部注入，商店层购买校验通过后调用。
+         * 外部负责扣钱、发 Buff/武器/治疗等，并返回结果。
+         *
+         * @type {((slot: number, item: import("./shop_const").ShopItemConfig, ctx: import("./shop_const").ShopPurchaseContext) => import("./shop_const").ShopGrantResult) | null}
+         */
+        this._grantReward = null;
+
+        /**
+         * 打开商店回调
+         * @type {((slot: number, pawn: import("cs_script/point_script").CSPlayerPawn) => void) | null}
+         */
+        this._openshop = null;
+        /**
+         * 刷新文本回调
+         * @type {((slot: number, pawn: import("cs_script/point_script").CSPlayerPawn, text: string) => void) | null}
+         */
+        this._refreshtext=null;
+        /**
+         * 关闭商店回调
+         * @type {((slot: number) => void) | null}
+         */
+        this._closeshop = null;
+        this.init();
+    }
+    init()
+    {
+        Instance.OnScriptInput("openshop", (event) => {
+            const controller = event.activator;
+            if (controller && controller instanceof CSPlayerController) {
+                const slot = controller.GetPlayerSlot();
+                const pawn = controller.GetPlayerPawn();
+                if (!pawn) return;
+                this.openShop(slot, pawn);
+            }
+        });
+        Instance.OnScriptInput("closeshop", (event) => {
+            const controller = event.activator;
+            if (controller && controller instanceof CSPlayerController) {
+                const slot = controller.GetPlayerSlot();
+                this.closeShop(slot);
+            }
+        });
+    }
+    // ——— 对外接口 ———
+
+    /**
+     * 打开商店。
+     *
+     * 若该玩家已有会话且处于打开状态，则只刷新内容。
+     * 若不存在会话则创建新会话。
+     *
+     * @param {number} playerSlot - 玩家槽位
+     * @param {import("cs_script/point_script").CSPlayerPawn} pawn - 玩家 Pawn
+     */
+    openShop(playerSlot, pawn) {
+        if (!this._getPlayerInfo || !this._grantReward || !this._openshop || !this._closeshop||!this._refreshtext) {
+            Instance.Msg(`[ShopManager] 回调未就绪，无法打开商店 (slot=${playerSlot})`);
+            return;
+        }
+
+        let session = this._sessions.get(playerSlot);
+        if (!session) {
+            session = new ShopSession(
+                playerSlot,
+                this._items,
+                (slot) => this._getPlayerInfo?.(slot) ?? null,
+                (slot, item, ctx) => this._grantReward?.(slot, item, ctx) ?? { success: false, message: "回调未注入" },
+                (slot, currentPawn) => this._openshop?.(slot,currentPawn),
+                (slot, currentPawn, text) => this._refreshtext?.(slot, currentPawn, text),
+                (slot) => this._closeshop?.(slot),
+            );
+            this._sessions.set(playerSlot, session);
+        }
+
+        session.open(pawn);
+        Instance.Msg(`[ShopManager] 商店已打开 (slot=${playerSlot})`);
+    }
+
+    /**
+     * 关闭商店。
+     *
+     * 若商店未打开则静默跳过。
+     *
+     * @param {number} playerSlot - 玩家槽位
+     */
+    closeShop(playerSlot) {
+        const session = this._sessions.get(playerSlot);
+        if (!session || !session.isOpen) return;
+
+        session.close();
+        Instance.Msg(`[ShopManager] 商店已关闭 (slot=${playerSlot})`);
+    }
+
+    /**
+     * 向指定玩家的商店会话发送原始按键。
+     *
+     * 商店管理器内部负责将 raw key 映射成 ShopAction。
+     *
+     * @param {number} playerSlot - 玩家槽位
+     * @param {string} rawKey - InputDetector 返回的原始键名
+     * @returns {{ result: string, message?: string } | null}
+     */
+    handleRawKey(playerSlot, rawKey) {
+        const session = this._sessions.get(playerSlot);
+        if (!session || !session.isOpen) return null;
+
+        const action = SHOP_KEY_MAP[rawKey];
+        if (!action) return null;
+
+        return session.handleAction(action);
+    }
+
+    /**
+     * 每 tick 推进全部已打开的商店会话。
+     */
+    tick() {
+        for (const [, session] of this._sessions) {
+            if (!session.isOpen) continue;
+            session.tick();
+        }
+    }
+
+    /**
+     * 关闭所有已打开的商店会话。
+     */
+    closeAll() {
+        for (const [slot, session] of this._sessions) {
+            if (session.isOpen) {
+                session.close();
+            }
+        }
+    }
+
+    // ——— 回调设置 ———
+
+    /**
+     * 设置获取玩家信息回调。
+     * @param {(slot: number) => import("./shop_const").ShopPlayerInfo | null} callback
+     */
+    setGetPlayerInfo(callback) {
+        this._getPlayerInfo = callback;
+    }
+
+    /**
+     * 设置发奖回调。
+     * @param {(slot: number, item: import("./shop_const").ShopItemConfig, ctx: import("./shop_const").ShopPurchaseContext) => import("./shop_const").ShopGrantResult} callback
+     */
+    setGrantReward(callback) {
+        this._grantReward = callback;
+    }
+
+    /**
+     * 设置打开 HUD 回调。
+     * @param {(slot: number, pawn: import("cs_script/point_script").CSPlayerPawn) => void} callback
+     */
+    setOpenShop(callback) {
+        this._openshop = callback;
+    }
+
+    /**
+     * 设置刷新 HUD 回调。
+     * @param {(slot: number, pawn: import("cs_script/point_script").CSPlayerPawn, text: string) => void} callback
+     */
+    setRefreshText(callback) {
+        this._refreshtext = callback;
+    }
+    /**
+     * 设置隐藏 HUD 回调。
+     * @param {(slot: number) => void} callback
+     */
+    setCloseShop(callback) {
+        this._closeshop = callback;
+    }
+}
+
+/**
+ * @module HUD系统/HUD常量
+ */
+
+/**
+ * 地图中已存在的 HUD point_template 名称。
+ */
+const HUD_TEMPLATE_NAME = "hud_template";
+
+/**
+ * 运行时生成的 HUD 实体名前缀。
+ */
+const HUD_ENTITY_PREFIX = "hud";
+
+/**
+ *  HUD 贴脸显示参数。
+ */
+const HUD_FACE_ATTACH = {
+    radius: 7,
+    // 正值向玩家左侧偏移，负值向右侧偏移。
+    lateralOffset: 2,
+};
+
+/**
+ * HUD 渠道定义。
+ */
+const CHANNAL = {
+    NONE: -1,
+    SHOP: 0,
+    STATUS: 1,
+};
+
+/**
+ * 渠道优先级（数值越大越优先）。
+ * 同一玩家只显示优先级最高的活跃请求；高优先级释放后自动回退。
+ */
+const CHANNEL_PRIORITY = {
+    [CHANNAL.NONE]: 0,
+    [CHANNAL.STATUS]: 1,
+    [CHANNAL.SHOP]: 2,
+};
+
+/**
+ * @module HUD系统/HUD管理器
+ */
+
+/**
+ * @typedef {object} HudRequest
+ * @property {string} text - 待显示文本
+ * @property {import("cs_script/point_script").CSPlayerPawn} pawn - 关联的玩家 Pawn
+ */
+
+/**
+ * @typedef {object} HudSession
+ * @property {number} slot - 玩家槽位
+ * @property {string} entityName - HUD 实体名
+ * @property {import("cs_script/point_script").Entity | undefined} entity - HUD 实体引用
+ * @property {number} activeChannel - 当前生效的渠道
+ * @property {import("cs_script/point_script").CSPlayerPawn | null} pawn - 当前跟随的 Pawn
+ * @property {boolean} use - 实体是否处于 Enable 状态
+ * @property {string} lastText - 上次渲染的文本（用于去重）
+ * @property {Map<number, HudRequest>} requests - 各渠道的显示请求
+ */
+
+/**
+ * HUD 管理器（单 HUD 仲裁模式）。
+ *
+ * 每个玩家槽位只维护一个 HUD 实体。多个 channel 可同时提交显示请求，
+ * 但只有优先级最高的 channel 内容会被投影到唯一实体上。
+ * 高优先级释放后自动回退到次高优先级。
+ *
+ * 优先级由 {@link CHANNEL_PRIORITY} 定义：SHOP > STATUS > NONE。
+ *
+ * 业务模块不直接 import 本模块，而是通过 main.js 注入回调使用。
+ *
+ * @navigationTitle HUD管理器
+ */
+class HudManager {
+    constructor() {
+        /**
+         * 玩家槽位 → HUD 会话状态。
+         * @type {Map<number, HudSession>}
+         */
+        this._sessions = new Map();
+    }
+
+    /**
+     * 提交指定 channel 的显示请求，并重新仲裁当前应显示的内容。
+     *
+     * @param {number} slot - 玩家槽位
+     * @param {import("cs_script/point_script").CSPlayerPawn} pawn - 玩家 Pawn
+     * @param {string} text - HUD 文本
+     * @param {number} channel - HUD 渠道
+     */
+    showHud(slot, pawn, text, channel) {
+        const session = this._getOrCreateSession(slot);
+        session.requests.set(channel, { text, pawn });
+        this._arbitrate(session);
+    }
+
+    /**
+     * 撤销指定 channel 的显示请求（或全部请求），并重新仲裁。
+     *
+     * @param {number} slot - 玩家槽位
+     * @param {number} [channel] - HUD 渠道；不传时撤销该玩家全部渠道请求
+     */
+    hideHud(slot, channel) {
+        const session = this._sessions.get(slot);
+        if (!session) return;
+
+        if (channel === undefined) {
+            session.requests.clear();
+        } else {
+            session.requests.delete(channel);
+        }
+
+        this._arbitrate(session);
+    }
+
+    /**
+     * 获取指定玩家当前生效的 channel。
+     * @param {number} slot
+     * @returns {number}
+     */
+    getActiveChannel(slot) {
+        const session = this._sessions.get(slot);
+        return session ? session.activeChannel : CHANNAL.NONE;
+    }
+
+    /**
+     * 每 tick 刷新全部可见 HUD 的贴脸位置。
+     * @param {{ id: number; name: string; slot: number; level: number; money: number; health: number; maxHealth: number; armor: number; attack: number; critChance: number; critMultiplier: number; kills: number; score: number; exp: number; expNeeded: number; pawn: import("cs_script/point_script").CSPlayerPawn | null; }[]} [allAlivePlayersSummary=[]]
+     */
+    tick(allAlivePlayersSummary=[]) {
+        for (const s of allAlivePlayersSummary) {
+            if(!s.pawn)continue;
+            const text = `Lv.${s.level} HP:${s.health}/${s.maxHealth} 护甲:${s.armor}\n$${s.money} 升级还需:${s.expNeeded - s.exp}EXP`;
+            this.showHud(s.slot, s.pawn, text, CHANNAL.STATUS);
+        }
+        for (const [, session] of this._sessions) {
+            if (!session.use) continue;
+            const s=this._refreshHudPosition(session);
+            if(!s)session.use=false;
+        }
+    }
+
+    // ——— 内部方法 ———
+
+    /**
+     * 获取或创建指定玩家的 HUD 会话。
+     * @param {number} slot
+     * @returns {HudSession}
+     */
+    _getOrCreateSession(slot) {
+        let session = this._sessions.get(slot);
+        if (!session) {
+            session = {
+                slot,
+                entityName: `${HUD_ENTITY_PREFIX}_${slot}`,
+                entity: undefined,
+                activeChannel: CHANNAL.NONE,
+                pawn: null,
+                use: false,
+                lastText: "",
+                requests: new Map(),
+            };
+            this._sessions.set(slot, session);
+        }
+        return session;
+    }
+
+    /**
+     * 根据优先级重新决定当前应显示的 channel 内容。
+     * @param {HudSession} session
+     */
+    _arbitrate(session) {
+        // 找出最高优先级的活跃请求
+        let winnerChannel = CHANNAL.NONE;
+        for (const ch of session.requests.keys()) {
+            if ((CHANNEL_PRIORITY[ch] ?? 0) > (CHANNEL_PRIORITY[winnerChannel] ?? 0)) {
+                winnerChannel = ch;
+            }
+        }
+
+        // 无活跃请求 → 隐藏 HUD
+        if (winnerChannel === CHANNAL.NONE) {
+            if (session.use) this._hideEntity(session);
+            session.activeChannel = CHANNAL.NONE;
+            return;
+        }
+
+        const request = session.requests.get(winnerChannel);
+        if(!request)return;
+        const channelChanged = session.activeChannel !== winnerChannel;
+        const textChanged = session.lastText !== request.text;
+        const pawnChanged = session.pawn !== request.pawn;
+
+        // 无变化且已显示 → 跳过
+        if (!channelChanged && !textChanged && !pawnChanged && session.use) return;
+
+        session.activeChannel = winnerChannel;
+        session.pawn = request.pawn;
+
+        this._ensureEntity(session);
+        if (!session.entity) return;
+
+        // 文本更新
+        if (textChanged || channelChanged) {
+            session.lastText = request.text;
+            Instance.EntFireAtTarget({
+                target: session.entity,
+                input: "SetMessage",
+                value: request.text,
+            });
+        }
+
+        // 首次启用或 Pawn 变更 → 重新绑定
+        if (!session.use) {
+            Instance.EntFireAtTarget({ target: session.entity, input: "Enable" });
+            Instance.EntFireAtTarget({
+                target: session.entity,
+                input: "Followentity",
+                value: "!activator",
+                activator: request.pawn,
+            });
+            session.use = true;
+        } else if (pawnChanged) {
+            Instance.EntFireAtTarget({
+                target: session.entity,
+                input: "Followentity",
+                value: "!activator",
+                activator: request.pawn,
+            });
+        }
+
+        this._refreshHudPosition(session);
+    }
+
+    /**
+     * 确保 HUD 实体已创建。
+     * @param {HudSession} session
+     */
+    _ensureEntity(session) {
+        if (session.entity?.IsValid()) return;
+
+        session.entity = Instance.FindEntityByName(session.entityName);
+        if (session.entity?.IsValid()) return;
+
+        const template = Instance.FindEntityByName(HUD_TEMPLATE_NAME);
+        if (template && template instanceof PointTemplate) {
+            const spawned = template.ForceSpawn();
+            if (spawned && spawned.length > 0) {
+                spawned[0].SetEntityName(session.entityName);
+                session.entity = spawned[0];
+            }
+        }
+
+        if (session.entity?.IsValid()) {
+            Instance.EntFireAtTarget({
+                target: session.entity,
+                input: "Disable",
+            });
+        }
+    }
+
+    /**
+     * 禁用 HUD 实体。
+     * @param {HudSession} session
+     */
+    _hideEntity(session) {
+        if (!session.entity || !session.use) return;
+
+        Instance.EntFireAtTarget({
+            target: session.entity,
+            input: "Disable",
+        });
+
+        session.use = false;
+        session.lastText = "";
+    }
+
+    /**
+     * 刷新 HUD 贴脸位置（基于当前生效 channel 的偏移配置）。
+     * @param {HudSession} session
+     * @returns {boolean}
+     */
+    _refreshHudPosition(session) {
+        if (!session.entity?.IsValid() || !session.pawn) return false;
+
+        const ps = session.pawn.GetEyePosition();
+        const ag = session.pawn.GetEyeAngles();
+        if (!ps || !ag) return false;
+
+        const radius = HUD_FACE_ATTACH.radius;
+        const lateralOffset = HUD_FACE_ATTACH.lateralOffset;
+
+        const pitchRad = ag.pitch * Math.PI / 180;
+        const yawRad = ag.yaw * Math.PI / 180;
+        const x = ps.x + radius * Math.cos(pitchRad) * Math.cos(yawRad);
+        const y = ps.y + radius * Math.cos(pitchRad) * Math.sin(yawRad);
+        const ox = ps.x + radius * Math.cos(0) * Math.cos(yawRad);
+        const oy = ps.y + radius * Math.cos(0) * Math.sin(yawRad);
+
+        session.entity.Teleport({
+            position: {
+                x: x - lateralOffset * (oy - ps.y) / radius,
+                y: y + lateralOffset * (ox - ps.x) / radius,
+                z: ps.z - radius * Math.sin(pitchRad),
+            },
+            angles: {
+                pitch: 0,
+                yaw: 270 + ag.yaw,
+                roll: 90 - ag.pitch,
+            },
+        });
+
+        return true;
+    }
+}
+
+/**
+ * 已知漏洞
+ * 怪物正常死亡后引擎实体从不移除 — 实体泄漏
+ * fireuser1相关
+ */
+/**
+ * release 版正式入口。
+ *
+ * 职责：
+ * 1. 设置服务器 cvar。
+ * 2. 分别实例化 GameManager、WaveManager、PlayerManager、MonsterManager、
+ *    MovementManager、NavMesh、InputManager、ShopManager、HudManager。
+ * 3. 在此文件中完成所有跨模块回调绑定——这里是唯一允许出现跨模块业务回调的地方。
+ * 4. 注册统一 think 主循环，按固定顺序推进各模块 tick。
+ * 5. 消费怪物移动意图事件，驱动 MovementManager 执行实际移动，
+ *    并将移动状态回写给 Monster。
+ *
+ * 设计原则：
+ * - game、wave、player、monster、movement、navmesh、input、shop、hud 各模块彼此独立，不互相 import。
+ * - 模块之间的数据流动全部通过本文件的回调绑定完成。
+ * @module 主入口
+ */
+
+
+// ═══════════════════════════════════════════════
+// 1. 服务器初始化
+// ═══════════════════════════════════════════════
+
+Instance.ServerCommand("mp_warmup_offline_enabled 1");
+Instance.ServerCommand("mp_warmup_pausetimer 1");
+Instance.ServerCommand("mp_roundtime 60");
+Instance.ServerCommand("mp_freezetime 1");
+Instance.ServerCommand("mp_ignore_round_win_conditions 1");
+Instance.ServerCommand("weapon_accuracy_nospread 1");
+
+// ═══════════════════════════════════════════════
+// 2. 实例化各模块（平级，互不持有）
+// ═══════════════════════════════════════════════
+
+/** @type {import("./util/definition").Adapter} */
+const adapter = {
+    log: (/** @type {string} */ msg) => Instance.Msg(msg),
+    broadcast: (/** @type {string} */ msg) => Instance.Msg(`${msg}`),
+    sendMessage: (/** @type {number} */ playerSlot, /** @type {string} */ msg) => Instance.Msg(`${playerSlot} "${msg}"`),//////????
+    getGameTime: () => Instance.GetGameTime()
+};
+
+const activeTempDisableKeys = getActiveTempDisableKeys();
+if (activeTempDisableKeys.length > 0) {
+    Instance.Msg(`[TempDisable] Active: ${activeTempDisableKeys.join(", ")}`);
+}
+
+const gameManager = new GameManager(adapter);
+const waveManager = new WaveManager(adapter);
+const playerManager = new PlayerManager(adapter);
+const monsterManager = new MonsterManager();
+const movementManager = new MovementManager();
+const navMesh = new NavMesh();
+const areaEffectManager = new AreaEffectManager();
+const particleManager = new ParticleManager();
+const inputManager = new InputManager();
+const shopManager = new ShopManager();
+const hudManager = new HudManager();
+
+function cleanupMonsterSystems() {
+    monsterManager.cleanup();
+    areaEffectManager.cleanup();
+    particleManager.cleanup();
+    movementManager.cleanup();
+    monsterManager.resetStats();
+}
+
+// ── 初始化导航网格 ──
+navMesh.init();
+
+// ── 装配路径调度依赖 ──
+movementManager.initPathScheduler(
+    (start, end) => navMesh.findPath(start, end)
+);
+
+// ═══════════════════════════════════════════════
+// 3. 跨模块回调绑定（全部集中在此）
+// ═══════════════════════════════════════════════
+
+// ——— 3.1 波次 → 怪物 ———
+
+waveManager.setOnWaveStart((waveNumber, waveConfig) => {
+    monsterManager.spawnWave(waveConfig);
+});
+
+waveManager.setOnWaveComplete((waveNumber) => {
+    const waveConfig = waveManager.getWaveConfig(waveNumber);
+
+    // 给予玩家波次奖励
+    playerManager.dispatchReward(null, {
+        type: "money",
+        amount: waveConfig?.reward ?? 0,
+        reason: `第${waveNumber}波通关奖励`
+    });
+
+    // 清理怪物
+    monsterManager.stopWave();
+    cleanupMonsterSystems();
+
+    // 推进下一波或胜利
+    if (waveManager.hasNextWave()) {
+        waveManager.nextWave();
+    } else {
+        gameManager.gameWon();
+    }
+});
+
+// ——— 3.2 怪物 → 玩家 ———
+
+monsterManager.events.setOnMonsterDeath((monster, killer, reward) => {
+    // 注销移动实例
+    movementManager.unregister(monster.model);
+
+    if (killer && killer instanceof CSPlayerPawn) {
+        const controller = killer.GetPlayerController();
+        if (controller) {
+            const playerSlot = controller.GetPlayerSlot();
+            playerManager.dispatchReward(playerSlot, {
+                type: "exp",
+                amount: reward,
+                reason: "击杀怪物"
+            });
+            playerManager.dispatchReward(playerSlot, {
+                type: "money",
+                amount: reward,
+                reason: "击杀怪物"
+            });
+        }
+    }
+});
+
+monsterManager.events.setOnAllMonstersDead(() => {
+    waveManager.completeWave();
+});
+
+monsterManager.events.setOnAttack((damage, target) => {
+    const controller = target.GetPlayerController();
+    if (controller) {
+        const playerSlot = controller.GetPlayerSlot();
+        playerManager.dispatchReward(playerSlot, {
+            type: "damage",
+            amount: damage
+        });
+    }
+});
+
+monsterManager.events.setOnSkill((id, target, payload) => {
+    if (TEMP_DISABLE.monsterSkills || TEMP_DISABLE.playerBuffs) return;
+    const controller = target.GetPlayerController();
+    if (controller) {
+        const playerSlot = controller.GetPlayerSlot();
+        const buffId = payload?.buffTypeId ?? id;
+        const params = payload?.params;
+        playerManager.applyBuff(playerSlot, buffId, params, payload?.source);
+    }
+});
+monsterManager.events.setOnBeforeTakeDamage((monster, amount, attacker) => {
+    if (attacker && attacker instanceof CSPlayerPawn) {
+        const controller = attacker.GetPlayerController();
+        if (controller) {
+            const playerSlot = controller.GetPlayerSlot();
+            return playerManager.modifyDamage(playerSlot, amount);
+        }
+    }
+    return amount;
+});
+areaEffectManager.setOnHitPlayer((targetPawn, payload) => {
+    if (TEMP_DISABLE.playerBuffs) return;
+    const controller = targetPawn.GetPlayerController();
+    if (!controller) return;
+
+    playerManager.applyBuff(
+        controller.GetPlayerSlot(),
+        payload.buffTypeId,
+        payload.buffParams,
+        payload.source
+    );
+});
+
+areaEffectManager.setOnHitMonster((targetMonster, payload) => {
+    if (TEMP_DISABLE.monsterBuffs) return;
+    monsterManager.applyBuff(targetMonster, payload.buffTypeId, payload.buffParams, payload.source);
+});
+
+areaEffectManager.setOnParticleRequest((request) => {
+    const particle = particleManager.create(request.particleId, request.position, {
+        lifetime: request.lifetime
+    });
+    if (!particle) return null;
+
+    return {
+        stop: () => {
+            particle.stop();
+        }
+    };
+});
+
+// ——— 3.2b 怪物生成 → 注册移动实例 + 路径调度 ———
+
+monsterManager.events.setOnMonsterSpawn((monster) => {
+    movementManager.register(monster.model, {
+        speed: monster.speed,
+        mode: monster.movementPath.getDefaultMode(),
+        ignoreEntity: monster.model,
+    });
+    monster.events.setOnAreaEffectRequest((desc) => {
+        if (TEMP_DISABLE.monsterSkills) return;
+        areaEffectManager.create(desc);
+    });
+});
+
+// ——— 3.2c 怪物移动请求 → MovementManager 队列 ———
+
+monsterManager.events.setOnMovementRequest((req) => {
+    movementManager.submitRequest(req);
+});
+
+// ——— 3.3 玩家 → 游戏 ———
+
+playerManager.events.setOnPlayerJoin((player) => {
+    if (player.entityBridge.pawn) monsterManager.addPlayerPawn(player.entityBridge.pawn);
+    gameManager.onPlayerJoin();
+});
+playerManager.events.setOnPlayerLeave((player) => {
+    if (player.entityBridge.pawn) monsterManager.removePlayerPawn(player.entityBridge.pawn);
+    shopManager.closeShop(player.slot);
+    inputManager.stop(player.slot);
+    hudManager.hideHud(player.slot);
+
+    const wasPlaying = gameManager.onPlayerLeave(player.slot);
+    if (wasPlaying && !playerManager.hasAlivePlayers()) {
+        gameManager.gameLost();
+    }
+});
+
+playerManager.events.setOnPlayerDeath((playerPawn) => {
+    monsterManager.removePlayerPawn(playerPawn);
+    const controller = playerPawn.GetPlayerController();
+    if (controller) {
+        const slot = controller.GetPlayerSlot();
+        shopManager.closeShop(slot);
+        inputManager.stop(slot);
+        hudManager.hideHud(slot);
+
+        const wasPlaying = gameManager.onPlayerDeath();
+        if (wasPlaying && !playerManager.hasAlivePlayers()) {
+            gameManager.gameLost();
+        }
+    }
+});
+
+playerManager.events.setOnPlayerRespawn((player) => {
+    if (player.entityBridge.pawn) monsterManager.addPlayerPawn(player.entityBridge.pawn);
+    gameManager.onPlayerRespawn();
+});
+
+// ——— 3.4 全员准备 → 开始游戏 → 开始波次 ———
+
+playerManager.events.setOnAllPlayersReady(() => {
+    gameManager.startGame();
+});
+
+gameManager.setOnGamePrepare(() => {
+    playerManager.dispatchReward(null, {
+        type: "ready",
+        isReady: false
+    });
+});
+
+gameManager.setOnGameStart(() => {
+    playerManager.enterGameStart();
+    waveManager.startWave(1);
+});
+
+gameManager.setOnGameLost(() => {
+    shopManager.closeAll();
+    monsterManager.stopWave();
+    cleanupMonsterSystems();
+});
+//游戏胜利
+gameManager.setOnGameWin(() => {
+    shopManager.closeAll();
+    monsterManager.stopWave();
+    cleanupMonsterSystems();
+});
+// ——— 3.5 游戏重置 → 联动各模块 ———
+
+gameManager.setOnResetGame(() => {
+    shopManager.closeAll();
+    waveManager.resetGame();
+    playerManager.resetAllGameStatus();
+    monsterManager.stopWave();
+    cleanupMonsterSystems();
+    Instance.ServerCommand("mp_restartgame 5");
+});
+
+// ——— 3.6 输入 → 商店 ———
+
+inputManager.setOnInput((slot, key) => {
+    shopManager.handleRawKey(slot, key);
+});
+
+// ——— 3.7 商店 ← 玩家 ———
+
+shopManager.setOpenShop((slot, pawn) => {
+    hudManager.showHud(slot, pawn, "", CHANNAL.SHOP);
+    inputManager.start(slot,pawn);
+});
+shopManager.setRefreshText((slot, pawn, text) => {
+    hudManager.showHud(slot, pawn, text, CHANNAL.SHOP);
+});
+shopManager.setCloseShop((slot) => {
+    hudManager.hideHud(slot, CHANNAL.SHOP);
+    inputManager.stop(slot);
+});
+
+shopManager.setGetPlayerInfo((slot) => {
+    const player = playerManager.getPlayer(slot);
+    if (!player) return null;
+    const s = player.getSummary();
+    return {
+        money: s.money,
+        level: s.level,
+        health: s.health,
+        armor: s.armor,
+        weapons: [],
+    };
+});
+
+shopManager.setGrantReward((slot, item, ctx) => {
+    const player = playerManager.getPlayer(slot);
+    if (!player) return { success: false, message: "玩家不存在" };
+
+    const payload = item.payload;
+    if (payload?.type === "buff" && TEMP_DISABLE.playerBuffs) {
+        return { success: false, message: "Buffs are temporarily disabled." };
+    }
+    if (!payload) return { success: false, message: "商品无效果定义" };
+
+    player.addMoney(-ctx.price, `购买 ${item.displayName}`);
+
+    switch (payload.type) {
+        case "heal":
+            player.heal(payload.amount ?? 0);
+            break;
+        case "armor":
+            player.giveArmor(payload.amount ?? 0);
+            break;
+        case "buff":
+            playerManager.applyBuff(slot, payload.buffTypeId, payload.params, {
+                sourceType: "shop",
+                sourceId: item.id,
+                itemId: item.id,
+            });
+            break;
+        case "weapon":
+            // 暂无武器系统集成，待添加
+            break;
+        case "money":
+            player.addMoney(payload.amount ?? 0, "商店奖励");
+            break;
+        default:
+            return { success: false, message: `未知效果类型: ${payload.type}` };
+    }
+
+    return { success: true, message: `购买成功: ${item.displayName}` };
+});
+
+// ═══════════════════════════════════════════════
+// 4. 引擎事件注册
+// ═══════════════════════════════════════════════
+Instance.OnPlayerConnect((event) => {
+    playerManager.handlePlayerConnect(event.player);
+});
+
+Instance.OnPlayerActivate((event) => {
+    playerManager.handlePlayerActivate(event.player);
+});
+
+Instance.OnPlayerDisconnect((event) => {
+    playerManager.handlePlayerDisconnect(event.playerSlot);
+});
+
+Instance.OnPlayerReset((event) => {
+    playerManager.handlePlayerReset(event.player);
+});
+
+Instance.OnPlayerKill((event) => {
+    playerManager.handlePlayerDeath(event.player);
+});
+
+Instance.OnModifyPlayerDamage((event) => {
+    return playerManager.handleBeforePlayerDamage(event);
+});
+
+Instance.OnPlayerDamage((event) => {
+    playerManager.handlePlayerDamage(event);
+});
+
+Instance.OnPlayerChat((event) => {
+    playerManager.handlePlayerChat(event);
+    const controller = event.player;
+    const text = event.text;
+    if (!controller) return;
+
+    const parts = text.trim().toLowerCase().split(/\s+/);
+    const command = parts[0];
+    Number(parts[1]);
+
+    if (command === "shop" || command === "!shop") {
+        const pawn = controller.GetPlayerPawn();
+        if (pawn) {
+             shopManager.openShop(controller.GetPlayerSlot(), pawn);
+        }
+    }
+});
+
+// ═══════════════════════════════════════════════
+// 5. 主循环（统一 think）
+// ═══════════════════════════════════════════════
+
+/** 上一帧时间戳，用于计算 dt */
+let _lastTime = Instance.GetGameTime();
+
+Instance.SetThink(() => {
+    const now = Instance.GetGameTime();
+    const dt = now - _lastTime;
+    _lastTime = now;
+    // ── 5.1 输入 / 玩家 / 波次 ──
+    inputManager.tick();
+    playerManager.tick();
+    waveManager.tick();
+
+    // ── 5.2 怪物 AI tick（产出移动请求，自动提交到 movementManager 队列） ──
+    const tickContext = monsterManager.tick();
+    for (const monster of monsterManager.getActiveMonsters()) {
+        movementManager.setSpeed(monster.model, monster.speed);
+    }
+
+    // ── 5.3 统一移动 tick（消费请求 → 路径刷新 → 批量 update） ──
+    movementManager.tick(now,dt, tickContext.monsterPositions);
+
+    // ── 5.4 移动状态回写：将 movement 状态快照同步给 monster 侧 ──
+    monsterManager.syncMovementStates(movementManager.getAllStates());
+    areaEffectManager.tick(now, {
+        players: tickContext.allppos,
+        monsters: monsterManager.getActiveMonsters()
+    });
+    particleManager.tickAll(now);
+
+    // ── 5.7 NavMesh tick ──
+    navMesh.tick();
+    // ── 5.8 其他模块 tick ──
+    shopManager.tick();
+    hudManager.tick(playerManager.getActivePlayers().map(p => p.getSummary()));
+
+    // ── 5.9 玩家状态 HUD 同步 ──
+    Instance.SetNextThink(now + 1 / 64);
+});
+Instance.SetNextThink(Instance.GetGameTime() + 1 / 64);
+
+Instance.Msg("=== PvE Release 已启动 ===");
+
+playerManager.refresh();
+monsterManager.syncAllPlayerPawns(
+    playerManager
+        .getActivePlayers()
+        .map((player) => player.entityBridge.pawn)
+        .filter((pawn) => !!pawn)
+);

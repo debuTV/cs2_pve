@@ -1,5 +1,10 @@
 {
   "type": "module",
+  "scripts": {
+    "build": "rollup --config",
+    "copy": "copy \"output\\main.js\" \"D:\\SteamLibrary\\steamapps\\common\\Counter-Strike Global Offensive\\content\\csgo_addons\\minidemo\\scripts\\output\\main.js\"",
+    "release": "yarn build && yarn copy"
+  },
   "devDependencies": {
     "@types/node": "^25.4.0",
     "rollup": "^4.52.4",
