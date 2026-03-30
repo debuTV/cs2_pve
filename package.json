@@ -1,0 +1,9 @@
+{
+  "type": "module",
+  "devDependencies": {
+    "@types/node": "^25.4.0",
+    "rollup": "^4.52.4",
+    "typedoc": "^0.28.17",
+    "typedoc-plugin-navigation-title": "^1.2.3"
+  }
+}

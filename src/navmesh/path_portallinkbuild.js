@@ -1,0 +1,186 @@
+/**
+ * @module 导航网格/传送门链接构建
+ */
+import { Instance } from "cs_script/point_script";
+import { MAX_LINKS, PathState } from "./path_const";
+import { Tool } from "./util/tool";
+import { vec } from "./util/vector";
+/** @typedef {import("cs_script/point_script").Vector} Vector */
+/** @typedef {import("./path_manager").NavMeshMesh} NavMeshMesh */
+/** @typedef {import("./path_manager").NavMeshDetail} NavMeshDetail */
+/** @typedef {import("./path_manager").NavMeshLink} NavMeshLink */
+/**
+ * 传送门链接构建器。
+ *
+ * 从地图中查找 `navmesh_PORTAL_*` 实体对，
+ * 创建零代价的传送连接（Teleport）。
+ *
+ * @navigationTitle 传送门链接构建
+ */
+//手动传送点
+export class PortalLinkBuilder {
+    /**
+     * 初始化传送门链接构建器，绑定多边形网格。
+     * @param {NavMeshMesh} polyMesh
+     */
+    constructor(polyMesh) {
+        /** @type {NavMeshMesh} 待分析的多边形网格引用 */
+        this.mesh = polyMesh;
+        /** @type {boolean} 构建过程中是否出现错误（点位不足、找不到 poly 等） */
+        this.error = false;
+        /** @type {Uint16Array} 每个 link 占 2 个 uint16：poly[i*2]=起始 poly, poly[i*2+1]=目标 poly */
+        this.poly = new Uint16Array(MAX_LINKS * 2);
+        /** @type {Float32Array} 每个 link 的寻路代价（传送门固定为 0，鼓励使用） */
+        this.cost = new Float32Array(MAX_LINKS);
+        /** @type {Uint8Array} 每个 link 的类型（PathState.PORTAL） */
+        this.type = new Uint8Array(MAX_LINKS);
+        /** @type {Float32Array} 每个 link 占 6 个 float：起点 XYZ + 终点 XYZ */
+        this.pos = new Float32Array(MAX_LINKS * 6);
+        /** @type {number} 当前已写入的 link 数量 */
+        this.length = 0;
+    }
+
+    /**
+     * 返回当前构建的 NavMeshLink 结构。
+     *
+     * @returns {NavMeshLink}
+     */
+    return() {
+        return {
+            poly: this.poly,
+            cost: this.cost,
+            type: this.type,
+            pos: this.pos,
+            length: this.length
+        };
+    }
+
+    /**
+     * 将一条传送门连接写入 TypedArray。
+     *
+     * @param {number} polyA - 起始多边形索引
+     * @param {number} polyB - 目标多边形索引
+     * @param {Vector} posA - 起点世界坐标
+     * @param {Vector} posB - 终点世界坐标
+     * @param {number} cost - 寻路代价
+     */
+    pushLink(polyA, polyB, posA, posB, cost) {
+        const i = this.length;
+        const pi = i << 1;
+        const vi = i * 6;
+        this.poly[pi] = polyA;
+        this.poly[pi + 1] = polyB;
+        this.cost[i] = cost;
+        this.type[i] = PathState.PORTAL;
+        this.pos[vi] = posA.x;
+        this.pos[vi + 1] = posA.y;
+        this.pos[vi + 2] = posA.z;
+        this.pos[vi + 3] = posB.x;
+        this.pos[vi + 4] = posB.y;
+        this.pos[vi + 5] = posB.z;
+        this.length++;
+    }
+
+    /**
+     * 从地图中查找所有 navmesh_PORTAL_* 实体对，构建零代价传送连接。
+     *
+     * 每个标签组需要恰好 2 个点位，按 Z 轴从低到高配对，
+     * 通过 findNearestPoly 匹配到多边形后生成传送门 link。
+     *
+     * @returns {NavMeshLink}
+     */
+    init() {
+        this.error = false;
+        this.length = 0;
+        if (!this.mesh || !this.mesh.polys || this.mesh.polyslength === 0) return this.return();
+
+        /** @type {Map<string, Vector[]>} */
+        const groups = new Map();
+        const ents = Instance.FindEntitiesByClass("info_target");
+
+        for (const ent of ents) {
+            const name = ent.GetEntityName();
+            if (!name.startsWith("navmesh_PORTAL_")) continue;
+
+            const tag = name.slice("navmesh_PORTAL_".length);
+            if (!tag) continue;
+
+            const p = ent.GetAbsOrigin();
+            if (!p) continue;
+
+            if (!groups.has(tag)) groups.set(tag, []);
+            groups.get(tag)?.push({ x: p.x, y: p.y, z: p.z });
+        }
+        //let start=new Date();
+        let rawPairs = 0;
+        let validPairs = 0;
+
+        for (const [tag, points] of groups) {
+            if (points.length < 2) {
+                this.error = true;
+                Instance.Msg(`PortalLink: ${tag} 点位不足(=${points.length})，已跳过`);
+                continue;
+            }
+            if (points.length !== 2) {
+                this.error = true;
+                Instance.Msg(`PortalLink: ${tag} 点位数量过多(${points.length})，已跳过`);
+                continue;
+            }
+            const p0 = points[0], p1 = points[1];
+            const aPos = p0.z <= p1.z ? p0 : p1;
+            const bPos = p0.z <= p1.z ? p1 : p0;
+            //points.sort((a, b) => a.z - b.z);
+            //const aPos = points[0];
+            //const bPos = points[points.length - 1];
+            rawPairs++;
+            const aNearest = Tool.findNearestPoly(aPos, this.mesh);//,this.heightfixer);
+            const bNearest = Tool.findNearestPoly(bPos, this.mesh);//,this.heightfixer);
+            const aPoly = aNearest.poly;
+            const bPoly = bNearest.poly;
+            if (aPoly < 0 || bPoly < 0) {
+                this.error = true;
+                Instance.Msg(`PortalLink: ${tag} 找不到最近多边形，已跳过`);
+                continue;
+            }
+            if (aPoly === bPoly) {
+                this.error = true;
+                Instance.Msg(`PortalLink: ${tag} 两端落在同一 poly(${aPoly})，已跳过`);
+                continue;
+            }//鼓励走传送门
+            this.pushLink(aPoly, bPoly, aPos, bPos, 0);
+            validPairs++;
+        }
+        Instance.Msg(`PortalLink统计: group=${groups.size} pair=${rawPairs} link=${this.length} valid=${validPairs}`);
+        return this.return();
+    }
+
+    /**
+     * 调试绘制所有传送门连接（橙色线段 + 青色球体）。
+     *
+     * @param {number} [duration=30] - 绘制持续时间（秒）
+     */
+    debugDraw(duration = 30) {
+        for (let i = 0; i < this.length; i++) {
+            const vi = i * 6;
+            const start = {
+                x: this.pos[vi],
+                y: this.pos[vi + 1],
+                z: this.pos[vi + 2]
+            };
+            const end = {
+                x: this.pos[vi + 3],
+                y: this.pos[vi + 4],
+                z: this.pos[vi + 5]
+            };
+            Instance.DebugLine({
+                start,
+                end,
+                color: { r: 255, g: 165, b: 0 },
+                duration
+            });
+            Instance.DebugSphere({ center: start, radius: 4, color: { r: 0, g: 215, b: 255 }, duration });
+            Instance.DebugSphere({ center: end, radius: 4, color: { r: 0, g: 215, b: 255 }, duration });
+        }
+    }
+}
+

@@ -1,0 +1,102 @@
+/**
+ * @module 工具/定义
+ */
+/**
+ * @typedef {Object} broadcastMessage - 广播消息对象
+ * @property {string} message - 发送的信息
+ * @property {number} delay - 距波次开始的延迟时间（秒）
+ */
+/**
+ * @typedef {object} skill_pool - 技能池配置对象。同类型技能可重复出现多次。所有技能均支持：params.events（触发事件数组，可选）, params.cooldown（可选，默认-1一次性）, params.animation（可选）。
+ * @property {string} id - 技能类型名称，必须在 SkillFactory 中注册（同类型可重复出现多次）
+ * @property {number} chance - 技能获得概率（0~1）
+ * @property {object} params - 技能参数（各技能自定义，详见 skill_factory.js 注释）
+ */
+/**
+ * 通用动画集合类型：任意键对应动画名数组。
+ * 例如 `{ idle: string[], walk: string[] }`。"idle"、"walk"、"attack"、"skill"、"dead" 在对应状态切换时播放。
+ * @typedef {{ [key: string]: string[] }} animations
+ */
+/**
+ * @typedef {object} monsterTypes - 怪物类型配置对象。每个怪物实例对应一个 monsterTypes 配置项，包含其属性、技能池和动画列表。
+ * @property {string} template_name - 怪物模板名称，对应地图中 PointTemplate 的实体名称
+ * @property {string} model_name - 模型名称，对应游戏内模型资源路径（不含前缀 "models/" 和后缀 ".mdl"）
+ * @property {string} name - 怪物名称（仅作记录/展示）
+ * @property {number} baseHealth - 基础生命值
+ * @property {number} baseDamage - 基础伤害
+ * @property {number} speed - 移动速度
+ * @property {number} reward - 击杀奖励
+ * @property {number} attackdist - 攻击距离
+ * @property {number} attackCooldown - 攻击冷却时间（秒）
+ * @property {string} movementmode - 移动模式（例如 "walk"、"fly" 等，具体逻辑由怪物系统实现）
+ * @property {skill_pool[]} skill_pool - 技能池配置数组
+ * @property {animations} animations - 动画配置对象，键为状态名（如 "idle"、"walk"、"attack"、"skill"、"dead" 等），值为对应动画名数组
+ */
+/**
+ * @typedef {object} waveConfig - 波次配置对象。每波包含一个或多个 monsterTypes 配置项，定义该波次的怪物类型和属性。
+ * @property {string} name - 波次名称
+ * @property {number} totalMonsters - 怪物总数（仅作记录/展示）
+ * @property {number} reward - 波次奖励（仅作记录/展示）
+ * @property {number} spawnInterval - 怪物生成间隔（秒）
+ * @property {number} preparationTime - 波次准备时间（秒）
+ * @property {number} aliveMonster - 同时存在的怪物数量（仅作记录/展示）
+ * @property {string[]} monster_spawn_points_name - 怪物生成点名称数组，对应地图中 PointTemplate 的实体名称
+ * @property {{x: number, y: number, z: number}} monster_breakablemins - 怪物破坏物最小边界坐标（相对于生成点位置的偏移）
+ * @property {{x: number, y: number, z: number}} monster_breakablemaxs - 怪物破坏物最大边界坐标（相对于生成点位置的偏移）
+ * @property {broadcastMessage[]} broadcastmessage - 准备阶段广播消息
+ * @property {monsterTypes[]} monsterTypes - 怪物类型配置数组，定义该波次的怪物类型和属性
+ */
+/**
+ * @typedef {object} particleConfig - 粒子配置项。每个粒子对应一个地图中的 PointTemplate，ForceSpawn 后生成 info_particle_system。
+ * @property {string} id - 业务粒子 id（代码中引用的 key）
+ * @property {string} spawnTemplateName - 地图中 PointTemplate 的实体名称
+ * @property {string} middleEntityName - PointTemplate 内目标 info_particle_system 的实体名称，如果是范围特效，选择范围中心点的实体，用于精确匹配
+ * @property {number} [lifetime] - 默认活动时间（秒），为空时仅能外部 stop；运行时 options 可覆盖
+ */
+/**
+ * @typedef {object} Adapter - 外部适配器接口
+ * @property {(msg: string) => void} log - 输出日志
+ * @property {(msg: string) => void} broadcast - 广播消息给玩家
+ * @property {(playerSlot: number, msg: string) => void} sendMessage - 发送消息给指定玩家
+ * @property {() => number} getGameTime - 获取当前游戏时间（秒）
+ */
+/**
+ * 移动请求类型常量。
+ *
+ * 统一移动请求模型：Monster 侧只提交 MoveRequest / StopRequest / RemoveMovement，
+ * main 侧按 priority 合并后统一消费。
+ */
+export const MovementRequestType = {
+    /** 移动请求：追击实体或移动到坐标 */
+    Move:   "Move",
+    /** 停止请求 */
+    Stop:   "Stop",
+    /** 注销 Movement 实例 */
+    Remove: "Remove",
+};
+/**@typedef {import("cs_script/point_script").Entity} Entity */
+/**@typedef {import("cs_script/point_script").Vector} Vector */
+/**
+ * @typedef {object} MovementRequest
+ * @property {string}  type - MovementRequestType 值
+ * @property {Entity}  entity - 移动实体，也是请求合并与定位 Movement 的主键
+ * @property {number}  priority - MovementPriority 值
+ * @property {Entity}  [targetEntity] - 追击目标实体（与 targetPosition 互斥）
+ * @property {Vector}  [targetPosition] - 目标坐标（与 targetEntity 互斥）
+ * @property {boolean} [usePathRefresh] - 是否允许刷新路径（默认 true）
+ * @property {boolean} [useNPCSeparation] - 是否启用NPC分离速度；false 时每 tick 传空分离上下文
+ * @property {string}  [Mode] - 切换移动模式（walk / air / fly 等）
+ * @property {Vector}  [Velocity] - 设置速度向量（技能位移用,例如飞扑就需要）
+ * @property {number}  [maxSpeed] - 速度上限
+ * @property {boolean} [clearPath] - 是否清空现有路径
+ */
+
+/**
+ * 移动请求优先级。数值越小优先级越高。
+ * main 每帧按 priority 合并同一 entity 的请求，保留最高优先级。
+ */
+export const MovementPriority = {
+    Skill:       0,
+    StateChange: 1,
+    Chase:       2,
+};

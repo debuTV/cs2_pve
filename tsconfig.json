@@ -1,0 +1,13 @@
+{
+    "compilerOptions": {
+        "allowJs": true,
+        "strict": true,
+        "target": "es2022",
+        "checkJs": true,
+        "noEmit": true,
+        "types": []
+    },
+    "include": ["./release", "point_script.d.ts"],
+    //"include": ["./src/main.js", "point_script.d.ts"],
+    "exclude": ["node_modules"]
+}

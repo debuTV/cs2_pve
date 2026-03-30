@@ -1,0 +1,48 @@
+/**
+ * @module 波次系统/波次配置
+ */
+
+import { monster } from "../monster/monster_const";
+
+/**
+ * 波次状态枚举。
+ *
+ * - `IDLE`  – 等待波次开始。
+ * - `PREPARING`  – 波次准备阶段。
+ * - `ACTIVE`  – 波次进行中。
+ * - `COMPLETED` – 当前波次通关。
+ *
+
+ * @enum {string}
+ * @navigationTitle 波次状态枚举
+ */
+export const WaveState = {
+    IDLE: 'IDLE',
+    PREPARING: 'PREPARING',
+    ACTIVE: 'ACTIVE',
+    COMPLETED: 'COMPLETED'
+};
+
+/**
+ * 内置的默认波次配置列表，包含三波递增难度的演示数据。
+ * 实际使用时由 main.js 传入真实配置。
+ * @type {import("../util/definition").waveConfig[]}
+ * @navigationTitle 默认波次配置
+ */
+export const wavesConfig=[
+        { 
+            name: "训练波", 
+            totalMonsters: 1000, 
+            reward: 500, 
+            spawnInterval: 0.1, 
+            preparationTime: 0, //波次开始到第一个怪物出现时间，这段时间可以用来发消息
+            aliveMonster:150, //同时存在的怪物数量
+            monster_spawn_points_name:["monster_spawnpoint"],//这一波生成点
+            monster_breakablemins:{x:-30,y:-30,z:0},//最大怪物的breakable的mins
+            monster_breakablemaxs:{x:30,y:30,z:75},//最大怪物的breakable的maxs
+            broadcastmessage:[{message:"",delay:1}],
+            monsterTypes:[
+                monster["Zombie"]
+            ]
+        },
+    ];
