@@ -44,7 +44,7 @@ export class Player {
         /** @type {number} 玩家当前状态，取值见 {@link PlayerState} */
         this.state = PlayerState.DISCONNECTED;
 
-        /** @type {PlayerEvents} 玩家领域事件集合 */
+        ///** @type {PlayerEvents} 玩家领域事件集合 */
         this.events = new PlayerEvents();
         /** @type {number} 上一次 tick 的游戏时间（0 表示尚未 tick） */
         this.lastTick = 0;
@@ -187,48 +187,25 @@ export class Player {
         return this.stats.getAttackDamage(baseDamage);
     }
 
-    /**
-     * 计算玩家对实体的一次伤害值，供外部系统通过 PlayerManager 间接调用。
-     *
-     * 返回最终数值；若外部需要暴击等细节，可改用 PlayerStats.rollDamageAgainstEntity。
-     *
-     * @param {import("../player_const").PlayerDamageOptions} [options]
-     * @returns {number}
-     */
-    calculateDamageToEntity(options) {
-        return this.stats.rollDamageAgainstEntity(options).damage;
-    }
-
     // ——— Buff 入口（委托给 BuffManager） ———
 
     /**
      * 添加指定类型的 Buff。
      * @param {string} typeId Buff 类型标识
-     * @param {Record<string, any>} [params] Buff 初始化参数
-     * @param {Record<string, any>|null} [source] Buff 来源
-     * @param {import("./components/buff_manager").PlayerBuffContext|null} [context] Buff 结算上下文
-     * @returns {import("../../buff/buff_template").BuffTemplate | null} 创建的 Buff 实例，创建失败返回 null
+     * @param {Record<string, any>} params Buff 初始化参数
+     * @returns {boolean} 是否成功添加 Buff
      */
-    addBuff(typeId, params, source, context) {
-        return this.buffManager.addBuff(typeId, params, source, context);
+    addBuff(typeId, params) {
+        return this.buffManager.addBuff(typeId, params);
     }
 
     /**
      * 移除指定类型的 Buff。
-     * @param {string|Record<string, any>|null|undefined} typeIdOrFilter Buff 类型标识或过滤条件
+     * @param {string} typeId Buff 类型标识
      * @returns {boolean} 是否成功移除
      */
-    removeBuff(typeIdOrFilter) {
-        return this.buffManager.removeBuff(typeIdOrFilter);
-    }
-
-    /** @param {string} typeId */
-    hasBuff(typeId) {
-        return this.buffManager.hasBuff(typeId);
-    }
-
-    getAllBuffs() {
-        return this.buffManager.getAllBuffs();
+    removeBuff(typeId) {
+        return this.buffManager.removeBuff(typeId);
     }
 
     // ——— 准备状态 ———
@@ -274,57 +251,9 @@ export class Player {
         const oldState = this.state;
         this.state = nextState;
         this.buffManager.onStateChange(oldState, nextState);
-        this.events.OnStateChanged?.(oldState, nextState);
         return true;
     }
-
-    /** @param {(ready: boolean) => void} callback */
-    setOnReadyChanged(callback) {
-        this.events.setOnReadyChanged(callback);
-    }
-    /** @param {(old: number, current: number, delta: number, reason?: string) => void} callback */
-    setOnMoneyChanged(callback) {
-        this.events.setOnMoneyChanged(callback);
-    }
-    /** @param {(oldLevel: number, newLevel: number) => void} callback */
-    setOnLevelUp(callback) {
-        this.events.setOnLevelUp(callback);
-    }
-    /** @param {(player: Player, killer?: any) => void} callback */
-    setOnDeath(callback) {
-        this.events.setOnDeath(callback);
-    }
-    /** @param {(player: Player) => void} callback */
-    setOnRespawned(callback) {
-        this.events.setOnRespawned(callback);
-    }
-    /** @param {(oldState: number, newState: number) => void} callback */
-    setOnStateChanged(callback) {
-        this.events.setOnStateChanged(callback);
-    }
-    /** @param {(damage: number, attacker?: any, inflictor?: any) => void} callback */
-    setOnAfterDamageTaken(callback) {
-        this.events.setOnAfterDamageTaken(callback);
-    }
-    /** @param {(amount: number) => void} callback */
-    setOnHeal(callback) {
-        this.events.setOnHeal(callback);
-    }
-    /** @param {(buff: any) => void} callback */
-    setOnBuffAdded(callback) {
-        this.events.setOnBuffAdded(callback);
-    }
-    /** @param {(buff: any) => void} callback */
-    setOnBuffRemoved(callback) {
-        this.events.setOnBuffRemoved(callback);
-    }
-    /** @param {(buff: any) => void} callback */
-    setOnBuffRefreshed(callback) {
-        this.events.setOnBuffRefreshed(callback);
-    }
-
     // ——— Tick ———
-
     /**
      * 每帧调度入口。
      * @param {number} now 当前引擎时间
@@ -339,7 +268,7 @@ export class Player {
         if (dt <= 0) return;
 
         // 1. buff 计时 & 过期清理
-        this.buffManager.tick(dt);
+        this.buffManager.onTick(dt);
     }
 
     // ——— 查询 ———
@@ -360,103 +289,43 @@ export class PlayerEvents {
         this.clear();
     }
     /** 
-     * 玩家连接事件回调。
-     * @param {(player: Player) => void} callback 
-     */
-    setOnJoin(callback) { this.OnJoin = callback; }
-    /** 
-     * 玩家激活事件回调。
-     * @param {(player: Player) => void} callback 
-     */
-    setOnActivate(callback) { this.OnActivate = callback; }
-    /** 
-     * 玩家断开连接事件回调。
-     * @param {(player: Player) => void} callback 
-     */
-    setOnDisconnect(callback) { this.OnDisconnect = callback; }
-    /** 
      * 玩家准备状态变化事件回调。
      * @param {(ready: boolean) => void} callback 
      */
     setOnReadyChanged(callback) { this.OnReadyChanged = callback; }
     /** 
-     * 玩家状态变化事件回调。
-     * @param {(oldState: number, newState: number) => void} callback 
-     */
-    setOnStateChanged(callback) { this.OnStateChanged = callback; }
-    /** 
-     * 玩家受到伤害后事件回调。
+     * 玩家受到伤害前事件回调。
      * @param {(damage: number, attacker?: any, inflictor?: any) => void} callback 
      */
-    setOnAfterDamageTaken(callback) { this.OnAfterDamageTaken = callback; }
-    /** 
-     * 玩家治疗事件回调。
-     * @param {(amount: number) => void} callback 
-     */
-    setOnHeal(callback) { this.OnHeal = callback; }
-    /** 
-     * 玩家死亡事件回调。
-     * @param {(player: Player, killer?: any) => void} callback 
-     */
-    setOnDeath(callback) { this.OnDeath = callback; }
+    setOnBeforeDamageTaken(callback) { this.OnBeforeDamageTaken = callback; }
     /** 
      * 玩家重生事件回调。
      * @param {(player: Player) => void} callback 
      */
     setOnRespawned(callback) { this.OnRespawned = callback; }
     /** 
-     * 玩家金钱变化事件回调。
-     * @param {(old: number, current: number, delta: number, reason?: string) => void} callback 
+     * 请求获得Buff事件回调。
+     * @param {(typeId: string, params: Record<string, any>) => number} callback 
      */
-    setOnMoneyChanged(callback) { this.OnMoneyChanged = callback; }
+    setOnBuffAddedRequest(callback) { this.OnBuffAddedRequest = callback; }
     /** 
-     * 玩家经验变化事件回调。
-     * @param {(exp: number, delta: number, reason?: string) => void} callback 
+     * 请求失去Buff事件回调。
+     * @param {(buffId: number) => boolean} callback 
      */
-    setOnExpChanged(callback) { this.OnExpChanged = callback; }
+    setOnBuffRemovedRequest(callback) { this.OnBuffRemovedRequest = callback; }
     /** 
-     * 玩家升级事件回调。
-     * @param {(oldLevel: number, newLevel: number) => void} callback 
+     * 请求刷新Buff事件回调。
+     * @param {(buffId: number, params: Record<string, any>) => boolean} callback 
      */
-    setOnLevelUp(callback) { this.OnLevelUp = callback; }
-    /** 
-     * 玩家获得Buff事件回调。
-     * @param {(buff: any) => void} callback 
-     */
-    setOnBuffAdded(callback) { this.OnBuffAdded = callback; }
-    /** 
-     * 玩家失去Buff事件回调。
-     * @param {(buff: any) => void} callback 
-     */
-    setOnBuffRemoved(callback) { this.OnBuffRemoved = callback; }
-    /** 
-     * 玩家刷新Buff事件回调。
-     * @param {(buff: any) => void} callback 
-     */
-    setOnBuffRefreshed(callback) { this.OnBuffRefreshed = callback; }
-    /** 
-     * 玩家每个Tick事件回调。
-     * @param {(dt: number) => void} callback 
-     */
-    setOnTick(callback) { this.OnTick = callback; }
+    setOnBuffRefreshedRequest(callback) { this.OnBuffRefreshedRequest = callback; }
 
     /** 清除所有回调 */
     clear() {
-        this.OnJoin = null;
-        this.OnActivate = null;
-        this.OnDisconnect = null;
         this.OnReadyChanged = null;
-        this.OnStateChanged = null;
-        this.OnAfterDamageTaken = null;
-        this.OnHeal = null;
-        this.OnDeath = null;
+        this.OnBeforeDamageTaken = null;
         this.OnRespawned = null;
-        this.OnMoneyChanged = null;
-        this.OnExpChanged = null;
-        this.OnLevelUp = null;
-        this.OnBuffAdded = null;
-        this.OnBuffRemoved = null;
-        this.OnBuffRefreshed = null;
-        this.OnTick = null;
+        this.OnBuffAddedRequest = null;
+        this.OnBuffRemovedRequest = null;
+        this.OnBuffRefreshedRequest = null;
     }
 }

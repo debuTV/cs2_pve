@@ -36,7 +36,6 @@ export class PlayerLifecycle {
     connect(controller) {
         this.player.entityBridge.bindController(controller);
         this.player.applyStateTransition(PlayerState.CONNECTED);
-        this.player.events.OnJoin?.(this.player);
     }
 
     /**
@@ -57,7 +56,6 @@ export class PlayerLifecycle {
         // 给予初始装备
         this._giveStartingEquipment();
 
-        this.player.events.OnActivate?.(this.player);
         Instance.Msg(`玩家 ${this.player.entityBridge.getPlayerName()} 已激活`);
     }
 
@@ -128,10 +126,8 @@ export class PlayerLifecycle {
      */
     disconnect() {
         this.player.buffManager.clearAll();
-        this.player.buffManager.unbindController();
         this.player.entityBridge.disconnect();
         this.player.applyStateTransition(PlayerState.DISCONNECTED);
-        this.player.events.OnDisconnect?.(this.player);
     }
 
     /**

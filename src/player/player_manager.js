@@ -18,23 +18,6 @@ import { PlayerState } from "./player_const";
  * @property {number} [armor] - 护甲值（仅 type="respawn" 时适用）
  */
 /**
- * @typedef {object} TP_playerBuffApplyContext
- * @property {Player|null} [player] - Buff 的目标玩家
- * @property {any|null} [monster] - Buff 的来源怪物
- */
-/**
- * @typedef {object} TP_playerBuffEvent
- * @property {"request"|"added"|"removed"|"refreshed"|"damageTaken"|"heal"} type - Buff 运行时事件类型
- * @property {string} [buffTypeId] - 请求的 Buff 类型
- * @property {Record<string, any>} [params] - 请求参数
- * @property {Record<string, any>|null} [source] - 事件来源
- * @property {TP_playerBuffApplyContext|null} [context] - Buff 上下文
- * @property {any} [buff] - Buff 实例
- * @property {number} [amount] - 治疗或受伤数值
- * @property {any} [attacker] - 攻击者
- * @property {any} [inflictor] - 伤害来源实体
- */
-/**
  * 负责所有在线玩家实例的集合管理，以及引擎事件到脚本层的桥接。
  * 它是外部系统与玩家系统交互的唯一入口。
  *
@@ -87,8 +70,6 @@ export class PlayerManager {
         /** 每个 slot 的hud文本缓存 */
         this._statusTextCache = new Map();
         this._tempDisableLogKeys = new Set();
-        /** @type {any|null} */
-        this._buffController = null;
         this.events = new PlayerManagerEvents();
         /** @type {Record<string, (player: Player, payload: TP_playerRewardPayload) => void>} */
         this._rewardHandlers = {
@@ -190,7 +171,6 @@ export class PlayerManager {
             existingPlayer.disconnect();
             this.players.delete(slot);
         }
-        player.buffManager.bindController(this._buffController);
         this.players.set(slot, player);
         if (!existingPlayer) {
             this.totalPlayers++;
@@ -340,7 +320,7 @@ export class PlayerManager {
      * @param {Player} player 玩家实例
      */
     _bindPlayerEvents(player) {
-        player.setOnReadyChanged((ready) => {
+        player.events.setOnReadyChanged((ready) => {
             if (ready) this.readyCount++;
             else this.readyCount--;
 
@@ -356,16 +336,6 @@ export class PlayerManager {
             if (ready && this.areAllPlayersReady()) {
                 this.events.OnAllPlayersReady?.();
             }
-        });
-
-        player.setOnMoneyChanged((old, current, delta, reason) => {
-            if (delta > 0) this._adapter.sendMessage(player.slot, `获得 $${delta} ${reason ?? ""}`);
-            this.events.OnPlayerMoneyChange?.(player, old, current);
-        });
-
-        player.setOnLevelUp((oldLevel, newLevel) => {
-            this._adapter.sendMessage(player.slot, `恭喜升级到 ${newLevel} 级！`);
-            this.events.OnPlayerLevelUp?.(player, oldLevel, newLevel);
         });
     }
 
@@ -388,21 +358,16 @@ export class PlayerManager {
      * 把请求路由到对应 Player，并补齐当前目标玩家上下文。
      * @param {number|null} playerSlot null = 全体玩家
      * @param {string} typeId Buff 类型 ID
-     * @param {Record<string, any>} [params] Buff 参数
-     * @param {Record<string, any>|null} [source] Buff 来源
-     * @param {TP_playerBuffApplyContext|null} [context] Buff 上下文
+     * @param {Record<string, any>} params Buff 参数
      * @returns {any}
      */
-    applyBuff(playerSlot, typeId, params, source, context = null) {
+    applyBuff(playerSlot, typeId, params) {
         if (!typeId) return null;
 
         /** @type {any} */
         let appliedBuff = null;
         this._forEachTargetPlayer(playerSlot, (player) => {
-            const buff = player.addBuff(typeId, params, source ?? null, {
-                player: context?.player ?? player,
-                monster: context?.monster ?? null,
-            });
+            const buff = player.addBuff(typeId, params);
             if (appliedBuff == null) {
                 appliedBuff = buff;
             }
@@ -564,22 +529,6 @@ export class PlayerManager {
             `击杀: ${s.kills} | 分数: ${s.score}`;
         message.split('\n').forEach(line => this._adapter.sendMessage(playerSlot, line));
     }
-
-    /**
-     * 计算指定玩家对实体的最终伤害。
-     *
-     * 外部只需传入 slot，即可拿到当前玩家在基础攻击、等级倍率、暴击等结算后的伤害值。
-     * 若玩家不存在或已不在可战斗状态，返回 0。
-     *
-     * @param {number} playerSlot 玩家 slot
-     * @param {import("./player_const").PlayerDamageOptions} [options] 额外伤害修正参数
-     * @returns {number}
-     */
-    calculatePlayerDamageToEntity(playerSlot, options) {
-        const player = this.players.get(playerSlot);
-        if (!player || !player.isAlive) return 0;
-        return player.calculateDamageToEntity(options);
-    }
     
     /**
      * 获取管理器当前状态快照。
@@ -614,8 +563,6 @@ export class PlayerManagerEvents {
         this.OnPlayerReady = null;
         this.OnPlayerDeath = null;
         this.OnPlayerRespawn = null;
-        this.OnPlayerMoneyChange = null;
-        this.OnPlayerLevelUp = null;
         this.OnAllPlayersReady = null;
         this.OnPlayerBuffAdd=null;
         this.OnPlayerBuffDelete=null;
@@ -630,10 +577,6 @@ export class PlayerManagerEvents {
     setOnPlayerDeath(callback) { this.OnPlayerDeath = callback; }
     /** 设置玩家重生回调。 @param {(player: Player) => void} callback */
     setOnPlayerRespawn(callback) { this.OnPlayerRespawn = callback; }
-    /** 设置玩家金钱变化回调。 @param {(player: Player, old: number, current: number) => void} callback */
-    setOnPlayerMoneyChange(callback) { this.OnPlayerMoneyChange = callback; }
-    /** 设置玩家升级回调。 @param {(player: Player, oldLevel: number, newLevel: number) => void} callback */
-    setOnPlayerLevelUp(callback) { this.OnPlayerLevelUp = callback; }
     /** 设置全员准备就绪回调。 @param {() => void} callback */
     setOnAllPlayersReady(callback) { this.OnAllPlayersReady = callback; }
     /** 设置玩家 Buff 添加请求回调。 @param {(player: any, params: any) => number | null} callback*/

@@ -10,7 +10,6 @@ import {
     getCritMultiplierForLevel,
     getHealPolicyForLevel,
     scaleOutgoingDamage,
-    rollDamageForLevel,
     LevelUpHealPolicy,
 } from "../../player_const";
 
@@ -198,16 +197,6 @@ export class PlayerStats {
     getAttackDamage(baseDamage) {
         const levelScaled = scaleOutgoingDamage(baseDamage, this.level);
         return Math.max(0, Math.round(levelScaled * this.getAttackRatio()));
-    }
-
-    rollDamageAgainstEntity(options) {
-        const result = rollDamageForLevel(this.level, options);
-        const ratio = this.getAttackRatio();
-        return {
-            ...result,
-            damage: Math.max(0, Math.round(result.damage * ratio)),
-            baseDamage: Math.max(0, Math.round(result.baseDamage * ratio)),
-        };
     }
 
     getSummary() {

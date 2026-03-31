@@ -47,19 +47,18 @@ export class PlayerHealthCombat {
         this.player.buffManager.onBeforeDamageTaken(ctx);
         damage = ctx.damage;
 
-        if (damage <= 0) {
-            this.player.buffManager.onAfterDamageTaken({ damage: 0, attacker });
-            this.player.events.OnAfterDamageTaken?.(0, attacker);
-            return false;
-        }
+        if (damage <= 0) return false;
+        // 优先扣护甲
+        const armor = this.player.stats.armor;
+        const damageToArmor = Math.min(armor, damage);
+        const damageToHealth = damage - damageToArmor;
+        // 扣护甲
+        this.player.stats.setArmor(armor - damageToArmor);
+        this.player.entityBridge.syncArmor(this.player.stats.armor);
 
         // 扣血后同步
-        this.player.stats.setHealth(this.player.stats.health - damage);
+        this.player.stats.setHealth(this.player.stats.health - damageToHealth);
         this.player.entityBridge.syncHealth(this.player.stats.health);
-
-        this.player.buffManager.onAfterDamageTaken({ damage, attacker });
-
-        this.player.events.OnAfterDamageTaken?.(damage, attacker);
 
         Instance.Msg(`玩家 ${this.player.entityBridge.getPlayerName()} 受到 ${damage} 伤害 (生命: ${this.player.stats.health}, 护甲: ${this.player.stats.armor})`);
 
@@ -82,14 +81,6 @@ export class PlayerHealthCombat {
         if (this.player.state === PlayerState.DEAD) return true;
 
         this._syncFromEngine();
-
-        this.player.buffManager.onAfterDamageTaken({
-            damage,
-            attacker,
-            inflictor,
-        });
-
-        this.player.events.OnAfterDamageTaken?.(damage, attacker, inflictor);
 
         Instance.Msg(`玩家 ${this.player.entityBridge.getPlayerName()} 受到 ${damage} 伤害 (生命: ${this.player.stats.health}, 护甲: ${this.player.stats.armor})`);
 
@@ -117,7 +108,6 @@ export class PlayerHealthCombat {
         stats.setHealth(newHealth);
         this.player.entityBridge.syncHealth(stats.health);
 
-        this.player.events.OnHeal?.(actualHeal);
         return true;
     }
 
@@ -150,12 +140,10 @@ export class PlayerHealthCombat {
         this.player.applyStateTransition(PlayerState.DEAD);
 
         // 清理临时战斗 buff
-        this.player.buffManager.clearCombatTemporary();
+        this.player.buffManager.onDie();
 
         // 切换到观察者
         this.player.entityBridge.joinTeam(1);
-
-        this.player.events.OnDeath?.(this.player, killer);
 
         Instance.Msg(`玩家 ${this.player.entityBridge.getPlayerName()} 死亡`);
     }

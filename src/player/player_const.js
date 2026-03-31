@@ -65,55 +65,54 @@ export const PlayerState = {
  * 单个等级的配置。
  *
  * @typedef {object} LevelConfig
- * @property {number} level
- * @property {number} expRequired
- * @property {number} maxHealthMultiplier
- * @property {number} attackMultiplier
- * @property {string} [healOnLevelUp]
+ * @property {number} level - 等级
+ * @property {number} expRequired - 升级所需经验
+ * @property {number} maxHealthMultiplier - 生命值倍率
+ * @property {number} attackMultiplier - 攻击力倍率
+ * @property {string} [healOnLevelUp] - 升级回血策略，取值见 {@link LevelUpHealPolicy}
  */
 
 /**
  * 公式参数配置。
  *
  * @typedef {object} FormulaParams
- * @property {number} baseExp
- * @property {number} expPerLevel
- * @property {number} healthGrowth
- * @property {number} attackGrowth
- * @property {number} critChanceGrowth
- * @property {number} critMultiplierGrowth
+ * @property {number} baseExp - 基础经验需求
+ * @property {number} expPerLevel - 每级额外经验需求
+ * @property {number} healthGrowth - 生命值成长率
+ * @property {number} attackGrowth - 攻击力成长率
+ * @property {number} critChanceGrowth - 暴击率成长率
+ * @property {number} critMultiplierGrowth - 暴击伤害倍率成长率
  */
 
 /**
- * 对实体伤害计算参数。
- *
- * @typedef {object} PlayerDamageOptions
- * @property {number} [flatBonus]
- * @property {number} [multiplier]
- * @property {number} [critChanceBonus]
- * @property {number} [critMultiplierBonus]
- * @property {boolean} [allowCrit]
+ * 最大等级
  */
-
-/**
- * 单次伤害结算结果。
- *
- * @typedef {object} PlayerDamageRoll
- * @property {number} damage
- * @property {number} baseDamage
- * @property {number} critChance
- * @property {number} critMultiplier
- * @property {boolean} isCritical
- */
-
 export const MAX_LEVEL = 5;
+/**
+ * 基础属性数值（等级 1 的数值，后续等级通过倍率成长）
+ */
 export const BASE_MAX_HEALTH = 100;
+/**
+ * 基础攻击力（等级 1 的数值，后续等级通过倍率成长）
+ */
 export const BASE_ATTACK = 10;
+/**
+ * 基础暴击率（等级 1 的数值，后续等级通过成长率提升）
+ */
 export const BASE_CRIT_CHANCE = 0.1;
+/**
+ * 基础暴击伤害倍率（等级 1 的数值，后续等级通过成长率提升）
+ */
 export const BASE_CRIT_MULTIPLIER = 1.5;
+/**
+ * 默认升级回血策略
+ */
 export const DEFAULT_LEVEL_UP_HEAL_POLICY = LevelUpHealPolicy.FULL;
 
-/** @type {FormulaParams} */
+/** 
+ * 等级成长公式参数配置。
+ * @type {FormulaParams}
+ */
 export const FORMULA_PARAMS = {
     baseExp: 100,
     expPerLevel: 50,
@@ -229,33 +228,4 @@ export function getHealPolicyForLevel(level) {
 export function scaleOutgoingDamage(baseDamage, level) {
     const config = getLevelConfig(Math.max(1, level));
     return Math.round(baseDamage * config.attackMultiplier);
-}
-
-/**
- * @param {number} level
- * @param {PlayerDamageOptions} [options]
- * @returns {PlayerDamageRoll}
- */
-export function rollDamageForLevel(level, options) {
-    const baseAttack = getAttackForLevel(level);
-    const flatBonus = options?.flatBonus ?? 0;
-    const multiplier = options?.multiplier ?? 1;
-    const allowCrit = options?.allowCrit ?? true;
-    const critChance = Math.max(0, Math.min(getCritChanceForLevel(level) + (options?.critChanceBonus ?? 0), 1));
-    const critMultiplier = Math.max(1, getCritMultiplierForLevel(level) + (options?.critMultiplierBonus ?? 0));
-
-    let damage = Math.max(0, (baseAttack + flatBonus) * multiplier);
-    let isCritical = false;
-    if (allowCrit && Math.random() < critChance) {
-        damage *= critMultiplier;
-        isCritical = true;
-    }
-
-    return {
-        damage: Math.max(0, Math.round(damage)),
-        baseDamage: baseAttack,
-        critChance,
-        critMultiplier,
-        isCritical,
-    };
 }
