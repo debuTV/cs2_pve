@@ -3,6 +3,7 @@
  */
 import { Instance } from "cs_script/point_script";
 import { PlayerState } from "../../player_const";
+import { PlayerBuffEvents } from "./buff_manager";
 
 /**
  * 玩家战斗组件 — 受伤、治疗与死亡判定。
@@ -44,7 +45,7 @@ export class PlayerHealthCombat {
         // buff 修饰器链
         const ctx = { damage, attacker };
         // 触发前置事件，允许 buff 修改伤害,例如减伤、增伤、护甲一类的效果
-        this.player.buffManager.onBeforeDamageTaken(ctx);
+        this.player.buffManager.emitEvent(PlayerBuffEvents.BeforeTakeDamage, ctx);
         damage = ctx.damage;
 
         if (damage <= 0) return false;
@@ -140,7 +141,7 @@ export class PlayerHealthCombat {
         this.player.applyStateTransition(PlayerState.DEAD);
 
         // 清理临时战斗 buff
-        this.player.buffManager.onDie();
+        this.player.buffManager.emitEvent(PlayerBuffEvents.Die, { killer });
 
         // 切换到观察者
         this.player.entityBridge.joinTeam(1);
