@@ -2,8 +2,6 @@
  * @module 波次系统/波次配置
  */
 
-import { monster } from "../monster/monster_const";
-
 /**
  * 波次状态枚举。
  *
@@ -32,17 +30,28 @@ export const WaveState = {
 export const wavesConfig=[
         { 
             name: "训练波", 
-            totalMonsters: 1000, 
+            totalMonsters: 4, 
             reward: 500, 
             spawnInterval: 0.1, 
             preparationTime: 0, //波次开始到第一个怪物出现时间，这段时间可以用来发消息
-            aliveMonster:150, //同时存在的怪物数量
+            aliveMonster:2, //同时存在的怪物数量
             monster_spawn_points_name:["monster_spawnpoint"],//这一波生成点
             monster_breakablemins:{x:-30,y:-30,z:0},//最大怪物的breakable的mins
             monster_breakablemaxs:{x:30,y:30,z:75},//最大怪物的breakable的maxs
             broadcastmessage:[{message:"",delay:1}],
-            monsterTypes:[
-                monster["Zombie"]
-            ]
+            // monster 系统已独立拆出，主工程仅保留波次元数据。
+            monsterTypes:[]
+        },{ 
+            name: "训练波", 
+            totalMonsters: 4, 
+            reward: 500, 
+            spawnInterval: 0.1, 
+            preparationTime: 0, //波次开始到第一个怪物出现时间，这段时间可以用来发消息
+            aliveMonster:2, //同时存在的怪物数量
+            monster_spawn_points_name:["monster_spawnpoint"],//这一波生成点
+            monster_breakablemins:{x:-30,y:-30,z:0},//最大怪物的breakable的mins
+            monster_breakablemaxs:{x:30,y:30,z:75},//最大怪物的breakable的maxs
+            broadcastmessage:[{message:"",delay:1}],
+            monsterTypes:[]
         },
     ];

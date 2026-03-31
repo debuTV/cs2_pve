@@ -1,5 +1,4 @@
 import { SkillFactory } from "../skill_factory";
-import { TEMP_DISABLE } from "../../../runtime_flags";
 
 class SkillRequestQueue {
     constructor() {
@@ -33,11 +32,6 @@ export class MonsterSkillsManager {
     }
 
     initSkills(skillPool) {
-        if (TEMP_DISABLE.monsterSkills) {
-            this._queue.clear();
-            this.monster.skills.length = 0;
-            return;
-        }
         if (!skillPool) return;
 
         for (const cfg of skillPool) {
@@ -49,14 +43,11 @@ export class MonsterSkillsManager {
     }
 
     addSkill(skill) {
-        if (TEMP_DISABLE.monsterSkills) return;
         skill.id = this.monster.skills.length;
         this.monster.skills.push(skill);
     }
 
     emitEvent(event) {
-        if (TEMP_DISABLE.monsterSkills) return;
-
         for (const skill of this.monster.skills) {
             if (!skill.canTrigger(event)) continue;
             skill.request();
@@ -64,8 +55,6 @@ export class MonsterSkillsManager {
     }
 
     tickRunningSkills() {
-        if (TEMP_DISABLE.monsterSkills) return;
-
         for (const skill of this.monster.skills) {
             if (!skill.running) continue;
             skill.tick();
@@ -73,10 +62,6 @@ export class MonsterSkillsManager {
     }
 
     requestSkill(skill) {
-        if (TEMP_DISABLE.monsterSkills) {
-            this._queue.clear();
-            return;
-        }
         if (this.monster.movementStateSnapshot.mode === "ladder") {
             this._queue.clear();
             return;
@@ -85,10 +70,6 @@ export class MonsterSkillsManager {
     }
 
     hasRequestedSkill() {
-        if (TEMP_DISABLE.monsterSkills) {
-            this._queue.clear();
-            return false;
-        }
         if (this.monster.movementStateSnapshot.mode === "ladder") {
             this._queue.clear();
             return false;
@@ -97,10 +78,6 @@ export class MonsterSkillsManager {
     }
 
     triggerRequestedSkill() {
-        if (TEMP_DISABLE.monsterSkills) {
-            this._queue.clear();
-            return;
-        }
         if (this.monster.movementStateSnapshot.mode === "ladder") {
             this._queue.clear();
             return;

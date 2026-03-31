@@ -98,8 +98,8 @@ export class Monster {
         return this.healthCombat.takeDamage(amount, attacker);
     }
 
-    addBuff(typeId, params, source) {
-        return this.buffManager.addBuff(typeId, params, source);
+    addBuff(typeId, params, source, context) {
+        return this.buffManager.addBuff(typeId, params, source, context);
     }
 
     removeBuff(typeIdOrFilter) {

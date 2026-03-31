@@ -128,6 +128,7 @@ export class PlayerLifecycle {
      */
     disconnect() {
         this.player.buffManager.clearAll();
+        this.player.buffManager.unbindController();
         this.player.entityBridge.disconnect();
         this.player.applyStateTransition(PlayerState.DISCONNECTED);
         this.player.events.OnDisconnect?.(this.player);

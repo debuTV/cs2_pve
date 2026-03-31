@@ -229,6 +229,7 @@ export class SpawnService {
     createMonster(typeConfig, position) {
         const monsterId = this.manager.nextMonsterId++;
         const monster = new Monster(monsterId, position, typeConfig);
+        monster.buffManager.bindController(this.manager._buffController);
         this.manager.bindMonsterCallbacks(monster);
         this.manager.monsters.set(monsterId, monster);
         this.manager.lifecycle.recordSpawn();

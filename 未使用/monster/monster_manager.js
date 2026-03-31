@@ -69,6 +69,7 @@ export class MonsterManager {
 
         /** 管理器级事件集合。向上层暴露生成/死亡/全灭/攻击/技能事件。 */
         this.events = new MonsterManagerEvents();
+        this._buffController = null;
         /** 刷怪服务。负责波次调度和单体生成。 */
         this.spawnService = new SpawnService(this);
         /** 生命周期服务。处理死亡/清理/统计。 */
@@ -278,12 +279,22 @@ export class MonsterManager {
         return this.monsters.get(id);
     }
 
-    applyBuff(monsterOrId, typeId, params, source) {
+    setBuffController(controller) {
+        this._buffController = controller;
+        for (const [, monster] of this.monsters) {
+            monster.buffManager.bindController(controller);
+        }
+    }
+
+    applyBuff(monsterOrId, typeId, params, source, context = null) {
         const monster = typeof monsterOrId === "number"
             ? this.getMonsterById(monsterOrId)
             : monsterOrId;
-        if (!monster) return null;
-        return monster.addBuff(typeId, params, source);
+        if (!monster || !typeId) return null;
+        return monster.addBuff(typeId, params, source, {
+            player: context?.player ?? null,
+            monster: context?.monster ?? monster,
+        });
     }
 
     /**

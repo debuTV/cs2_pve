@@ -4,18 +4,35 @@
 import { CSPlayerController, CSPlayerPawn, Instance } from "cs_script/point_script";
 import { Player } from "./player/player";
 import { PlayerState } from "./player_const";
-import { TEMP_DISABLE } from "../runtime_flags";
 
 /**
  * @typedef {object} TP_playerRewardPayload - 玩家奖励分发载荷
  * @property {"buff"|"money"|"exp"|"heal"|"armor"|"damage"|"ready"|"respawn"|"resetGameStatus"} type - 奖励类型
  * @property {string} [buffTypeId] - Buff 类型 ID（仅 type="buff" 时适用）
  * @property {Record<string, any>} [params] - Buff 参数（仅 type="buff" 时适用）
+ * @property {Record<string, any>|null} [source] - Buff 来源（仅 type="buff" 时适用）
  * @property {number} [amount] - 数值（仅 type="money"、"exp"、"heal"、"armor"、"damage" 时适用）
  * @property {string} [reason] - 原因描述（仅 type="money"、"exp" 时适用）
  * @property {boolean} [isReady] - 准备状态（仅 type="ready" 时适用）
  * @property {number} [health] - 生命值（仅 type="respawn" 时适用）
  * @property {number} [armor] - 护甲值（仅 type="respawn" 时适用）
+ */
+/**
+ * @typedef {object} TP_playerBuffApplyContext
+ * @property {Player|null} [player] - Buff 的目标玩家
+ * @property {any|null} [monster] - Buff 的来源怪物
+ */
+/**
+ * @typedef {object} TP_playerBuffEvent
+ * @property {"request"|"added"|"removed"|"refreshed"|"damageTaken"|"heal"} type - Buff 运行时事件类型
+ * @property {string} [buffTypeId] - 请求的 Buff 类型
+ * @property {Record<string, any>} [params] - 请求参数
+ * @property {Record<string, any>|null} [source] - 事件来源
+ * @property {TP_playerBuffApplyContext|null} [context] - Buff 上下文
+ * @property {any} [buff] - Buff 实例
+ * @property {number} [amount] - 治疗或受伤数值
+ * @property {any} [attacker] - 攻击者
+ * @property {any} [inflictor] - 伤害来源实体
  */
 /**
  * 负责所有在线玩家实例的集合管理，以及引擎事件到脚本层的桥接。
@@ -70,15 +87,26 @@ export class PlayerManager {
         /** 每个 slot 的hud文本缓存 */
         this._statusTextCache = new Map();
         this._tempDisableLogKeys = new Set();
+        /** @type {any|null} */
+        this._buffController = null;
         this.events = new PlayerManagerEvents();
         /** @type {Record<string, (player: Player, payload: TP_playerRewardPayload) => void>} */
         this._rewardHandlers = {
             buff: (player, payload) => {
-                if (TEMP_DISABLE.playerBuffs) {
-                    this._logTempDisableOnce("reward:buff", "[TempDisable] Player reward buffs are disabled and will be ignored.");
-                    return;
-                }
-                this.applyBuff(player.slot, payload.buffTypeId ?? "", payload.params, payload.source);
+                if (!payload.buffTypeId) return;
+
+                // 玩家模块只负责提出“要给谁什么 Buff”的请求，
+                // 实际是否发放、用什么跨模块上下文，统一交给 main.js 决定。
+                this.events.OnPlayerBuffEvent?.(player, {
+                    type: "request",
+                    buffTypeId: payload.buffTypeId,
+                    params: payload.params,
+                    source: payload.source ?? null,
+                    context: {
+                        player,
+                        monster: null,
+                    },
+                });
             },
             money: (player, payload) => {
                 player.addMoney(payload.amount ?? 0, payload.reason);
@@ -162,6 +190,7 @@ export class PlayerManager {
             existingPlayer.disconnect();
             this.players.delete(slot);
         }
+        player.buffManager.bindController(this._buffController);
         this.players.set(slot, player);
         if (!existingPlayer) {
             this.totalPlayers++;
@@ -338,9 +367,59 @@ export class PlayerManager {
             this._adapter.sendMessage(player.slot, `恭喜升级到 ${newLevel} 级！`);
             this.events.OnPlayerLevelUp?.(player, oldLevel, newLevel);
         });
+
+        player.setOnAfterDamageTaken((amount, attacker, inflictor) => {
+            this.events.OnPlayerBuffEvent?.(player, {
+                type: "damageTaken",
+                amount,
+                attacker,
+                inflictor,
+            });
+        });
+
+        player.setOnHeal((amount) => {
+            this.events.OnPlayerBuffEvent?.(player, {
+                type: "heal",
+                amount,
+            });
+        });
+
+        player.setOnBuffAdded((buff) => {
+            this.events.OnPlayerBuffEvent?.(player, {
+                type: "added",
+                buff,
+            });
+        });
+
+        player.setOnBuffRemoved((buff) => {
+            this.events.OnPlayerBuffEvent?.(player, {
+                type: "removed",
+                buff,
+            });
+        });
+
+        player.setOnBuffRefreshed((buff) => {
+            this.events.OnPlayerBuffEvent?.(player, {
+                type: "refreshed",
+                buff,
+            });
+        });
     }
 
     // ——— 兼容 API ———
+
+    /**
+     * 绑定全局 Buff 控制器。
+     * main.js 会在这里把玩家 host 注册给全局 buff 编排器，
+     * 之后 player 模块只保留本地宿主能力，不再自行决定跨模块的 buff 创建时机。
+    * @param {any|null} controller
+     */
+    setBuffController(controller) {
+        this._buffController = controller;
+        for (const [, player] of this.players) {
+            player.buffManager.bindController(controller);
+        }
+    }
 
     /**
      * 计算玩家对实体的最终伤害，提供给外部系统调用。
@@ -353,21 +432,34 @@ export class PlayerManager {
         return player.getAttackDamage(amount);
     }
 
-    _logTempDisableOnce(key, message) {
-        if (this._tempDisableLogKeys.has(key)) return;
-        this._tempDisableLogKeys.add(key);
-        this._adapter.log(message);
+    /**
+     * 由 main.js 统一调度的玩家 Buff 应用入口。
+     * PlayerManager 不主动决定何时发 Buff；它只负责在 main 给出最终结论后，
+     * 把请求路由到对应 Player，并补齐当前目标玩家上下文。
+     * @param {number|null} playerSlot null = 全体玩家
+     * @param {string} typeId Buff 类型 ID
+     * @param {Record<string, any>} [params] Buff 参数
+     * @param {Record<string, any>|null} [source] Buff 来源
+     * @param {TP_playerBuffApplyContext|null} [context] Buff 上下文
+     * @returns {any}
+     */
+    applyBuff(playerSlot, typeId, params, source, context = null) {
+        if (!typeId) return null;
+
+        /** @type {any} */
+        let appliedBuff = null;
+        this._forEachTargetPlayer(playerSlot, (player) => {
+            const buff = player.addBuff(typeId, params, source ?? null, {
+                player: context?.player ?? player,
+                monster: context?.monster ?? null,
+            });
+            if (appliedBuff == null) {
+                appliedBuff = buff;
+            }
+        });
+        return appliedBuff;
     }
 
-    applyBuff(playerSlot, typeId, params, source) {
-        if (TEMP_DISABLE.playerBuffs) {
-            this._logTempDisableOnce("applyBuff", "[TempDisable] Player buffs are disabled; applyBuff() calls are ignored.");
-            return;
-        }
-        this._forEachTargetPlayer(playerSlot, (player) => {
-            player.addBuff(typeId, params, source);
-        });
-    }
     /**
      * 统一奖励/效果分发入口
      * @param {number|null} playerSlot  null = 全体玩家
@@ -574,6 +666,7 @@ export class PlayerManagerEvents {
         this.OnPlayerRespawn = null;
         this.OnPlayerMoneyChange = null;
         this.OnPlayerLevelUp = null;
+        this.OnPlayerBuffEvent = null;
         this.OnAllPlayersReady = null;
     }
     /** 设置玩家加入回调。 @param {(player: Player) => void} callback */
@@ -590,6 +683,8 @@ export class PlayerManagerEvents {
     setOnPlayerMoneyChange(callback) { this.OnPlayerMoneyChange = callback; }
     /** 设置玩家升级回调。 @param {(player: Player, oldLevel: number, newLevel: number) => void} callback */
     setOnPlayerLevelUp(callback) { this.OnPlayerLevelUp = callback; }
+    /** 设置玩家 Buff 相关事件回调。 @param {(player: Player, event: TP_playerBuffEvent) => void} callback */
+    setOnPlayerBuffEvent(callback) { this.OnPlayerBuffEvent = callback; }
     /** 设置全员准备就绪回调。 @param {() => void} callback */
     setOnAllPlayersReady(callback) { this.OnAllPlayersReady = callback; }
 }

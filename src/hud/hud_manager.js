@@ -216,10 +216,7 @@ export class HudManager {
         }
 
         if (session.entity?.IsValid()) {
-            Instance.EntFireAtTarget({
-                target: session.entity,
-                input: "Disable",
-            });
+            Instance.EntFireAtTarget({target: session.entity,input: session.use?"Enable":"Disable",});
         }
     }
 

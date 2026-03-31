@@ -2,8 +2,6 @@
  * @module 商店系统/商店常量
  */
 
-import { TEMP_DISABLE } from "../runtime_flags";
-
 export const ShopAction = {
     UP: "up",
     DOWN: "down",
@@ -11,15 +9,6 @@ export const ShopAction = {
     PAGE_NEXT: "page_next",
     CONFIRM: "confirm",
     BACK: "back",
-};
-
-export const SHOP_KEY_MAP = {
-    W: "up",
-    A: "page_prev",
-    S: "down",
-    D: "page_next",
-    Use: "confirm",
-    Walk: "back",
 };
 
 export const SHOP_ITEMS_PER_PAGE = 4;
@@ -49,7 +38,7 @@ export const ShopResult = {
  */
 
 /** @type {ShopItemConfig[]} */
-const BASE_SHOP_ITEMS = [
+export const BASE_SHOP_ITEMS = [
     { id: "heal_small",  displayName: "小型治疗包", cost: 200,  requiredLevel: 1, payload: { type: "heal",  amount: 30 } },
     { id: "heal_large",  displayName: "大型治疗包", cost: 500,  requiredLevel: 3, payload: { type: "heal",  amount: 80 } },
     { id: "armor_small", displayName: "轻型护甲",   cost: 300,  requiredLevel: 1, payload: { type: "armor", amount: 50 } },
@@ -57,13 +46,6 @@ const BASE_SHOP_ITEMS = [
     { id: "buff_attack", displayName: "强攻增益",   cost: 600,  requiredLevel: 2, payload: { type: "buff",  buffTypeId: "attack_up", params: { duration: 30, multiplier: 1.35 } } },
     { id: "weapon_ak47", displayName: "AK-47",      cost: 2700, requiredLevel: 4, payload: { type: "weapon", weaponName: "weapon_ak47" } },
 ];
-
-export const DEFAULT_SHOP_ITEMS = BASE_SHOP_ITEMS.filter((item) => {
-    if (TEMP_DISABLE.playerBuffs && item.payload?.type === "buff") {
-        return false;
-    }
-    return true;
-});
 
 /**
  * @typedef {object} ShopPlayerInfo

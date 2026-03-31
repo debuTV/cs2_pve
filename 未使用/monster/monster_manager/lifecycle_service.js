@@ -43,6 +43,7 @@ export class LifecycleService {
         this.manager.monsters.delete(monsterId);
         this.manager._removeMonsterFromCache(monsterId);
         this.manager.events.OnMonsterDeath?.(monsterInstance, killer, reward);
+        monsterInstance.buffManager.unbindController();
         if (this._shouldEmitAllMonstersDead()) {
             this.manager.events.OnAllMonstersDead?.(this.manager.totalKills, this.manager.totalReward);
         }

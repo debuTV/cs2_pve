@@ -3,7 +3,7 @@
  */
 import { CSPlayerController, Instance } from "cs_script/point_script";
 import { ShopSession } from "./shop_session";
-import { DEFAULT_SHOP_ITEMS, SHOP_KEY_MAP } from "./shop_const";
+import { BASE_SHOP_ITEMS, ShopAction } from "./shop_const";
 
 /**
  * 商店管理器。
@@ -25,7 +25,7 @@ export class ShopManager {
          * 商店商品列表。
          * @type {import("./shop_const").ShopItemConfig[]}
          */
-        this._items = DEFAULT_SHOP_ITEMS;
+        this._items = BASE_SHOP_ITEMS;
 
         /**
          *  玩家槽位 → 商店会话 映射表
@@ -153,8 +153,8 @@ export class ShopManager {
     handleRawKey(playerSlot, rawKey) {
         const session = this._sessions.get(playerSlot);
         if (!session || !session.isOpen) return null;
-
-        const action = SHOP_KEY_MAP[rawKey];
+        // @ts-ignore
+        const action = ShopAction[rawKey];
         if (!action) return null;
 
         return session.handleAction(action);

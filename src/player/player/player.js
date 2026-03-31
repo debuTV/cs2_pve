@@ -204,22 +204,25 @@ export class Player {
     /**
      * 添加指定类型的 Buff。
      * @param {string} typeId Buff 类型标识
-     * @param {object} [params] Buff 初始化参数
-     * @returns {import("./buffs/buff_template").BuffTemplate | null} 创建的 Buff 实例，创建失败返回 null
+     * @param {Record<string, any>} [params] Buff 初始化参数
+     * @param {Record<string, any>|null} [source] Buff 来源
+     * @param {import("./components/buff_manager").PlayerBuffContext|null} [context] Buff 结算上下文
+     * @returns {import("../../buff/buff_template").BuffTemplate | null} 创建的 Buff 实例，创建失败返回 null
      */
-    addBuff(typeId, params, source) {
-        return this.buffManager.addBuff(typeId, params, source);
+    addBuff(typeId, params, source, context) {
+        return this.buffManager.addBuff(typeId, params, source, context);
     }
 
     /**
      * 移除指定类型的 Buff。
-     * @param {string} typeId Buff 类型标识
+     * @param {string|Record<string, any>|null|undefined} typeIdOrFilter Buff 类型标识或过滤条件
      * @returns {boolean} 是否成功移除
      */
     removeBuff(typeIdOrFilter) {
         return this.buffManager.removeBuff(typeIdOrFilter);
     }
 
+    /** @param {string} typeId */
     hasBuff(typeId) {
         return this.buffManager.hasBuff(typeId);
     }
@@ -298,6 +301,26 @@ export class Player {
     /** @param {(oldState: number, newState: number) => void} callback */
     setOnStateChanged(callback) {
         this.events.setOnStateChanged(callback);
+    }
+    /** @param {(damage: number, attacker?: any, inflictor?: any) => void} callback */
+    setOnAfterDamageTaken(callback) {
+        this.events.setOnAfterDamageTaken(callback);
+    }
+    /** @param {(amount: number) => void} callback */
+    setOnHeal(callback) {
+        this.events.setOnHeal(callback);
+    }
+    /** @param {(buff: any) => void} callback */
+    setOnBuffAdded(callback) {
+        this.events.setOnBuffAdded(callback);
+    }
+    /** @param {(buff: any) => void} callback */
+    setOnBuffRemoved(callback) {
+        this.events.setOnBuffRemoved(callback);
+    }
+    /** @param {(buff: any) => void} callback */
+    setOnBuffRefreshed(callback) {
+        this.events.setOnBuffRefreshed(callback);
     }
 
     // ——— Tick ———
