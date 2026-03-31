@@ -37,19 +37,7 @@ export class WaveManager {
          * @type {import("../util/definition").Adapter} 
          */
         this._adapter = adapter;
-
-        // ——— 回调钩子 ———
-        /** 
-         * 波次开始回调，由 {@link startWave} 触发，参数为当前波次号和配置。
-         * @type {((waveNumber: number, waveConfig: import("../util/definition").waveConfig) => void) | null} 
-         */
-        this.onWaveStart = null;
-        /**
-         *  波次完成回调，由 {@link completeWave} 触发，参数为当前波次号和配置。
-         *  @type {((waveNumber: number) => void) | null} 
-         */
-        this.onWaveComplete = null;
-
+        this.events = new WaveManagerEvents();
         // ——— 预热阶段内部状态 ———
         /**
          * 预热阶段上下文。
@@ -124,7 +112,7 @@ export class WaveManager {
         this.waveState = WaveState.ACTIVE;
         this._resetPrepareState();
         this._adapter.log(`=== 第 ${this.currentWave} 波开始 ===`);
-        this.onWaveStart?.(this.currentWave, wave);
+        this.events.onWaveStart?.(this.currentWave, wave);
     }
 
     // ═══════════════════════════════════════════════
@@ -184,7 +172,7 @@ export class WaveManager {
         }
         this._adapter.broadcast(message);
 
-        this.onWaveComplete?.(this.currentWave);
+        this.events.onWaveComplete?.(this.currentWave);
         return true;
     }
 
@@ -281,18 +269,14 @@ export class WaveManager {
             this._activateCurrentWave(wave);
         }
     }
-    // ═══════════════════════════════════════════════
-    // 回调设置
-    // ═══════════════════════════════════════════════
-
-    /**
-     * 绑定波次开始回调，当波次从 PREPARING 进入 ACTIVE 时触发。
-     * @param {(waveNumber: number, waveConfig: import("../util/definition").waveConfig) => void} callback
-     */
+}
+export class WaveManagerEvents {
+    constructor() {
+        this.onWaveStart = null;
+        this.onWaveComplete = null;
+    }
+    /** 绑定波次开始回调，当波次从 PREPARING 进入 ACTIVE 时触发。 @param {(waveNumber: number, waveConfig: import("../util/definition").waveConfig) => void} callback */
     setOnWaveStart(callback) {this.onWaveStart = callback;}
-    /**
-     * 绑定波次完成回调，当 {@link completeWave} 被外部调用时触发。
-     * @param {(waveNumber: number) => void} callback
-     */
+    /** 绑定波次完成回调，当 {@link completeWave} 被外部调用时触发。 @param {(waveNumber: number) => void} callback */
     setOnWaveComplete(callback) {this.onWaveComplete = callback;}
 }

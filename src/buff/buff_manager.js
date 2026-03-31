@@ -1,4 +1,5 @@
-import { BuffTemplate } from "./buff_template";
+import { Player } from "../player/player/player";
+import { BuffFactory, BuffTemplate } from "./buff_template";
 /**
  * Buff 管理器。
  */
@@ -10,20 +11,25 @@ export class BuffManager {
          * @type {Map<number, BuffTemplate>}
          */
         this.buffMap = new Map();
+        this.id=0;
     }
-
     /**
-     * @param {BuffTemplate} buff
-     * @returns {BuffTemplate|null}
+     * @param {Player|Monster} target
+     * @param {any} params
+     * @returns {number|null} 返回 buff 的 id，如果创建失败则返回 null
      */
-    addbuff(buff)
+    addbuff(target,params)
     {
-        if(!(buff instanceof BuffTemplate))return null;
-        const currentBuff=this.buffMap.get(buff.id);
-        if(currentBuff!==undefined)currentBuff.stop();
-        buff.start();
-        this.buffMap.set(buff.id,buff);
-        return buff;
+        const buff=BuffFactory.create(target,this.id++,params);
+        if(buff)
+        {
+            const currentBuff=this.buffMap.get(buff.id);
+            if(currentBuff!==undefined)currentBuff.stop();
+            buff.start();
+            this.buffMap.set(buff.id,buff);
+            return buff.id;
+        }
+        return null;
     }
 
     /**

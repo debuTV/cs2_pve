@@ -1,6 +1,23 @@
 import { Instance } from "cs_script/point_script";
 import { Monster } from "../monster/monster/monster";
 import { Player } from "../player/player/player";
+export const BuffFactory = {
+    /**
+     * 根据 typeId 创建对应的技能实例。未识别的 id 返回 null。
+     * @param {Monster|Player} target 所属怪物实例
+     * @param {number} id 
+     * @param {any} params 技能配置参数
+     * @returns {BuffTemplate|null}
+     */
+    create(target,id, params) {
+        switch (params.id) {
+            case "corestats":
+                return null;
+            default:
+                return null;
+        } 
+    }
+};
 export class BuffTemplate{
     /**
      * @param {number}id

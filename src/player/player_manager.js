@@ -97,7 +97,7 @@ export class PlayerManager {
 
                 // 玩家模块只负责提出“要给谁什么 Buff”的请求，
                 // 实际是否发放、用什么跨模块上下文，统一交给 main.js 决定。
-                this.events.OnPlayerBuffEvent?.(player, {
+                this.events.OnPlayerBuffAdd?.(player, {
                     type: "request",
                     buffTypeId: payload.buffTypeId,
                     params: payload.params,
@@ -367,59 +367,9 @@ export class PlayerManager {
             this._adapter.sendMessage(player.slot, `恭喜升级到 ${newLevel} 级！`);
             this.events.OnPlayerLevelUp?.(player, oldLevel, newLevel);
         });
-
-        player.setOnAfterDamageTaken((amount, attacker, inflictor) => {
-            this.events.OnPlayerBuffEvent?.(player, {
-                type: "damageTaken",
-                amount,
-                attacker,
-                inflictor,
-            });
-        });
-
-        player.setOnHeal((amount) => {
-            this.events.OnPlayerBuffEvent?.(player, {
-                type: "heal",
-                amount,
-            });
-        });
-
-        player.setOnBuffAdded((buff) => {
-            this.events.OnPlayerBuffEvent?.(player, {
-                type: "added",
-                buff,
-            });
-        });
-
-        player.setOnBuffRemoved((buff) => {
-            this.events.OnPlayerBuffEvent?.(player, {
-                type: "removed",
-                buff,
-            });
-        });
-
-        player.setOnBuffRefreshed((buff) => {
-            this.events.OnPlayerBuffEvent?.(player, {
-                type: "refreshed",
-                buff,
-            });
-        });
     }
 
     // ——— 兼容 API ———
-
-    /**
-     * 绑定全局 Buff 控制器。
-     * main.js 会在这里把玩家 host 注册给全局 buff 编排器，
-     * 之后 player 模块只保留本地宿主能力，不再自行决定跨模块的 buff 创建时机。
-    * @param {any|null} controller
-     */
-    setBuffController(controller) {
-        this._buffController = controller;
-        for (const [, player] of this.players) {
-            player.buffManager.bindController(controller);
-        }
-    }
 
     /**
      * 计算玩家对实体的最终伤害，提供给外部系统调用。
@@ -666,8 +616,9 @@ export class PlayerManagerEvents {
         this.OnPlayerRespawn = null;
         this.OnPlayerMoneyChange = null;
         this.OnPlayerLevelUp = null;
-        this.OnPlayerBuffEvent = null;
         this.OnAllPlayersReady = null;
+        this.OnPlayerBuffAdd=null;
+        this.OnPlayerBuffDelete=null;
     }
     /** 设置玩家加入回调。 @param {(player: Player) => void} callback */
     setOnPlayerJoin(callback) { this.OnPlayerJoin = callback; }
@@ -683,8 +634,10 @@ export class PlayerManagerEvents {
     setOnPlayerMoneyChange(callback) { this.OnPlayerMoneyChange = callback; }
     /** 设置玩家升级回调。 @param {(player: Player, oldLevel: number, newLevel: number) => void} callback */
     setOnPlayerLevelUp(callback) { this.OnPlayerLevelUp = callback; }
-    /** 设置玩家 Buff 相关事件回调。 @param {(player: Player, event: TP_playerBuffEvent) => void} callback */
-    setOnPlayerBuffEvent(callback) { this.OnPlayerBuffEvent = callback; }
     /** 设置全员准备就绪回调。 @param {() => void} callback */
     setOnAllPlayersReady(callback) { this.OnAllPlayersReady = callback; }
+    /** 设置玩家 Buff 添加请求回调。 @param {(player: any, params: any) => number | null} callback*/
+    setOnPlayerBuffAdd(callback) { this.OnPlayerBuffAdd = callback; }
+    /** 设置玩家 Buff 删除请求回调。 @param {(player: any, buffid: any) => boolean} callback*/
+    setOnPlayerBuffDelete(callback) { this.OnPlayerBuffDelete = callback; }
 }

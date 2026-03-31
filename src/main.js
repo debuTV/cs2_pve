@@ -103,28 +103,12 @@ function grantPlayerBuff(playerSlot, buffTypeId, params, source) {
 
 // ——— 3.2 玩家 → 游戏 / Buff ———
 
-playerManager.events.setOnPlayerBuffEvent((player, event) => {
-    switch (event.type) {
-        case "request":
-            grantPlayerBuff(
-                player.slot,
-                event.buffTypeId ?? "",
-                event.params,
-                event.source
-            );
-            return;
-        case "added":
-        case "removed":
-        case "refreshed":
-        case "damageTaken":
-        case "heal":
-        default:
-            // Buff 运行时事件已经统一回到 main，后续若要接 HUD、日志或统计，
-            // 直接在这里扩展即可，不再反向修改 player 模块内部流程。
-            return;
-    }
+playerManager.events.setOnPlayerBuffAdd((player, params) => {
+    return buffManager.addbuff(player,params);
 });
-
+playerManager.events.setOnPlayerBuffDelete((player, buffid) => {
+    return buffManager.deletebuff(buffid);
+});
 playerManager.events.setOnPlayerJoin((player) => {
     void player;
     gameManager.onPlayerJoin();

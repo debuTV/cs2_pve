@@ -32,44 +32,7 @@ export class ShopManager {
          *  @type {Map<number, ShopSession>}
          */
         this._sessions = new Map();
-
-        // ——— 外部回调 ———
-
-        /**
-         * 获取玩家信息回调。
-         *
-         * 由外部注入，返回指定 slot 的玩家摘要信息。
-         * 返回 null 表示玩家不存在或不可读。
-         *
-         * @type {((slot: number) => import("./shop_const").ShopPlayerInfo | null) | null}
-         */
-        this._getPlayerInfo = null;
-
-        /**
-         * 发奖回调。
-         *
-         * 由外部注入，商店层购买校验通过后调用。
-         * 外部负责扣钱、发 Buff/武器/治疗等，并返回结果。
-         *
-         * @type {((slot: number, item: import("./shop_const").ShopItemConfig, ctx: import("./shop_const").ShopPurchaseContext) => import("./shop_const").ShopGrantResult) | null}
-         */
-        this._grantReward = null;
-
-        /**
-         * 打开商店回调
-         * @type {((slot: number, pawn: import("cs_script/point_script").CSPlayerPawn) => void) | null}
-         */
-        this._openshop = null;
-        /**
-         * 刷新文本回调
-         * @type {((slot: number, pawn: import("cs_script/point_script").CSPlayerPawn, text: string) => void) | null}
-         */
-        this._refreshtext=null;
-        /**
-         * 关闭商店回调
-         * @type {((slot: number) => void) | null}
-         */
-        this._closeshop = null;
+        this.events = new ShopManagerEvents();
         this.init();
     }
     init()
@@ -103,7 +66,7 @@ export class ShopManager {
      * @param {import("cs_script/point_script").CSPlayerPawn} pawn - 玩家 Pawn
      */
     openShop(playerSlot, pawn) {
-        if (!this._getPlayerInfo || !this._grantReward || !this._openshop || !this._closeshop||!this._refreshtext) {
+        if (!this.events.getPlayerInfo || !this.events.grantReward || !this.events.openshop || !this.events.closeshop || !this.events.refreshtext) {
             Instance.Msg(`[ShopManager] 回调未就绪，无法打开商店 (slot=${playerSlot})`);
             return;
         }
@@ -113,11 +76,11 @@ export class ShopManager {
             session = new ShopSession(
                 playerSlot,
                 this._items,
-                (slot) => this._getPlayerInfo?.(slot) ?? null,
-                (slot, item, ctx) => this._grantReward?.(slot, item, ctx) ?? { success: false, message: "回调未注入" },
-                (slot, currentPawn) => this._openshop?.(slot,currentPawn),
-                (slot, currentPawn, text) => this._refreshtext?.(slot, currentPawn, text),
-                (slot) => this._closeshop?.(slot),
+                (slot) => this.events.getPlayerInfo?.(slot) ?? null,
+                (slot, item, ctx) => this.events.grantReward?.(slot, item, ctx) ?? { success: false, message: "回调未注入" },
+                (slot, currentPawn) => this.events.openshop?.(slot,currentPawn),
+                (slot, currentPawn, text) => this.events.refreshtext?.(slot, currentPawn, text),
+                (slot) => this.events.closeshop?.(slot),
             );
             this._sessions.set(playerSlot, session);
         }
@@ -180,45 +143,24 @@ export class ShopManager {
             }
         }
     }
-
-    // ——— 回调设置 ———
-
-    /**
-     * 设置获取玩家信息回调。
-     * @param {(slot: number) => import("./shop_const").ShopPlayerInfo | null} callback
-     */
-    setGetPlayerInfo(callback) {
-        this._getPlayerInfo = callback;
+}
+export class ShopManagerEvents {
+    constructor()
+    {
+        this.getPlayerInfo = null;
+        this.grantReward = null;
+        this.openshop = null;
+        this.refreshtext=null;
+        this.closeshop = null;
     }
-
-    /**
-     * 设置发奖回调。
-     * @param {(slot: number, item: import("./shop_const").ShopItemConfig, ctx: import("./shop_const").ShopPurchaseContext) => import("./shop_const").ShopGrantResult} callback
-     */
-    setGrantReward(callback) {
-        this._grantReward = callback;
-    }
-
-    /**
-     * 设置打开 HUD 回调。
-     * @param {(slot: number, pawn: import("cs_script/point_script").CSPlayerPawn) => void} callback
-     */
-    setOpenShop(callback) {
-        this._openshop = callback;
-    }
-
-    /**
-     * 设置刷新 HUD 回调。
-     * @param {(slot: number, pawn: import("cs_script/point_script").CSPlayerPawn, text: string) => void} callback
-     */
-    setRefreshText(callback) {
-        this._refreshtext = callback;
-    }
-    /**
-     * 设置隐藏 HUD 回调。
-     * @param {(slot: number) => void} callback
-     */
-    setCloseShop(callback) {
-        this._closeshop = callback;
-    }
+    /** 设置获取玩家信息回调。 @param {(slot: number) => import("./shop_const").ShopPlayerInfo | null} callback*/
+    setGetPlayerInfo(callback) {this.getPlayerInfo = callback;}
+    /** 设置发奖回调。 @param {(slot: number, item: import("./shop_const").ShopItemConfig, ctx: import("./shop_const").ShopPurchaseContext) => import("./shop_const").ShopGrantResult} callback*/
+    setGrantReward(callback) {this.grantReward = callback;}
+    /** 设置打开 HUD 回调。 @param {(slot: number, pawn: import("cs_script/point_script").CSPlayerPawn) => void} callback*/
+    setOpenShop(callback) {this.openshop = callback;}
+    /** 设置刷新 HUD 回调。 @param {(slot: number, pawn: import("cs_script/point_script").CSPlayerPawn, text: string) => void} callback*/
+    setRefreshText(callback) {this.refreshtext = callback;}
+    /** 设置隐藏 HUD 回调。 @param {(slot: number) => void} callback*/
+    setCloseShop(callback) {this.closeshop = callback;}
 }

@@ -20,12 +20,12 @@ export class AreaEffect {
 
     /**
      * 创建区域效果实例。
-     * @param {import("./area_manager").AreaEffectManager|null} manager
+     * @param {import("./area_manager").AreaEffectManager} manager
      * @param {import("./area_const").areaEffectDesc} desc
      */
     constructor(manager, desc) {
         /** 所属管理器。
-         * @type {import("./area_manager").AreaEffectManager|null} */
+         * @type {import("./area_manager").AreaEffectManager} */
         this._manager = manager;
         /** 自增唯一 ID。 */
         this.id = AreaEffect._nextId++;
@@ -153,14 +153,8 @@ export class AreaEffect {
             if (this._isInCooldown(cooldownKey, now)) continue;
 
             this._hitCooldowns.set(cooldownKey, now);
-            try {
-                this._manager?._emitHitPlayer(pawn, this._createHitPayload());
-            } catch (error) {
-                Instance.Msg(`AreaEffect: 玩家命中回调失败 #${this.id}: ${error}\n`);
-            }
 
-            const name = pawn.GetPlayerController?.()?.GetPlayerName?.() ?? "?";
-            Instance.Msg(`[AreaEffect] #${this.id} 命中玩家 ${name}`);
+            this._manager.event.OnHitPlayer?.(pawn, this._createHitPayload());
         }
     }
 
@@ -180,12 +174,8 @@ export class AreaEffect {
             if (this._isInCooldown(cooldownKey, now)) continue;
 
             this._hitCooldowns.set(cooldownKey, now);
-            try {
-                this._manager?._emitHitMonster(monster, this._createHitPayload());
-            } catch (error) {
-                Instance.Msg(`AreaEffect: 怪物命中回调失败 #${this.id}: ${error}\n`);
-            }
-            Instance.Msg(`[AreaEffect] #${this.id} 命中怪物 #${monsterId}`);
+
+            this._manager.event.OnHitMonster?.(monster, this._createHitPayload());
         }
     }
 
@@ -218,35 +208,22 @@ export class AreaEffect {
     _requestParticle() {
         if (!this.particleId || !this._manager) return;
 
-        let handle = null;
-        try {
-            handle = this._manager._requestParticle({
-                particleId: this.particleId,
-                position: { ...this.position },
-                lifetime: this.particleLifetime,
-                effectId: this.id,
-                effectType: this.effectType,
-                source: this.source && typeof this.source === "object" ? { ...this.source } : this.source,
-            });
-        } catch (error) {
-            Instance.Msg(`AreaEffect: 请求粒子失败 #${this.id}: ${error}\n`);
-            return;
-        }
-
-        if (handle && typeof handle.stop === "function") {
-            this._particleHandle = handle;
-        }
+        this._particleHandle = this._manager.event.OnParticleRequest?.({
+            particleId: this.particleId,
+            position: { ...this.position },
+            lifetime: this.particleLifetime,
+            effectId: this.id,
+            effectType: this.effectType,
+            source: this.source && typeof this.source === "object" ? { ...this.source } : this.source,
+        });
     }
 
     /** 停止并释放粒子句柄。 */
     _stopParticle() {
         if (!this._particleHandle) return;
 
-        try {
-            this._particleHandle.stop?.();
-        } catch (error) {
-            Instance.Msg(`AreaEffect: 停止粒子失败 #${this.id}: ${error}\n`);
-        }
+        this._particleHandle.stop?.();
+        
         this._particleHandle = null;
     }
 }
