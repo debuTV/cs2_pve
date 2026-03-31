@@ -2,7 +2,7 @@
  * @module 玩家系统/玩家管理器
  */
 import { CSPlayerController, CSPlayerPawn, Instance } from "cs_script/point_script";
-import { Player } from "./player/player";
+import { Player, PlayerEvents } from "./player/player";
 import { PlayerState } from "./player_const";
 
 /**
@@ -75,19 +75,7 @@ export class PlayerManager {
         this._rewardHandlers = {
             buff: (player, payload) => {
                 if (!payload.buffTypeId) return;
-
-                // 玩家模块只负责提出“要给谁什么 Buff”的请求，
-                // 实际是否发放、用什么跨模块上下文，统一交给 main.js 决定。
-                this.events.OnPlayerBuffAdd?.(player, {
-                    type: "request",
-                    buffTypeId: payload.buffTypeId,
-                    params: payload.params,
-                    source: payload.source ?? null,
-                    context: {
-                        player,
-                        monster: null,
-                    },
-                });
+                player.addBuff(payload.buffTypeId, payload.params ?? {});
             },
             money: (player, payload) => {
                 player.addMoney(payload.amount ?? 0, payload.reason);
@@ -161,6 +149,7 @@ export class PlayerManager {
         const slot = controller.GetPlayerSlot();
         const existingPlayer = this.players.get(slot);
         const player = new Player(this.nextPlayerId++, slot);
+
         player.connect(controller);
         // 订阅玩家领域事件，桥接到 manager 级回调
         this._bindPlayerEvents(player);
@@ -337,6 +326,12 @@ export class PlayerManager {
                 this.events.OnAllPlayersReady?.();
             }
         });
+        player.events.setBuffEvent(
+            (typeId,params)=> this.events.OnBuffAddedRequest?.(player,typeId,params)??null,
+            (buffId)=>this.events.OnBuffRemovedRequest?.(player,buffId)??false,
+            (buffId,params)=>this.events.OnBuffRefreshedRequest?.(player,buffId,params)??false,
+            (buffId,event,params)=>this.events.OnBuffEmitEvent?.(player,buffId,event,params)??false
+        )
     }
 
     // ——— 兼容 API ———
@@ -558,14 +553,18 @@ export class PlayerManager {
  */
 export class PlayerManagerEvents {
     constructor() {
+        // manager 级事件回调
         this.OnPlayerJoin = null;
         this.OnPlayerLeave = null;
         this.OnPlayerReady = null;
         this.OnPlayerDeath = null;
         this.OnPlayerRespawn = null;
         this.OnAllPlayersReady = null;
-        this.OnPlayerBuffAdd=null;
-        this.OnPlayerBuffDelete=null;
+        //player buff事件回调
+        this.OnBuffAddedRequest = null;
+        this.OnBuffRemovedRequest = null;
+        this.OnBuffRefreshedRequest = null;
+        this.OnBuffEmitEvent = null;
     }
     /** 设置玩家加入回调。 @param {(player: Player) => void} callback */
     setOnPlayerJoin(callback) { this.OnPlayerJoin = callback; }
@@ -579,8 +578,13 @@ export class PlayerManagerEvents {
     setOnPlayerRespawn(callback) { this.OnPlayerRespawn = callback; }
     /** 设置全员准备就绪回调。 @param {() => void} callback */
     setOnAllPlayersReady(callback) { this.OnAllPlayersReady = callback; }
-    /** 设置玩家 Buff 添加请求回调。 @param {(player: any, params: any) => number | null} callback*/
-    setOnPlayerBuffAdd(callback) { this.OnPlayerBuffAdd = callback; }
-    /** 设置玩家 Buff 删除请求回调。 @param {(player: any, buffid: any) => boolean} callback*/
-    setOnPlayerBuffDelete(callback) { this.OnPlayerBuffDelete = callback; }
+
+    /** 设置玩家 Buff 添加请求回调。 @param {(player: any, typeId: string, params: Record<string, any>) => number|null} callback*/
+    setOnPlayerBuffAddRequest(callback) { this.OnBuffAddedRequest = callback; }
+    /** 设置玩家 Buff 删除请求回调。 @param {(player: any, buffid: number) => boolean} callback*/
+    setOnPlayerBuffDeleteRequest(callback) { this.OnBuffRemovedRequest = callback; }
+    /** 设置玩家 Buff 刷新请求回调。 @param {(player: any, buffid: number, params: Record<string, any>) => boolean} callback*/
+    setOnPlayerBuffRefreshRequest(callback) { this.OnBuffRefreshedRequest = callback; }
+    /** 设置玩家 Buff 发射事件回调。 @param {(player: any, buffid: number, event: string, params: any) => boolean} callback*/
+    setOnPlayerBuffEmitEvent(callback) { this.OnBuffEmitEvent = callback; }
 }

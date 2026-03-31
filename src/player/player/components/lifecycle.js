@@ -100,11 +100,7 @@ export class PlayerLifecycle {
 
         this._giveStartingEquipment();
 
-        // 通知 persistent buff 重生
-        this.player.buffManager.onRespawn();
-
         this.player.applyStateTransition(PlayerState.PREPARING);
-        this.player.events.OnRespawned?.(this.player);
 
         Instance.Msg(`玩家 ${this.player.entityBridge.getPlayerName()} 已重生 (HP: ${stats.health})`);
     }
