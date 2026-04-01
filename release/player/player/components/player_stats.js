@@ -4,16 +4,6 @@
 import { LEVEL_CONFIGS, LevelUpHealPolicy } from "../../player_const";
 import { PlayerBuffEvents } from "./buff_manager";
 
-const FALLBACK_LEVEL_CONFIG = {
-    level: 1,
-    expRequired: 0,
-    maxHealth: 100,
-    attackScale: 1,
-    critChance: 0,
-    critMultiplier: 1,
-    healOnLevelUp: LevelUpHealPolicy.FULL,
-};
-
 const MAX_LEVEL = Math.max(LEVEL_CONFIGS.length, 1);
 
 /**
@@ -59,7 +49,7 @@ export class PlayerStats {
     constructor(player) {
         this.player = player;
 
-        const levelConfig = LEVEL_CONFIGS[0] ?? FALLBACK_LEVEL_CONFIG;
+        const levelConfig = LEVEL_CONFIGS[0];
 
         // 等级与成长资源。
         this.level = 1;
@@ -73,7 +63,7 @@ export class PlayerStats {
         this.armor = 0;
 
         // 输出属性。
-        this.baseAttackScale = levelConfig.attackScale ?? FALLBACK_LEVEL_CONFIG.attackScale;
+        this.baseAttackScale = levelConfig.attackScale;
         this.attackScale = this.baseAttackScale;
         this.baseCritChance = levelConfig.critChance;
         this.critChance = this.baseCritChance;
@@ -180,7 +170,6 @@ export class PlayerStats {
      */
     getSummary() {
         return {
-            id: this.player.id,
             name: this.player.entityBridge.getPlayerName(),
             slot: this.player.slot,
             level: this.level,
@@ -264,11 +253,11 @@ export class PlayerStats {
 
     /**
      * 获取当前等级对应的配置，不存在时回落到兜底配置。
-     * @returns {import("../../player_const").LevelConfig | typeof FALLBACK_LEVEL_CONFIG} 当前等级配置。
+     * @returns {import("../../player_const").LevelConfig} 当前等级配置。
      */
     _getCurrentLevelConfig() {
         const clampedLevel = Math.max(1, Math.min(this.level, MAX_LEVEL));
-        return LEVEL_CONFIGS[clampedLevel - 1] ?? LEVEL_CONFIGS[0] ?? FALLBACK_LEVEL_CONFIG;
+        return LEVEL_CONFIGS[clampedLevel - 1];
     }
 
     /**
@@ -315,7 +304,7 @@ export class PlayerStats {
      * 根据升级回血策略，结算升级后的生命值。
      * @param {number} previousHealth 升级前的生命值。
      * @param {number} previousMaxHealth 升级前的最大生命值。
-     * @param {import("../../player_const").LevelConfig | typeof FALLBACK_LEVEL_CONFIG} levelConfig 新等级对应的配置。
+     * @param {import("../../player_const").LevelConfig} levelConfig 新等级对应的配置。
      * @returns {number} 升级后的生命值。
      */
     _resolveLevelUpHealth(previousHealth, previousMaxHealth, levelConfig) {
@@ -336,7 +325,7 @@ export class PlayerStats {
 
     /**
      * 按等级配置重建基础属性，并重新应用 Buff 的派生修正。
-     * @param {import("../../player_const").LevelConfig | typeof FALLBACK_LEVEL_CONFIG} [levelConfig] 要应用的等级配置，默认使用当前等级。
+     * @param {import("../../player_const").LevelConfig} [levelConfig] 要应用的等级配置，默认使用当前等级。
      * @returns {void}
      */
     _refreshDerivedStats(levelConfig = this._getCurrentLevelConfig()) {
@@ -347,12 +336,12 @@ export class PlayerStats {
 
     /**
      * 将等级配置写入基础属性字段。
-     * @param {import("../../player_const").LevelConfig | typeof FALLBACK_LEVEL_CONFIG} levelConfig 要应用的等级配置。
+     * @param {import("../../player_const").LevelConfig} levelConfig 要应用的等级配置。
      * @returns {void}
      */
     _applyLevelBaseConfig(levelConfig) {
         this.baseMaxHealth = levelConfig.maxHealth;
-        this.baseAttackScale = levelConfig.attackScale ?? FALLBACK_LEVEL_CONFIG.attackScale;
+        this.baseAttackScale = levelConfig.attackScale;
         this.baseCritChance = levelConfig.critChance;
         this.baseCritMultiplier = levelConfig.critMultiplier;
     }

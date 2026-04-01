@@ -227,12 +227,10 @@ export class PlayerManager {
         let player = this.players.get(controller.GetPlayerSlot());
 
         if (player) {
-            //const wasDead = player.state === PlayerState.DEAD;
+            
             player.handleReset(pawn, this.ingame ? PlayerState.ALIVE : PlayerState.PREPARING);
-            // 只有从 DEAD 恢复才是真正的重生，换队等不触发回调
-            //if (wasDead) {
             this.events.OnPlayerRespawn?.(player);
-            //}
+
         } else {
             // 全新未知玩家，走 connect + activate
             this.handlePlayerConnect(controller);
@@ -251,11 +249,7 @@ export class PlayerManager {
         const player = this.players.get(slot);
         if (!player) return;
 
-        // 只在首次进入 DEAD 时触发回调，防止与 handlePlayerDamage 双重触发
-        //if (player.state !== PlayerState.DEAD) {
-        //    player.healthCombat.die(null);
-            this.events.OnPlayerDeath?.(playerPawn);
-        //}
+        this.events.OnPlayerDeath?.(playerPawn);
     }
 
     /**
@@ -285,13 +279,7 @@ export class PlayerManager {
      * @param {import("cs_script/point_script").ModifyPlayerDamageEvent} event 引擎伤害修改事件
      */
     handleBeforePlayerDamage(event) {
-        //const controller = event.player.GetPlayerController();
-        //if (!controller) return { abort: true };
-        //const slot = controller.GetPlayerSlot();
-        //const player = this.players.get(slot);
-        //if (!player || !player.isAlive) {
-        //    return { abort: true };
-        //}
+
         return;
     }
 
@@ -306,13 +294,7 @@ export class PlayerManager {
         const player = this.players.get(slot);
         if (!player) return;
 
-        //const wasDead = player.state === PlayerState.DEAD;
-        //const died = 
         player.syncDamageFromEngine(event.damage, event.attacker, event.inflictor);
-        // 只在本次首次检测到死亡时触发回调，防止与 handlePlayerDeath (OnPlayerKill) 双重触发
-        //if (died && !wasDead) {
-        //    this.events.OnPlayerDeath?.(event.player);
-        //}
     }
 
     // ——— 订阅 Player 领域事件 ———
