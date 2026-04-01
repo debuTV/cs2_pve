@@ -45,6 +45,19 @@ export class BuffManager {
         return true;
     }
 
+    /**
+     * @param {number} buffId
+     * @param {any} params
+     * @returns {boolean}
+     */
+    refreshbuff(buffId,params)
+    {
+        const buff=this.buffMap.get(buffId);
+        if(buff===undefined)return false;
+        if(typeof buff.refresh === "function")buff.refresh(params);
+        return true;
+    }
+
     tick()
     {
         for(const [buffId,buff] of this.buffMap)
@@ -120,10 +133,34 @@ export class BuffManager {
      * @param {import("./buff_const").EmitEventPayload} payload
      * @returns {import("./buff_const").EmitEventPayload}
      */
+    OnStateChange(buffId,payload)
+    {
+        const buff=this.buffMap.get(buffId);
+        if(buff===undefined)return payload;
+        return buff.OnStateChange(payload);
+    }
+
+    /**
+     * @param {number} buffId
+     * @param {import("./buff_const").EmitEventPayload} payload
+     * @returns {import("./buff_const").EmitEventPayload}
+     */
     OnSpawn(buffId,payload)
     {
         const buff=this.buffMap.get(buffId);
         if(buff===undefined)return payload;
         return buff.OnSpawn(payload);
+    }
+
+    /**
+     * @param {number} buffId
+     * @param {import("./buff_const").EmitEventPayload} payload
+     * @returns {import("./buff_const").EmitEventPayload}
+     */
+    OnRecompute(buffId,payload)
+    {
+        const buff=this.buffMap.get(buffId);
+        if(buff===undefined)return payload;
+        return buff.OnRecompute(payload);
     }
 }

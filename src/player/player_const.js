@@ -65,7 +65,7 @@ export const PlayerState = {
  * @property {number} level - 等级
  * @property {number} expRequired - 升到下一级所需经验，满级填 0
  * @property {number} maxHealth - 该等级的基础最大生命值
- * @property {number} attack - 该等级的基础攻击力
+ * @property {number} attackScale - 该等级的基础攻击倍率
  * @property {number} critChance - 该等级的基础暴击率
  * @property {number} critMultiplier - 该等级的基础暴击伤害倍率
  * @property {string} healOnLevelUp - 升级回血策略，取值见 {@link LevelUpHealPolicy}
@@ -82,7 +82,7 @@ export const LEVEL_CONFIGS = [
         level: 1,
         expRequired: 100,
         maxHealth: 100,
-        attack: 10,
+        attackScale: 1.0,
         critChance: 0.1,
         critMultiplier: 1.5,
         healOnLevelUp: DEFAULT_LEVEL_UP_HEAL_POLICY,
@@ -91,7 +91,7 @@ export const LEVEL_CONFIGS = [
         level: 2,
         expRequired: 150,
         maxHealth: 110,
-        attack: 11,
+        attackScale: 1.1,
         critChance: 0.105,
         critMultiplier: 1.52,
         healOnLevelUp: DEFAULT_LEVEL_UP_HEAL_POLICY,
@@ -100,7 +100,7 @@ export const LEVEL_CONFIGS = [
         level: 3,
         expRequired: 200,
         maxHealth: 120,
-        attack: 12,
+        attackScale: 1.2,
         critChance: 0.11,
         critMultiplier: 1.54,
         healOnLevelUp: DEFAULT_LEVEL_UP_HEAL_POLICY,
@@ -109,7 +109,7 @@ export const LEVEL_CONFIGS = [
         level: 4,
         expRequired: 250,
         maxHealth: 130,
-        attack: 12,
+        attackScale: 1.3,
         critChance: 0.115,
         critMultiplier: 1.56,
         healOnLevelUp: DEFAULT_LEVEL_UP_HEAL_POLICY,
@@ -118,7 +118,7 @@ export const LEVEL_CONFIGS = [
         level: 5,
         expRequired: 0,
         maxHealth: 140,
-        attack: 13,
+        attackScale: 1.4,
         critChance: 0.12,
         critMultiplier: 1.58,
         healOnLevelUp: DEFAULT_LEVEL_UP_HEAL_POLICY,

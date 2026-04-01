@@ -14,10 +14,10 @@ import { PlayerState } from "../../player_const";
  * | 方法          | 触发时机               | 核心动作                          |
  * |---------------|------------------------|-----------------------------------|
  * | `connect`     | 玩家首次连接           | 绑定 Controller，状态 → CONNECTED |
- * | `activate`    | Pawn 生成 / 激活       | 绑定 Pawn，发放装备，状态 → ALIVE |
+ * | `activate`    | Pawn 生成 / 激活       | 绑定 Pawn，发放装备，状态 → PREPARING |
  * | `disconnect`  | 玩家断开               | 清理 Buff，状态 → DISCONNECTED    |
  * | `handleDeath` | HealthCombat 判定死亡  | 切旁观者，状态 → DEAD             |
- * | `respawn`     | 重生触发               | 重置血量/护甲，通知 Persistent Buff |
+ * | `respawn`     | 重生触发               | 重置血量/护甲，并进入外部指定状态 |
  *
  * @navigationTitle 玩家生命周期
  */
@@ -41,17 +41,20 @@ export class PlayerLifecycle {
     /**
      * 玩家激活（拿到有效 pawn）
      * @param {import("cs_script/point_script").CSPlayerPawn} pawn
+     * @param {number} targetState
      */
-    activate(pawn) {
+    activate(pawn, targetState) {
         this.player.entityBridge.bindPawn(pawn);
+        const nextState = targetState === PlayerState.ALIVE ? PlayerState.ALIVE : PlayerState.PREPARING;
 
         // 按当前等级初始化战斗资源
         this.player.stats.refreshLevelStats();
         this.player.stats.resetCombatResources(this.player.stats.maxHealth, 0);
         this.player.entityBridge.syncMaxHealth(this.player.stats.maxHealth);
         this.player.entityBridge.syncHealth(this.player.stats.health);
+        this.player.entityBridge.syncArmor(this.player.stats.armor);
 
-        this.player.applyStateTransition(PlayerState.PREPARING);
+        this.player.applyStateTransition(nextState);
 
         // 给予初始装备
         this._giveStartingEquipment();
@@ -62,8 +65,9 @@ export class PlayerLifecycle {
     /**
      * 玩家重置（OnPlayerReset：重生/换队）
      * @param {import("cs_script/point_script").CSPlayerPawn} newPawn
+     * @param {number} respawnState
      */
-    handleReset(newPawn) {
+    handleReset(newPawn, respawnState = PlayerState.PREPARING) {
         this.player.entityBridge.rebindPawn(newPawn);
 
         // 同步脚本数值到新 pawn
@@ -74,7 +78,7 @@ export class PlayerLifecycle {
         // 如果之前是 DEAD，进入 RESPAWNING
         if (this.player.state === PlayerState.DEAD) {
             this.player.applyStateTransition(PlayerState.RESPAWNING);
-            this.respawn();
+            this.respawn(undefined, undefined, respawnState);
         } else {
             // 非死亡状态的重置（换队等），保持原脚本生命值
             if (this.player.stats.health <= 0) {
@@ -87,9 +91,11 @@ export class PlayerLifecycle {
      * 重生流程
      * @param {number} [health]
      * @param {number} [armor]
+     * @param {number} [targetState]
      */
-    respawn(health, armor) {
+    respawn(health, armor, targetState = PlayerState.PREPARING) {
         const stats = this.player.stats;
+        const nextState = targetState === PlayerState.ALIVE ? PlayerState.ALIVE : PlayerState.PREPARING;
         stats.refreshLevelStats();
         stats.resetCombatResources(health ?? stats.maxHealth, armor);
 
@@ -100,7 +106,7 @@ export class PlayerLifecycle {
 
         this._giveStartingEquipment();
 
-        this.player.applyStateTransition(PlayerState.PREPARING);
+        this.player.applyStateTransition(nextState);
 
         Instance.Msg(`玩家 ${this.player.entityBridge.getPlayerName()} 已重生 (HP: ${stats.health})`);
     }
@@ -137,7 +143,6 @@ export class PlayerLifecycle {
         this.player.entityBridge.syncHealth(stats.health);
         this.player.entityBridge.syncArmor(stats.armor);
         this.player.applyStateTransition(PlayerState.PREPARING);
-        this.player.lastTick = 0;
         this._giveStartingEquipment();
     }
 

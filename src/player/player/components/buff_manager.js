@@ -1,8 +1,9 @@
 export const PlayerBuffEvents = {
     Spawn:        "OnSpawn",// 出生/重生事件，允许 Buff 进行一次性修正或标记需要重算派生属性
-    Die:          "OnDie",
+    Recompute:    "OnRecompute",
+    Die:          "OnDeath",
     StateChange:  "OnStateChange",
-    BeforeTakeDamage: "BeforeTakeDamage", // 受伤前事件，允许修改伤害
+    BeforeTakeDamage: "OnDamage", // 受伤前事件，允许修改伤害
     Attack:          "OnAttack", // 攻击事件，允许修改伤害
     Tick:         "OnTick",
 };
@@ -26,7 +27,7 @@ export class PlayerBuffManager {
     addBuff(typeId, params) {
         if(this.buffMap.has(typeId))return false;
         const id=this.player.events.OnBuffAddedRequest?.(typeId, params);
-        if(!id)return false;
+        if(id == null)return false;
         this.buffMap.set(typeId, id);
         return true;
     }
@@ -37,7 +38,7 @@ export class PlayerBuffManager {
      */
     removeBuff(typeId) {
         const id=this.buffMap.get(typeId);
-        if(!id)return false;
+        if(id == null)return false;
         const success=this.player.events.OnBuffRemovedRequest?.(id);
         if(!success)return false;
         this.buffMap.delete(typeId);
@@ -50,7 +51,7 @@ export class PlayerBuffManager {
      */
     refreshBuff(typeId, params) {
         const id=this.buffMap.get(typeId);
-        if(!id)return this.addBuff(typeId, params);
+        if(id == null)return this.addBuff(typeId, params);
         const success=this.player.events.OnBuffRefreshedRequest?.(id, params);
         if(!success)return false;
         return true;
@@ -65,7 +66,7 @@ export class PlayerBuffManager {
      * @param {any} params 
      */
     emitEvent(event,params) {
-        for(const [typeId, id] of this.buffMap.entries()){
+        for(const [, id] of this.buffMap.entries()){
             this.player.events.OnBuffEmitEvent?.(id, event, params);
         }
     }

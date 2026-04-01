@@ -46,7 +46,13 @@ export class BuffTemplate{
     {
         this.use=false;
     }
+    /**
+     * @param {any} params
+     */
+    refresh(params)
+    {
 
+    }
     /**
      * 事件对外接口
      */
@@ -76,9 +82,21 @@ export class BuffTemplate{
      */
     OnDeath(payload){return payload;}
     /**
+     * 目标状态切换时调用
+     * @param {import("./buff_const").EmitEventPayload} payload
+     * @returns {import("./buff_const").EmitEventPayload}
+     */
+    OnStateChange(payload){return payload;}
+    /**
      * 目标出生之后调用
      * @param {import("./buff_const").EmitEventPayload} payload
      * @returns {import("./buff_const").EmitEventPayload}
      */
     OnSpawn(payload){return payload;}
+    /**
+     * 目标派生属性重算时调用
+     * @param {import("./buff_const").EmitEventPayload} payload
+     * @returns {import("./buff_const").EmitEventPayload}
+     */
+    OnRecompute(payload){return payload;}
 }

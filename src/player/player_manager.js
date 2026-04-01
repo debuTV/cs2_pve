@@ -2,7 +2,7 @@
  * @module 玩家系统/玩家管理器
  */
 import { CSPlayerController, CSPlayerPawn, Instance } from "cs_script/point_script";
-import { Player, PlayerEvents } from "./player/player";
+import { Player } from "./player/player";
 import { PlayerState } from "./player_const";
 
 /**
@@ -16,6 +16,7 @@ import { PlayerState } from "./player_const";
  * @property {boolean} [isReady] - 准备状态（仅 type="ready" 时适用）
  * @property {number} [health] - 生命值（仅 type="respawn" 时适用）
  * @property {number} [armor] - 护甲值（仅 type="respawn" 时适用）
+ * @property {number} [targetState] - 重生后的目标状态（仅 type="respawn" 时适用）
  */
 /**
  * 负责所有在线玩家实例的集合管理，以及引擎事件到脚本层的桥接。
@@ -48,11 +49,6 @@ export class PlayerManager {
          */
         this.players = new Map();
         /** 
-         * 下一个玩家 ID
-         * @type {number} 
-         */
-        this.nextPlayerId = 1;
-        /** 
          * 总玩家数量
          * @type {number} 
          */
@@ -68,8 +64,9 @@ export class PlayerManager {
          */
         this._adapter = adapter;
         /** 每个 slot 的hud文本缓存 */
-        this._statusTextCache = new Map();
-        this._tempDisableLogKeys = new Set();
+        //this._statusTextCache = new Map();
+        //this._tempDisableLogKeys = new Set();
+        this.ingame = false;
         this.events = new PlayerManagerEvents();
         /** @type {Record<string, (player: Player, payload: TP_playerRewardPayload) => void>} */
         this._rewardHandlers = {
@@ -96,7 +93,11 @@ export class PlayerManager {
                 player.setReady(payload.isReady ?? false);
             },
             respawn: (player, payload) => {
-                player.respawn(payload.health ?? 100, payload.armor ?? 0);
+                player.respawn(
+                    payload.health ?? 100,
+                    payload.armor ?? 0,
+                    payload.targetState ?? this.ingame? PlayerState.ALIVE: PlayerState.PREPARING
+                );
             },
             resetGameStatus: (player) => {
                 player.resetGameStatus();
@@ -111,10 +112,13 @@ export class PlayerManager {
      */
     init() {
         Instance.OnScriptInput("ready",(e)=>{
-            const controller = e.activator;
-            if(controller && controller instanceof CSPlayerPawn)
+            const pawn = e.activator;
+            if(pawn && pawn instanceof CSPlayerPawn)
             {
-                const player = this.getPlayerByPawn(controller);
+                const controller = pawn.GetPlayerController();
+                if (!controller) return;
+                const slot=controller.GetPlayerSlot();
+                const player = this.players.get(slot);
                 if (!player) return;
                 player.setReady(player.isReady ? false : true);
             }
@@ -148,22 +152,19 @@ export class PlayerManager {
 
         const slot = controller.GetPlayerSlot();
         const existingPlayer = this.players.get(slot);
-        const player = new Player(this.nextPlayerId++, slot);
+        if (existingPlayer) {
+            if (existingPlayer.isReady) this.readyCount--;
+            existingPlayer.disconnect();
+            this.players.delete(slot);
+            this.totalPlayers--;
+        }
 
+        const player = new Player(slot);
         player.connect(controller);
         // 订阅玩家领域事件，桥接到 manager 级回调
         this._bindPlayerEvents(player);
-        if (existingPlayer) {
-            if (existingPlayer.isReady) {
-                this.readyCount--;
-            }
-            existingPlayer.disconnect();
-            this.players.delete(slot);
-        }
         this.players.set(slot, player);
-        if (!existingPlayer) {
-            this.totalPlayers++;
-        }
+        this.totalPlayers++;
 
         this._adapter.broadcast(`玩家 ${controller.GetPlayerName()} 加入游戏 (SLOT: ${slot})`);
         this.events.OnPlayerJoin?.(player);
@@ -184,7 +185,8 @@ export class PlayerManager {
 
         const pawn = controller.GetPlayerPawn();
         if(!pawn)return;
-        player.activate(pawn);
+
+        player.activate(pawn, this.ingame? PlayerState.ALIVE: PlayerState.PREPARING);
     }
 
     /**
@@ -194,20 +196,22 @@ export class PlayerManager {
     handlePlayerDisconnect(playerSlot) {
         const player = this.players.get(playerSlot);
         if (!player) return;
+        const wasReady = player.isReady;
+        const wasLobbyState = player.state === PlayerState.PREPARING || player.state === PlayerState.READY;
 
         this._adapter.broadcast(`玩家 ${player.entityBridge.getPlayerName()} 离开游戏`);
 
-        if (player.isReady) {
+        if (wasReady) {
             this.readyCount--;
         }
-
-        this.events.OnPlayerLeave?.(player);
 
         player.disconnect();
         this.players.delete(playerSlot);
         this.totalPlayers--;
 
-        if (!player.isReady && this.areAllPlayersReady()) {
+        this.events.OnPlayerLeave?.(player);
+
+        if (wasLobbyState && this.areAllPlayersReady()) {
             this.events.OnAllPlayersReady?.();
         }
     }
@@ -223,15 +227,14 @@ export class PlayerManager {
         let player = this.players.get(controller.GetPlayerSlot());
 
         if (player) {
-            const wasDead = player.state === PlayerState.DEAD;
-            player.handleReset(pawn);
+            //const wasDead = player.state === PlayerState.DEAD;
+            player.handleReset(pawn, this.ingame ? PlayerState.ALIVE : PlayerState.PREPARING);
             // 只有从 DEAD 恢复才是真正的重生，换队等不触发回调
-            if (wasDead) {
-                this.events.OnPlayerRespawn?.(player);
-            }
+            //if (wasDead) {
+            this.events.OnPlayerRespawn?.(player);
+            //}
         } else {
             // 全新未知玩家，走 connect + activate
-            const controller = pawn.GetPlayerController();
             this.handlePlayerConnect(controller);
             this.handlePlayerActivate(controller);
         }
@@ -242,14 +245,17 @@ export class PlayerManager {
      * @param {CSPlayerPawn} playerPawn 玩家 Pawn 实体
      */
     handlePlayerDeath(playerPawn) {
-        const player = this.getPlayerByPawn(playerPawn);
+        const controller = playerPawn.GetPlayerController();
+        if (!controller) return;
+        const slot=controller.GetPlayerSlot();
+        const player = this.players.get(slot);
         if (!player) return;
 
         // 只在首次进入 DEAD 时触发回调，防止与 handlePlayerDamage 双重触发
-        if (player.state !== PlayerState.DEAD) {
-            player.healthCombat.die(null);
+        //if (player.state !== PlayerState.DEAD) {
+        //    player.healthCombat.die(null);
             this.events.OnPlayerDeath?.(playerPawn);
-        }
+        //}
     }
 
     /**
@@ -261,7 +267,7 @@ export class PlayerManager {
         const controller = event.player;
         const text = event.text;
         if (!controller) return;
-        const player = this.getPlayerByController(controller);
+        const player = this.players.get(controller.GetPlayerSlot());
         if (!player) return;
 
         const parts = text.trim().toLowerCase().split(/\s+/);
@@ -279,10 +285,13 @@ export class PlayerManager {
      * @param {import("cs_script/point_script").ModifyPlayerDamageEvent} event 引擎伤害修改事件
      */
     handleBeforePlayerDamage(event) {
-        const player = this.getPlayerByPawn(event.player);
-        if (!player || !player.isAlive) {
-            return { abort: true };
-        }
+        //const controller = event.player.GetPlayerController();
+        //if (!controller) return { abort: true };
+        //const slot = controller.GetPlayerSlot();
+        //const player = this.players.get(slot);
+        //if (!player || !player.isAlive) {
+        //    return { abort: true };
+        //}
         return;
     }
 
@@ -291,15 +300,19 @@ export class PlayerManager {
      * @param {import("cs_script/point_script").PlayerDamageEvent} event 引擎伤害事件
      */
     handlePlayerDamage(event) {
-        const player = this.getPlayerByPawn(event.player);
+        const controller = event.player.GetPlayerController();
+        if (!controller) return;
+        const slot = controller.GetPlayerSlot();
+        const player = this.players.get(slot);
         if (!player) return;
 
-        const wasDead = player.state === PlayerState.DEAD;
-        const died = player.syncDamageFromEngine(event.damage, event.attacker, event.inflictor);
+        //const wasDead = player.state === PlayerState.DEAD;
+        //const died = 
+        player.syncDamageFromEngine(event.damage, event.attacker, event.inflictor);
         // 只在本次首次检测到死亡时触发回调，防止与 handlePlayerDeath (OnPlayerKill) 双重触发
-        if (died && !wasDead) {
-            this.events.OnPlayerDeath?.(event.player);
-        }
+        //if (died && !wasDead) {
+        //    this.events.OnPlayerDeath?.(event.player);
+        //}
     }
 
     // ——— 订阅 Player 领域事件 ———
@@ -384,6 +397,7 @@ export class PlayerManager {
     }
 
     enterGameStart() {
+        this.ingame = true;
         this.readyCount = 0;
         for (const [, player] of this.players) {
             if (!player.entityBridge.pawn) continue;
@@ -392,6 +406,7 @@ export class PlayerManager {
     }
 
     resetAllGameStatus() {
+        this.ingame = false;
         this.readyCount = 0;
         for (const [, player] of this.players) {
             player.resetGameStatus();
@@ -412,64 +427,6 @@ export class PlayerManager {
         }
     }
 
-    // ——— 查询 ———
-
-    /**
-     * 按槽位获取玩家实例。
-     * @param {number} playerSlot 玩家槽位
-     * @returns {Player|undefined}
-     */
-    getPlayer(playerSlot) {
-        return this.players.get(playerSlot);
-    }
-
-    /**
-     * 按 Controller 查找玩家实例。
-     * @param {CSPlayerController} controller 玩家控制器
-     * @returns {Player|null}
-     */
-    getPlayerByController(controller) {
-        if (!controller) return null;
-        return this.players.get(controller.GetPlayerSlot()) ?? null;
-    }
-
-    /**
-     * 按 Pawn 遍历查找玩家实例。
-     * @param {CSPlayerPawn} pawn 玩家 Pawn 实体
-     * @returns {Player|null}
-     */
-    getPlayerByPawn(pawn) {
-        if (!pawn) return null;
-        for (const [, player] of this.players) {
-            if (player.entityBridge.pawn === pawn) return player;
-        }
-        return null;
-    }
-
-    /**
-     * 获取所有在线玩家列表。
-     * @returns {Player[]}
-     */
-    getAllPlayers() {
-        return Array.from(this.players.values());
-    }
-
-    /**
-     * 获取所有在游戏中且存活的玩家。
-     * @returns {Player[]}
-     */
-    getActivePlayers() {
-        return Array.from(this.players.values()).filter(p => p.isInGame && p.isAlive);
-    }
-
-    /**
-     * 获取所有已准备的玩家。
-     * @returns {Player[]}
-     */
-    getReadyPlayers() {
-        return Array.from(this.players.values()).filter(p => p.isReady);
-    }
-
     /**
      * 获取所有存活玩家。
      * @returns {Player[]}
@@ -488,52 +445,14 @@ export class PlayerManager {
     }
 
     /**
-     * 是否有存活玩家。
-     * @returns {boolean}
+     * 获取玩家统计概览（总数 / 已准备 / 存活）。
+     * @returns {{total: number, ready: number, alive: number}}
      */
-    hasAlivePlayers() {
-        return this.getAlivePlayers().length > 0;
-    }
-
-    /**
-     * 获取玩家统计概览（总数 / 已准备 / 存活 / 活跃）。
-     * @returns {{total: number, ready: number, alive: number, active: number}}
-     */
-    getPlayerStats() {
+    getStats() {
         return {
             total: this.totalPlayers,
             ready: this.readyCount,
-            alive: this.getAlivePlayers().length,
-            active: this.getActivePlayers().length
-        };
-    }
-
-    // ——— 消息 ———
-
-    /**
-     * 向指定玩家发送其属性摘要信息。
-     * @param {number} playerSlot 玩家槽位
-     */
-    sendPlayerStats(playerSlot) {
-        const player = this.players.get(playerSlot);
-        if (!player) return;
-        const s = player.getSummary();
-        const message =
-            `ID: ${s.id} | 等级: ${s.level} | 金钱: $${s.money}\n` +
-            `生命: ${s.health}/${s.maxHealth} | 护甲: ${s.armor} | 攻击: ${s.attack}\n` +
-            `击杀: ${s.kills} | 分数: ${s.score}`;
-        message.split('\n').forEach(line => this._adapter.sendMessage(playerSlot, line));
-    }
-    
-    /**
-     * 获取管理器当前状态快照。
-     * @returns {{totalPlayers: number, readyCount: number, nextPlayerId: number}}
-     */
-    getStatus() {
-        return {
-            totalPlayers: this.totalPlayers,
-            readyCount: this.readyCount,
-            nextPlayerId: this.nextPlayerId
+            alive: this.getAlivePlayers().length
         };
     }
 
@@ -541,9 +460,8 @@ export class PlayerManager {
      * 每帧驱动所有在线玩家的持续逻辑。
      */
     tick() {
-        const nowtime = this._adapter.getGameTime();
         for (const [slot, player] of this.players) {
-            player.tick(nowtime);
+            player.tick();
         }
     }
 }

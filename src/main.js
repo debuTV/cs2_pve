@@ -93,21 +93,63 @@ waveManager.setOnWaveComplete((waveNumber) => {
  * @param {number} playerSlot
  * @param {string} buffTypeId
  * @param {Record<string, any>} [params]
- * @param {Record<string, any>|null} [source]
  */
-function grantPlayerBuff(playerSlot, buffTypeId, params, source) {
+function grantPlayerBuff(playerSlot, buffTypeId, params) {
     if (!buffTypeId) return null;
 
-    return playerManager.applyBuff(playerSlot, buffTypeId, params, source ?? null, null);
+    return playerManager.applyBuff(playerSlot, buffTypeId, params ?? {});
+}
+
+/**
+ * @param {number} buffId
+ * @param {string} event
+ * @param {any} params
+ * @returns {boolean}
+ */
+function emitPlayerBuffEvent(buffId, event, params) {
+    switch (event) {
+        case "OnTick":
+            buffManager.OnTick(buffId, params);
+            return true;
+        case "OnAttack":
+            buffManager.OnAttack(buffId, params);
+            return true;
+        case "OnDamage":
+            buffManager.OnDamage(buffId, params);
+            return true;
+        case "OnDeath":
+            buffManager.OnDeath(buffId, params);
+            return true;
+        case "OnStateChange":
+            buffManager.OnStateChange(buffId, params);
+            return true;
+        case "OnSpawn":
+            buffManager.OnSpawn(buffId, params);
+            return true;
+        case "OnRecompute":
+            buffManager.OnRecompute(buffId, params);
+            return true;
+        default:
+            return false;
+    }
 }
 
 // ——— 3.2 玩家 → 游戏 / Buff ———
 
-playerManager.events.setOnPlayerBuffAdd((player, params) => {
-    return buffManager.addbuff(player,params);
+playerManager.events.setOnPlayerBuffAddRequest((player, typeId, params) => {
+    return buffManager.addbuff(player, { ...(params ?? {}), id: typeId });
 });
-playerManager.events.setOnPlayerBuffDelete((player, buffid) => {
+playerManager.events.setOnPlayerBuffDeleteRequest((player, buffid) => {
+    void player;
     return buffManager.deletebuff(buffid);
+});
+playerManager.events.setOnPlayerBuffRefreshRequest((player, buffid, params) => {
+    void player;
+    return buffManager.refreshbuff(buffid, params);
+});
+playerManager.events.setOnPlayerBuffEmitEvent((player, buffId, event, params) => {
+    void player;
+    return emitPlayerBuffEvent(buffId, event, params);
 });
 playerManager.events.setOnPlayerJoin((player) => {
     void player;
@@ -219,7 +261,7 @@ shopManager.setGrantReward((slot, item, ctx) => {
     
     if (!payload) return { success: false, message: "商品无效果定义" };
 
-    player.addMoney(-ctx.price, `购买 ${item.displayName}`);
+    player.addMoney(-ctx.price);
 
     switch (payload.type) {
         case "heal":
@@ -244,7 +286,7 @@ shopManager.setGrantReward((slot, item, ctx) => {
             // 暂无武器系统集成，待添加
             break;
         case "money":
-            player.addMoney(payload.amount ?? 0, "商店奖励");
+            player.addMoney(payload.amount ?? 0);
             break;
         default:
             return { success: false, message: `未知效果类型: ${payload.type}` };

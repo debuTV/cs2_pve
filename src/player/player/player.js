@@ -32,12 +32,9 @@ import { PlayerState } from "../player_const";
  */
 export class Player {
     /**
-     * @param {number} id 玩家唯一 ID
      * @param {number} slot 引擎 PlayerSlot
      */
-    constructor(id, slot) {
-        /** @type {number} 玩家唯一 ID */
-        this.id = id;
+    constructor(slot) {
         /** @type {number} 引擎 PlayerSlot */
         this.slot = slot;
 
@@ -46,8 +43,7 @@ export class Player {
 
         /** @type {PlayerEvents} 玩家领域事件集合 */
         this.events = new PlayerEvents();
-        /** @type {number} 上一次 tick 的游戏时间（0 表示尚未 tick） */
-        this.lastTick = 0;
+
         // 组件
         /** @type {PlayerEntityBridge} 引擎实体桥接组件 */
         this.entityBridge  = new PlayerEntityBridge(this);
@@ -74,17 +70,19 @@ export class Player {
     /**
      * 绑定 Pawn，进入可游戏状态。
      * @param {import("cs_script/point_script").CSPlayerPawn} pawn 玩家 Pawn 实体
+     * @param {number} targetState 激活后要进入的目标状态
      */
-    activate(pawn) {
-        this.lifecycle.activate(pawn);
+    activate(pawn, targetState) {
+        this.lifecycle.activate(pawn, targetState);
     }
 
     /**
      * 重置处理（重生/换队），更新 Pawn 引用并恢复状态。
      * @param {import("cs_script/point_script").CSPlayerPawn} newPawn 新的 Pawn 实体
+     * @param {number} respawnState 重生后要进入的目标状态
      */
-    handleReset(newPawn) {
-        this.lifecycle.handleReset(newPawn);
+    handleReset(newPawn, respawnState) {
+        this.lifecycle.handleReset(newPawn, respawnState);
     }
 
     /**
@@ -147,9 +145,10 @@ export class Player {
      * 复活玩家，可指定初始生命和护甲。
      * @param {number} [health] 复活后生命值
      * @param {number} [armor] 复活后护甲值
+     * @param {number} [targetState] 复活后要进入的目标状态
      */
-    respawn(health, armor) {
-        this.lifecycle.respawn(health, armor);
+    respawn(health, armor, targetState = PlayerState.PREPARING) {
+        this.lifecycle.respawn(health, armor, targetState);
     }
 
     enterAliveState() {
@@ -254,19 +253,14 @@ export class Player {
     // ——— Tick ———
     /**
      * 每帧调度入口。
-     * @param {number} now 当前引擎时间
      */
-    tick(now) {
+    tick() {
         
         if (this.state === PlayerState.DISCONNECTED) return;
         if (this.state === PlayerState.DEAD) return;
 
-        const dt = this.lastTick > 0 ? now - this.lastTick : 0;
-        this.lastTick = now;
-        if (dt <= 0) return;
-
         // 1. buff 计时 & 过期清理
-        this.buffManager.emitEvent(PlayerBuffEvents.Tick, { dt });
+        this.buffManager.emitEvent(PlayerBuffEvents.Tick, { });
     }
 
     // ——— 查询 ———

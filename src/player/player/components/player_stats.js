@@ -8,35 +8,33 @@ const FALLBACK_LEVEL_CONFIG = {
     level: 1,
     expRequired: 0,
     maxHealth: 100,
-    attack: 10,
+    attackScale: 1,
     critChance: 0,
     critMultiplier: 1,
     healOnLevelUp: LevelUpHealPolicy.FULL,
 };
 
-const BASE_LEVEL_CONFIG = LEVEL_CONFIGS[0] ?? FALLBACK_LEVEL_CONFIG;
-const MAX_LEVEL = LEVEL_CONFIGS.length || 1;
-const BASE_ATTACK = BASE_LEVEL_CONFIG.attack ?? 0;
-
-/**
- * 仅对正向收益应用倍率，负向扣减保持原值。
- * @param {number} amount
- * @param {number} multiplier
- * @returns {number}
- */
-function scalePositiveAmount(amount, multiplier) {
-    return amount > 0 ? amount * multiplier : amount;
-}
+const MAX_LEVEL = Math.max(LEVEL_CONFIGS.length, 1);
 
 /**
  * 将数值先取整，再约束到给定区间内。
- * @param {number} value
- * @param {number} min
- * @param {number} max
- * @returns {number}
+ * @param {number} value 原始数值。
+ * @param {number} min 允许的最小值。
+ * @param {number} max 允许的最大值。
+ * @returns {number} 约束后的整数结果。
  */
 function clampRounded(value, min, max) {
     return Math.max(min, Math.min(Math.round(value), Math.round(max)));
+}
+
+/**
+ * 仅对正向收益应用倍率，负向扣减保持原值。
+ * @param {number} amount 原始增减值。
+ * @param {number} multiplier 正向收益倍率。
+ * @returns {number} 应用倍率后的结果。
+ */
+function scalePositiveAmount(amount, multiplier) {
+    return amount > 0 ? amount * multiplier : amount;
 }
 
 /**
@@ -55,240 +53,130 @@ function clampRounded(value, min, max) {
  */
 export class PlayerStats {
     /**
-     * @param {import("../player").Player} player
+     * 创建玩家数值组件，并准备所有运行期字段。
+     * @param {import("../player").Player} player 所属的玩家对象。
      */
     constructor(player) {
         this.player = player;
+
+        const levelConfig = LEVEL_CONFIGS[0] ?? FALLBACK_LEVEL_CONFIG;
+
+        // 等级与成长资源。
         this.level = 1;
+        this.money = 0;
+        this.exp = 0;
 
-        const levelConfig = this._getCurrentLevelConfig();
-
-        // 基础生命相关属性。
+        // 战斗资源。
         this.baseMaxHealth = levelConfig.maxHealth;
         this.maxHealth = this.baseMaxHealth;
         this.health = this.maxHealth;
         this.armor = 0;
 
-        // 基础输出相关属性。
-        this.baseAttack = levelConfig.attack;
-        this.attack = this.baseAttack;
-        this.critChance = levelConfig.critChance;
-        this.critMultiplier = levelConfig.critMultiplier;
+        // 输出属性。
+        this.baseAttackScale = levelConfig.attackScale ?? FALLBACK_LEVEL_CONFIG.attackScale;
+        this.attackScale = this.baseAttackScale;
+        this.baseCritChance = levelConfig.critChance;
+        this.critChance = this.baseCritChance;
+        this.baseCritMultiplier = levelConfig.critMultiplier;
+        this.critMultiplier = this.baseCritMultiplier;
 
-        // 收益倍率，默认均为 1，由 Buff 等系统修改。
+        // 收益倍率。
         this.baseMoneyGain = 1;
-        this.moneyGain = 1;
+        this.moneyGain = this.baseMoneyGain;
         this.baseExpGain = 1;
-        this.expGain = 1;
+        this.expGain = this.baseExpGain;
 
-        // 成长主资源。
-        this.money = 0;
-        this.exp = 0;
+        // 统计字段。
+        this.score = 0;
+        this.kills = 0;
+        this.damageDealt = 0;
+        this.headshots = 0;
+        this.waveProgress = 0;
 
-        this._resetCombatStats();
+        this._initializeState();
     }
 
+    // ——— 主 API ———
+
     /**
-     * 给玩家增加金钱，并应用当前金钱收益倍率。
-     * @param {number} amount
-     * @returns {number}
+     * 增加金钱。正数视为奖励，负数会回落到扣钱逻辑。
+     * @param {number} amount 要增加的金钱数量。
+     * @returns {number} 实际变动后的金钱数量。
      */
     addMoney(amount) {
-        return this.applyMoneyDelta(amount, true);
+        if (amount < 0) {
+            return this.deductMoney(-amount) ? -Math.round(-amount) : 0;
+        }
+
+        return this._applyRewardDelta("money", amount, this.moneyGain);
     }
 
     /**
-     * 处理金钱变化，可选是否套用收益倍率。
-     * 兼容旧调用，外部通常应优先使用 addMoney。
-     * @param {number} amount
-     * @param {boolean} [applyGain=true]
-     * @returns {number}
+     * 增加经验值，并在需要时连续升级。
+     * @param {number} amount 要增加的经验值。
+     * @returns {number} 实际变动后的经验值。
      */
-    applyMoneyDelta(amount, applyGain = true) {
-        return this._applyMoneyChange(amount, applyGain ? this.moneyGain : 1);
-    }
+    addExp(amount) {
+        if (this.level >= MAX_LEVEL) {
+            this.exp = 0;
+            return 0;
+        }
 
-    /**
-     * 直接写入金钱变化，不再重复套用任何倍率。
-     * 兼容旧调用，外部通常不需要直接使用。
-     * @param {number} amount
-     * @returns {number}
-     */
-    applyRawMoneyDelta(amount) {
-        return this._applyMoneyChange(amount, 1);
+        const actual = this._applyRewardDelta("exp", amount, this.expGain);
+        if (actual > 0) {
+            this._applyPendingLevelUps();
+        }
+
+        return actual;
     }
 
     /**
      * 扣除指定金钱，余额不足时返回 false。
-     * @param {number} amount
-     * @returns {boolean}
+     * @param {number} amount 要扣除的金钱数量。
+     * @returns {boolean} 是否扣除成功。
      */
     deductMoney(amount) {
-        if (this.money < amount) return false;
-        this.applyRawMoneyDelta(-amount);
+        const roundedAmount = Math.max(0, Math.round(amount));
+        if (!roundedAmount) return true;
+        if (this.money < roundedAmount) return false;
+
+        this.money -= roundedAmount;
         return true;
     }
 
     /**
-     * 给玩家增加经验，并应用当前经验收益倍率。
-     * @param {number} amount
-     * @returns {number}
-     */
-    addExp(amount) {
-        return this.applyExpDelta(amount, true);
-    }
-
-    /**
-     * 处理经验变化，可选是否套用收益倍率。
-     * 兼容旧调用，外部通常应优先使用 addExp。
-     * @param {number} amount
-     * @param {boolean} [applyGain=true]
-     * @returns {number}
-     */
-    applyExpDelta(amount, applyGain = true) {
-        return this._applyExpChange(amount, applyGain ? this.expGain : 1);
-    }
-
-    /**
-     * 直接写入经验变化，并在正向增长后持续检测升级。
-     * 兼容旧调用，外部通常不需要直接使用。
-     * @param {number} amount
-     * @returns {number}
-     */
-    applyRawExpDelta(amount) {
-        return this._applyExpChange(amount, 1);
-    }
-
-    /**
-     * 获取当前等级升级所需经验值。
-     * @returns {number}
-     */
-    getExpNeeded() {
-        return this._getCurrentLevelConfig().expRequired;
-    }
-
-    /**
-     * 检查当前经验是否足够升级。
-     * 若满足条件，则执行升级、扣除经验并刷新派生属性。
-     * @returns {boolean}
-     */
-    _checkLevelUp() {
-        if (this.level >= MAX_LEVEL) {
-            this.exp = 0;
-            return false;
-        }
-
-        const needed = this.getExpNeeded();
-        if (needed <= 0 || this.exp < needed) return false;
-
-        this.level++;
-        this.exp -= needed;
-
-        this._applyLevelDerivedStats();
-
-        return true;
-    }
-
-    /**
-     * 升级后刷新等级基础属性，并按照配置决定是否回满或保留血量比例。
-     */
-    _applyLevelDerivedStats() {
-        const previousHealth = this.health;
-        const previousMaxHealth = this.maxHealth;
-        const levelConfig = this._getCurrentLevelConfig();
-
-        this._applyLevelBaseConfig(levelConfig);
-        this._recomputeBuffDerivedStats();
-        this.health = this._resolveLevelUpHealth(previousHealth, previousMaxHealth, levelConfig);
-        this._syncHealthState();
-    }
-
-    /**
-     * 按当前等级重新计算基础属性，并重新叠加 Buff 修正。
-     */
-    refreshLevelStats() {
-        this._applyLevelBaseConfig();
-        this._recomputeBuffDerivedStats();
-    }
-
-    /**
-     * 重置整局成长进度，但保留组件实例本身。
-     * 常用于新开一局或整局重置时恢复默认状态。
+     * 清空本局成长与统计数据，并回到 1 级初始状态。
+     * @returns {void}
      */
     resetGameProgress() {
+        this.level = 1;
         this.money = 0;
         this.exp = 0;
-        this.level = 1;
-        this._resetCombatStats();
-        this.moneyGain = this.baseMoneyGain;
-        this.expGain = this.baseExpGain;
-        this.refreshLevelStats();
-        this.resetCombatResources(this.maxHealth, 0);
+        this.score = 0;
+        this.kills = 0;
+        this.damageDealt = 0;
+        this.headshots = 0;
+        this.waveProgress = 0;
+
+        this._resetIncomeModifiers();
+        this.respawn();
     }
 
     /**
-     * 设置当前生命值，并强制约束到 0 ~ maxHealth 之间。
-     * @param {number} value
+     * 按当前等级刷新基础属性，并通知 Buff 重算增益。
+     * @param {number} [health] 重生后要设置的生命值，默认回到当前生命上限。
+     * @param {number} [armor] 重生后要设置的护甲值，默认清零。
+     * @returns {void}
      */
-    setHealth(value) {
-        this.health = clampRounded(value, 0, this.maxHealth);
+    respawn(health, armor) {
+        this._refreshDerivedStats();
+        this._setCombatResources(health ?? this.maxHealth, armor ?? 0);
+        this._syncCombatState();
     }
 
     /**
-     * 设置最大生命值，并同步约束当前生命值不超过新上限。
-     * @param {number} value
-     */
-    setMaxHealth(value) {
-        this.maxHealth = Math.max(1, Math.round(value));
-        this.setHealth(this.health);
-    }
-
-    /**
-     * 设置护甲值，并约束到 0 ~ 100。
-     * @param {number} value
-     */
-    setArmor(value) {
-        this.armor = clampRounded(value, 0, 100);
-    }
-
-    /**
-     * 重置战斗资源到指定值。
-     * 未传值时分别回到当前最大生命和 0 护甲。
-     * @param {number} [health]
-     * @param {number} [armor]
-     */
-    resetCombatResources(health, armor) {
-        this.setHealth(health ?? this.maxHealth);
-        this.setArmor(armor ?? 0);
-    }
-
-    /**
-     * 获取当前攻击相对 1 级基准攻击的倍率关系。
-     * 供最终伤害计算阶段叠乘使用。
-     * @returns {number}
-     */
-    getAttackScale() {
-        if (BASE_ATTACK <= 0) return 1;
-        return this.attack / BASE_ATTACK;
-    }
-
-    /**
-     * 计算玩家的最终攻击伤害。
-     * 直接按当前攻击相对 1 级基准攻击的倍率缩放，再交给 Buff 事件做二次修正。
-     * @param {number} baseDamage
-     * @returns {number}
-     */
-    getAttackDamage(baseDamage) {
-        const event = {
-            damage: Math.max(0, Math.round(baseDamage * this.getAttackScale())),
-        };
-        this.player.buffManager.emitEvent(PlayerBuffEvents.Attack, event);
-        return event.damage;
-    }
-
-    /**
-     * 获取玩家当前数值快照，供 HUD、调试或外部系统读取。
-     * @returns {{id: number, name: string, slot: number, level: number, money: number, health: number, maxHealth: number, armor: number, attack: number, critChance: number, critMultiplier: number, kills: number, score: number, exp: number, expNeeded: number}}
+     * 获取玩家当前数值快照。
+     * @returns {any} 当前玩家的主要数值摘要。
      */
     getSummary() {
         return {
@@ -300,114 +188,135 @@ export class PlayerStats {
             health: this.health,
             maxHealth: this.maxHealth,
             armor: this.armor,
-            attack: this.attack,
+            attack: this.attackScale,
+            attackScale: this.attackScale,
             critChance: this.critChance,
             critMultiplier: this.critMultiplier,
             kills: this.kills,
             score: this.score,
             exp: this.exp,
-            expNeeded: this.getExpNeeded(),
+            expNeeded: this._getExpNeeded(),
         };
     }
 
+    // ——— 兼容层：为了不改其他文件而保留 ———
+
     /**
-     * 获取当前等级的手动配置项。
+     * 按当前等级重新计算派生属性，并保持当前生命与护甲在合法范围内。
+     * @returns {void}
      */
-    _getCurrentLevelConfig() {
-        const clamped = Math.max(1, Math.min(this.level, MAX_LEVEL));
-        return LEVEL_CONFIGS[clamped - 1] ?? BASE_LEVEL_CONFIG;
+    refreshLevelStats() {
+        this._refreshDerivedStats();
+        this._setCombatResources(this.health, this.armor);
     }
 
     /**
-     * 根据当前等级应用手动配置表中的基础属性。
-     * @param {import("../../player_const").LevelConfig} [levelConfig]
+     * 重置当前战斗资源。
+     * @param {number} [health] 要设置的生命值，默认回满到当前生命上限。
+     * @param {number} [armor] 要设置的护甲值，默认清零。
+     * @returns {void}
      */
-    _applyLevelBaseConfig(levelConfig = this._getCurrentLevelConfig()) {
-        this.baseMaxHealth = levelConfig.maxHealth;
-        this.baseAttack = levelConfig.attack;
-        this.critChance = levelConfig.critChance;
-        this.critMultiplier = levelConfig.critMultiplier;
+    resetCombatResources(health, armor) {
+        this._setCombatResources(health ?? this.maxHealth, armor ?? 0);
     }
 
     /**
-     * 重新计算 Buff 对属性和收益倍率的影响。
-     * 若当前没有可用 Buff 管理器，则回退到纯等级基础值。
+     * 设置当前生命值，并约束到合法区间。
+     * @param {number} value 目标生命值。
+     * @returns {void}
      */
-    _recomputeBuffDerivedStats() {
-        this._resetDerivedStatsToBase();
-        this.player.buffManager?.emitEvent(PlayerBuffEvents.Spawn, { recompute: true });
+    setHealth(value) {
+        this.health = clampRounded(value, 0, this.maxHealth);
+    }
+
+    /**
+     * 设置当前最大生命值，并同步修正当前生命值。
+     * @param {number} value 目标最大生命值。
+     * @returns {void}
+     */
+    setMaxHealth(value) {
+        this.maxHealth = Math.max(1, Math.round(value));
         this.setHealth(this.health);
     }
 
     /**
-     * @param {number} amount
-     * @param {number} multiplier
-     * @returns {number}
+     * 设置当前护甲值，并约束到合法区间。
+     * @param {number} value 目标护甲值。
+     * @returns {void}
      */
-    _applyMoneyChange(amount, multiplier) {
-        return this._applyRoundedDelta("money", scalePositiveAmount(amount, multiplier));
+    setArmor(value) {
+        this.armor = clampRounded(value, 0, 100);
     }
 
     /**
-     * @param {number} amount
-     * @param {number} multiplier
-     * @returns {number}
+     * 计算一次攻击伤害，并允许 Buff 参与最终修正。
+     * @param {number} baseDamage 原始伤害值。
+     * @returns {number} 结算后的最终伤害。
      */
-    _applyExpChange(amount, multiplier) {
-        const scaledAmount = scalePositiveAmount(amount, multiplier);
-        if (!scaledAmount) return 0;
-        if (this.level >= MAX_LEVEL) return 0;
+    getAttackDamage(baseDamage) {
+        const event = this._rollAttackDamage(baseDamage);
+        this.player.buffManager.emitEvent(PlayerBuffEvents.Attack, event);
+        event.damage = Math.max(0, Math.round(event.damage));
+        return event.damage;
+    }
 
-        const actual = this._applyRoundedDelta("exp", scaledAmount);
-        if (actual > 0) {
-            while (this._checkLevelUp()) { /* keep going */ }
+    // ——— 等级链 ———
+
+    /**
+     * 获取当前等级对应的配置，不存在时回落到兜底配置。
+     * @returns {import("../../player_const").LevelConfig | typeof FALLBACK_LEVEL_CONFIG} 当前等级配置。
+     */
+    _getCurrentLevelConfig() {
+        const clampedLevel = Math.max(1, Math.min(this.level, MAX_LEVEL));
+        return LEVEL_CONFIGS[clampedLevel - 1] ?? LEVEL_CONFIGS[0] ?? FALLBACK_LEVEL_CONFIG;
+    }
+
+    /**
+     * 获取当前等级升到下一级所需经验。
+     * @returns {number} 当前升级所需经验。
+     */
+    _getExpNeeded() {
+        return this._getCurrentLevelConfig().expRequired;
+    }
+
+    /**
+     * 在经验足够时连续执行升级，并处理升级后的生命值结算。
+     * @returns {void}
+     */
+    _applyPendingLevelUps() {
+        let didLevelUp = false;
+
+        while (this.level < MAX_LEVEL) {
+            const needed = this._getExpNeeded();
+            if (needed <= 0 || this.exp < needed) break;
+
+            const previousHealth = this.health;
+            const previousMaxHealth = this.maxHealth;
+
+            this.level++;
+            this.exp = Math.max(0, Math.round(this.exp - needed));
+
+            const levelConfig = this._getCurrentLevelConfig();
+            this._refreshDerivedStats(levelConfig);
+            this.health = this._resolveLevelUpHealth(previousHealth, previousMaxHealth, levelConfig);
+            didLevelUp = true;
         }
 
-        return actual;
+        if (this.level >= MAX_LEVEL) {
+            this.exp = 0;
+        }
+
+        if (didLevelUp) {
+            this._syncCombatState();
+        }
     }
 
     /**
-     * @param {"money"|"exp"} field
-     * @param {number} amount
-     * @returns {number}
-     */
-    _applyRoundedDelta(field, amount) {
-        if (!amount) return 0;
-
-        const oldValue = this[field];
-        const nextValue = Math.max(0, Math.round(oldValue + amount));
-        const actual = nextValue - oldValue;
-        if (!actual) return 0;
-
-        this[field] = nextValue;
-        return actual;
-    }
-
-    _resetCombatStats() {
-        this.score = 0;
-        this.kills = 0;
-        this.damageDealt = 0;
-        this.headshots = 0;
-        this.waveProgress = 0;
-    }
-
-    _resetDerivedStatsToBase() {
-        this.maxHealth = this.baseMaxHealth;
-        this.attack = this.baseAttack;
-        this.moneyGain = this.baseMoneyGain;
-        this.expGain = this.baseExpGain;
-    }
-
-    _syncHealthState() {
-        this.player.entityBridge.syncMaxHealth(this.maxHealth);
-        this.player.entityBridge.syncHealth(this.health);
-    }
-
-    /**
-     * @param {number} previousHealth
-     * @param {number} previousMaxHealth
-     * @param {import("../../player_const").LevelConfig} levelConfig
-     * @returns {number}
+     * 根据升级回血策略，结算升级后的生命值。
+     * @param {number} previousHealth 升级前的生命值。
+     * @param {number} previousMaxHealth 升级前的最大生命值。
+     * @param {import("../../player_const").LevelConfig | typeof FALLBACK_LEVEL_CONFIG} levelConfig 新等级对应的配置。
+     * @returns {number} 升级后的生命值。
      */
     _resolveLevelUpHealth(previousHealth, previousMaxHealth, levelConfig) {
         switch (levelConfig.healOnLevelUp ?? LevelUpHealPolicy.FULL) {
@@ -421,5 +330,162 @@ export class PlayerStats {
             default:
                 return clampRounded(previousHealth, 0, this.maxHealth);
         }
+    }
+
+    // ——— 派生属性链 ———
+
+    /**
+     * 按等级配置重建基础属性，并重新应用 Buff 的派生修正。
+     * @param {import("../../player_const").LevelConfig | typeof FALLBACK_LEVEL_CONFIG} [levelConfig] 要应用的等级配置，默认使用当前等级。
+     * @returns {void}
+     */
+    _refreshDerivedStats(levelConfig = this._getCurrentLevelConfig()) {
+        this._applyLevelBaseConfig(levelConfig);
+        this._resetDerivedStatsToBase();
+        this._recomputeBuffModifiers();
+    }
+
+    /**
+     * 将等级配置写入基础属性字段。
+     * @param {import("../../player_const").LevelConfig | typeof FALLBACK_LEVEL_CONFIG} levelConfig 要应用的等级配置。
+     * @returns {void}
+     */
+    _applyLevelBaseConfig(levelConfig) {
+        this.baseMaxHealth = levelConfig.maxHealth;
+        this.baseAttackScale = levelConfig.attackScale ?? FALLBACK_LEVEL_CONFIG.attackScale;
+        this.baseCritChance = levelConfig.critChance;
+        this.baseCritMultiplier = levelConfig.critMultiplier;
+    }
+
+    /**
+     * 用基础属性覆盖当前派生属性，清掉上一轮 Buff 的改写结果。
+     * @returns {void}
+     */
+    _resetDerivedStatsToBase() {
+        this.maxHealth = this.baseMaxHealth;
+        this.attackScale = this.baseAttackScale;
+        this.critChance = this.baseCritChance;
+        this.critMultiplier = this.baseCritMultiplier;
+        this.moneyGain = this.baseMoneyGain;
+        this.expGain = this.baseExpGain;
+    }
+
+    /**
+     * 通知 Buff 重新计算派生属性，并重新约束当前生命与护甲。
+     * @returns {void}
+     */
+    _recomputeBuffModifiers() {
+        this.player.buffManager?.emitEvent(PlayerBuffEvents.Recompute, { recompute: true });
+        this.setHealth(this.health);
+        this.setArmor(this.armor);
+    }
+
+    /**
+     * 将金钱和经验收益倍率恢复为基础值。
+     * @returns {void}
+     */
+    _resetIncomeModifiers() {
+        this.moneyGain = this.baseMoneyGain;
+        this.expGain = this.baseExpGain;
+    }
+
+    // ——— 资源链 ———
+
+    /**
+     * 初始化或重置数值组件的默认状态。
+     * @returns {void}
+     */
+    _initializeState() {
+        this.level = 1;
+        this.baseMoneyGain = 1;
+        this.baseExpGain = 1;
+
+        const levelConfig = this._getCurrentLevelConfig();
+        this._applyLevelBaseConfig(levelConfig);
+        this._resetDerivedStatsToBase();
+
+        this.health = this.maxHealth;
+        this.armor = 0;
+
+        this.money = 0;
+        this.exp = 0;
+        this.score = 0;
+        this.kills = 0;
+        this.damageDealt = 0;
+        this.headshots = 0;
+        this.waveProgress = 0;
+    }
+
+    /**
+     * 同时设置当前生命和护甲。
+     * @param {number} health 目标生命值。
+     * @param {number} armor 目标护甲值。
+     * @returns {void}
+     */
+    _setCombatResources(health, armor) {
+        this.setHealth(health);
+        this.setArmor(armor);
+    }
+
+    /**
+     * 将当前生命、最大生命和护甲同步到引擎实体。
+     * @returns {void}
+     */
+    _syncCombatState() {
+        this.player.entityBridge.syncMaxHealth(this.maxHealth);
+        this.player.entityBridge.syncHealth(this.health);
+        this.player.entityBridge.syncArmor(this.armor);
+    }
+
+    /**
+     * 对奖励类数值应用收益倍率后再落到具体字段上。
+     * @param {"money"|"exp"} field 要修改的资源字段。
+     * @param {number} amount 原始增减值。
+     * @param {number} multiplier 要应用的收益倍率。
+     * @returns {number} 实际生效的变动值。
+     */
+    _applyRewardDelta(field, amount, multiplier) {
+        return this._applyRoundedDelta(field, scalePositiveAmount(amount, multiplier));
+    }
+
+    /**
+     * 将数值变动写入指定字段，并保证结果不会小于 0。
+     * @param {"money"|"exp"} field 要修改的资源字段。
+     * @param {number} amount 要写入的增减值。
+     * @returns {number} 实际生效的变动值。
+     */
+    _applyRoundedDelta(field, amount) {
+        if (!amount) return 0;
+
+        const oldValue = this[field];
+        const nextValue = Math.max(0, Math.round(oldValue + amount));
+        const actual = nextValue - oldValue;
+        if (!actual) return 0;
+
+        this[field] = nextValue;
+        return actual;
+    }
+
+    // ——— 伤害链 ———
+
+    /**
+     * 按攻击倍率与暴击配置结算一次基础伤害。
+     * @param {number} baseDamage 原始伤害值。
+     * @returns {{damage: number, baseDamage: number, scaledDamage: number, critChance: number, critMultiplier: number, isCritical: boolean}} 本次伤害结算明细。
+     */
+    _rollAttackDamage(baseDamage) {
+        const scaledDamage = Math.max(0, baseDamage * this.attackScale);
+        const critChance = Math.max(0, Math.min(this.critChance, 1));
+        const critMultiplier = Math.max(1, this.critMultiplier);
+        const isCritical = critChance > 0 && Math.random() < critChance;
+
+        return {
+            damage: Math.max(0, Math.round(scaledDamage * (isCritical ? critMultiplier : 1))),
+            baseDamage,
+            scaledDamage: Math.max(0, Math.round(scaledDamage)),
+            critChance,
+            critMultiplier,
+            isCritical,
+        };
     }
 }
