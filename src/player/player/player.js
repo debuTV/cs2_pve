@@ -161,19 +161,17 @@ export class Player {
     /**
      * 增加金钱。
      * @param {number} amount 金额
-     * @param {string} [reason] 来源原因
      */
-    addMoney(amount, reason) {
-        this.stats.addMoney(amount, reason);
+    addMoney(amount) {
+        this.stats.addMoney(amount);
     }
 
     /**
      * 增加经验值。
      * @param {number} amount 经验量
-     * @param {string} [reason] 来源原因
      */
-    addExp(amount, reason) {
-        this.stats.addExp(amount, reason);
+    addExp(amount) {
+        this.stats.addExp(amount);
     }
 
     // ——— 输出伤害（基于等级配置缩放） ———

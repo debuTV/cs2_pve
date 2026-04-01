@@ -2,15 +2,12 @@
  * @module 玩家系统/玩家常量配置
  */
 /**
- * 玩家等级成长配置。
+ * 玩家等级配置。
  *
- * 采用"公式默认值 + 等级数组覆盖"的双层结构：
- * - 公式参数可自动生成所有等级的默认配置。
- * - 显式等级数组优先级更高，可覆盖公式生成的值。
- * - 未显式给出的等级由公式自动补全。
- *
- * 经验语义：每升一级扣除当前等级所需经验，剩余经验继续向下一等级积累。
- * 倍率语义：基础值 × 全局倍率，非逐级连乘。
+ * 采用唯一的显式等级表作为真源：
+ * - 每一级都必须手动填写完整配置。
+ * - 经验语义：每升一级扣除当前等级所需经验，剩余经验继续向下一等级积累。
+ * - 生命、攻击、暴击率、暴击伤害均为该等级的基础值。
  */
 /**
  * 升级回血策略枚举。
@@ -66,166 +63,64 @@ export const PlayerState = {
  *
  * @typedef {object} LevelConfig
  * @property {number} level - 等级
- * @property {number} expRequired - 升级所需经验
- * @property {number} maxHealthMultiplier - 生命值倍率
- * @property {number} attackMultiplier - 攻击力倍率
- * @property {string} [healOnLevelUp] - 升级回血策略，取值见 {@link LevelUpHealPolicy}
+ * @property {number} expRequired - 升到下一级所需经验，满级填 0
+ * @property {number} maxHealth - 该等级的基础最大生命值
+ * @property {number} attack - 该等级的基础攻击力
+ * @property {number} critChance - 该等级的基础暴击率
+ * @property {number} critMultiplier - 该等级的基础暴击伤害倍率
+ * @property {string} healOnLevelUp - 升级回血策略，取值见 {@link LevelUpHealPolicy}
  */
 
-/**
- * 公式参数配置。
- *
- * @typedef {object} FormulaParams
- * @property {number} baseExp - 基础经验需求
- * @property {number} expPerLevel - 每级额外经验需求
- * @property {number} healthGrowth - 生命值成长率
- * @property {number} attackGrowth - 攻击力成长率
- * @property {number} critChanceGrowth - 暴击率成长率
- * @property {number} critMultiplierGrowth - 暴击伤害倍率成长率
- */
-
-/**
- * 最大等级
- */
-export const MAX_LEVEL = 5;
-/**
- * 基础属性数值（等级 1 的数值，后续等级通过倍率成长）
- */
-export const BASE_MAX_HEALTH = 100;
-/**
- * 基础攻击力（等级 1 的数值，后续等级通过倍率成长）
- */
-export const BASE_ATTACK = 10;
-/**
- * 基础暴击率（等级 1 的数值，后续等级通过成长率提升）
- */
-export const BASE_CRIT_CHANCE = 0.1;
-/**
- * 基础暴击伤害倍率（等级 1 的数值，后续等级通过成长率提升）
- */
-export const BASE_CRIT_MULTIPLIER = 1.5;
 /**
  * 默认升级回血策略
  */
 export const DEFAULT_LEVEL_UP_HEAL_POLICY = LevelUpHealPolicy.FULL;
 
-/** 
- * 等级成长公式参数配置。
- * @type {FormulaParams}
- */
-export const FORMULA_PARAMS = {
-    baseExp: 100,
-    expPerLevel: 50,
-    healthGrowth: 0.1,
-    attackGrowth: 0.08,
-    critChanceGrowth: 0.005,
-    critMultiplierGrowth: 0.02,
-};
-
 /** @type {LevelConfig[]} */
-export const LEVEL_OVERRIDES = [];
-
-/**
- * @param {number} level
- * @returns {LevelConfig}
- */
-function buildFormulaConfig(level) {
-    const p = FORMULA_PARAMS;
-    return {
-        level,
-        expRequired: level >= MAX_LEVEL ? 0 : p.baseExp + (level - 1) * p.expPerLevel,
-        maxHealthMultiplier: 1 + (level - 1) * p.healthGrowth,
-        attackMultiplier: 1 + (level - 1) * p.attackGrowth,
-    };
-}
-
-/**
- * @returns {LevelConfig[]}
- */
-export function buildLevelConfigs() {
-    /** @type {LevelConfig[]} */
-    const configs = [];
-    for (let lv = 1; lv <= MAX_LEVEL; lv++) {
-        configs.push(buildFormulaConfig(lv));
-    }
-    for (const override of LEVEL_OVERRIDES) {
-        const idx = override.level - 1;
-        if (idx >= 0 && idx < configs.length) {
-            configs[idx] = { ...configs[idx], ...override };
-        }
-    }
-    return configs;
-}
-
-const _levelConfigs = buildLevelConfigs();
-
-/**
- * @param {number} level
- * @returns {LevelConfig}
- */
-export function getLevelConfig(level) {
-    const clamped = Math.max(1, Math.min(level, MAX_LEVEL));
-    return _levelConfigs[clamped - 1];
-}
-
-/**
- * @param {number} level
- * @returns {number}
- */
-export function getExpRequired(level) {
-    if (level >= MAX_LEVEL) return 0;
-    return getLevelConfig(level).expRequired;
-}
-
-/**
- * @param {number} level
- * @returns {number}
- */
-export function getMaxHealthForLevel(level) {
-    return Math.round(BASE_MAX_HEALTH * getLevelConfig(Math.max(1, level)).maxHealthMultiplier);
-}
-
-/**
- * @param {number} level
- * @returns {number}
- */
-export function getAttackForLevel(level) {
-    return Math.round(BASE_ATTACK * getLevelConfig(Math.max(1, level)).attackMultiplier);
-}
-
-/**
- * @param {number} level
- * @returns {number}
- */
-export function getCritChanceForLevel(level) {
-    const p = FORMULA_PARAMS;
-    return Math.max(0, Math.min(BASE_CRIT_CHANCE + (Math.max(1, level) - 1) * p.critChanceGrowth, 1));
-}
-
-/**
- * @param {number} level
- * @returns {number}
- */
-export function getCritMultiplierForLevel(level) {
-    const p = FORMULA_PARAMS;
-    return Math.max(1, BASE_CRIT_MULTIPLIER + (Math.max(1, level) - 1) * p.critMultiplierGrowth);
-}
-
-/**
- * @param {number} level
- * @returns {string}
- */
-export function getHealPolicyForLevel(level) {
-    const config = getLevelConfig(Math.max(1, level));
-    return config.healOnLevelUp ?? DEFAULT_LEVEL_UP_HEAL_POLICY;
-}
-
-/**
- * @param {number} baseDamage
- * @param {number} level
- * @returns {number}
- */
-export function scaleOutgoingDamage(baseDamage, level) {
-    const config = getLevelConfig(Math.max(1, level));
-    return Math.round(baseDamage * config.attackMultiplier);
-}
+export const LEVEL_CONFIGS = [
+    {
+        level: 1,
+        expRequired: 100,
+        maxHealth: 100,
+        attack: 10,
+        critChance: 0.1,
+        critMultiplier: 1.5,
+        healOnLevelUp: DEFAULT_LEVEL_UP_HEAL_POLICY,
+    },
+    {
+        level: 2,
+        expRequired: 150,
+        maxHealth: 110,
+        attack: 11,
+        critChance: 0.105,
+        critMultiplier: 1.52,
+        healOnLevelUp: DEFAULT_LEVEL_UP_HEAL_POLICY,
+    },
+    {
+        level: 3,
+        expRequired: 200,
+        maxHealth: 120,
+        attack: 12,
+        critChance: 0.11,
+        critMultiplier: 1.54,
+        healOnLevelUp: DEFAULT_LEVEL_UP_HEAL_POLICY,
+    },
+    {
+        level: 4,
+        expRequired: 250,
+        maxHealth: 130,
+        attack: 12,
+        critChance: 0.115,
+        critMultiplier: 1.56,
+        healOnLevelUp: DEFAULT_LEVEL_UP_HEAL_POLICY,
+    },
+    {
+        level: 5,
+        expRequired: 0,
+        maxHealth: 140,
+        attack: 13,
+        critChance: 0.12,
+        critMultiplier: 1.58,
+        healOnLevelUp: DEFAULT_LEVEL_UP_HEAL_POLICY,
+    },
+];

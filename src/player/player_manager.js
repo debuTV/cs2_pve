@@ -78,10 +78,10 @@ export class PlayerManager {
                 player.addBuff(payload.buffTypeId, payload.params ?? {});
             },
             money: (player, payload) => {
-                player.addMoney(payload.amount ?? 0, payload.reason);
+                player.addMoney(payload.amount ?? 0);
             },
             exp: (player, payload) => {
-                player.addExp(payload.amount ?? 0, payload.reason);
+                player.addExp(payload.amount ?? 0);
             },
             heal: (player, payload) => {
                 player.heal(payload.amount ?? 0);
