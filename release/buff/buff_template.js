@@ -3,14 +3,15 @@ import { Monster } from "../monster/monster/monster";
 import { Player } from "../player/player/player";
 export const BuffFactory = {
     /**
-     * 根据 typeId 创建对应的技能实例。未识别的 id 返回 null。
+     * 根据 typeId 创建对应的buff实例。未识别的 id 返回 null。
      * @param {Monster|Player} target 所属怪物实例
+     * @param {string} typeid buff类型标识
      * @param {number} id 
-     * @param {any} params 技能配置参数
+     * @param {any} params buff配置参数
      * @returns {BuffTemplate|null}
      */
-    create(target,id, params) {
-        switch (params.id) {
+    create(target,typeid,id, params) {
+        switch (typeid) {
             case "corestats":
                 return null;
             default:

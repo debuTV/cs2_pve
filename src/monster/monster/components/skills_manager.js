@@ -36,7 +36,7 @@ export class MonsterSkillsManager {
 
         for (const cfg of skillPool) {
             if (Math.random() > cfg.chance) continue;
-            const skill = SkillFactory.create(this.monster, cfg.id, cfg.params);
+            const skill = SkillFactory.create(null, this.monster, cfg.id, this.monster.skills.length, cfg.params);
             if (!skill) continue;
             this.addSkill(skill);
         }

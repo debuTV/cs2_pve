@@ -1,4 +1,5 @@
 import { Player } from "../player/player/player";
+import { Monster } from "../monster/monster/monster";
 import { BuffFactory, BuffTemplate } from "./buff_template";
 /**
  * Buff 管理器。
@@ -15,12 +16,13 @@ export class BuffManager {
     }
     /**
      * @param {Player|Monster} target
+     * @param {string} typeid buff类型标识
      * @param {any} params
      * @returns {number|null} 返回 buff 的 id，如果创建失败则返回 null
      */
-    addbuff(target,params)
+    addbuff(target,typeid,params)
     {
-        const buff=BuffFactory.create(target,this.id++,params);
+        const buff=BuffFactory.create(target,typeid,this.id++,params);
         if(buff)
         {
             const currentBuff=this.buffMap.get(buff.id);

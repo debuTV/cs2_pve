@@ -30,7 +30,7 @@ import { InputManager } from "./input/input_manager";
 import { ShopManager } from "./shop/shop_manager";
 import { HudManager } from "./hud/hud_manager";
 import { CHANNAL } from "./hud/hud_const";
-import {BuffManager} from "./buff/buff_manager";
+import {SkillManager} from "./skill/skill_manager";
 
 // ═══════════════════════════════════════════════
 // 1. 服务器初始化

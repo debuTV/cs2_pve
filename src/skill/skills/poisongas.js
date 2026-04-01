@@ -1,0 +1,86 @@
+/**
+ * @module 怪物系统/怪物技能/毒气
+ */
+import { SkillEvents } from "../skill_const";
+import { SkillTemplate } from "../skill_template";
+
+export class PoisonGasSkill extends SkillTemplate {
+    /**
+     * @param {any|null} player
+     * @param {import("../../monster/monster/monster").Monster|null} monster
+     * @param {number} id
+     * @param {{
+     *   cooldown?: number;
+     *   events?: string[];
+     *   animation?: string | null;
+     *   particleId?: string;
+     *   dps?: number;
+     *   buffDuration?: number;
+     *   tickInterval?: number;
+     *   zoneDuration?: number;
+     *   zoneRadius?: number;
+     *   applyInterval?: number;
+     * }} [params]
+     */
+    constructor(player, monster, id, params = {}) {
+        super(player, monster, "poisongas", id, params);
+        this.animation = params.animation ?? null;
+        this.events = params.events ?? [SkillEvents.Die];
+        this.particleId = params.particleId ?? "poisongas";
+        this.buffTypeId = "poison";
+        this.buffParams = {
+            dps: params.dps ?? 5,
+            duration: params.buffDuration ?? 4,
+            tickInterval: params.tickInterval ?? 1,
+        };
+        this.zoneDuration = params.zoneDuration ?? 5;
+        this.zoneRadius = params.zoneRadius ?? 150;
+        this.applyInterval = params.applyInterval ?? 1;
+    }
+
+    canTrigger(/** @type {any} */ event) {
+        if (!this.events.includes(event.type)) return false;
+        if (!this._cooldownReady()) return false;
+        if (this.animation === null) {
+            this.trigger();
+            return false;
+        }
+        return true;
+    }
+
+    trigger() {
+        if (this.player) {
+            this._markTriggered();
+            return;
+        }
+
+        const monster = this.monster;
+        if (!monster) return;
+
+        const pos = monster.model?.GetAbsOrigin?.();
+        if (!pos) return;
+
+        if (monster.events.onAreaEffectRequest) {
+            monster.events.onAreaEffectRequest({
+                effectType: "poisongas",
+                position: { x: pos.x, y: pos.y, z: pos.z },
+                radius: this.zoneRadius,
+                duration: this.zoneDuration,
+                applyInterval: this.applyInterval,
+                buffTypeId: this.buffTypeId,
+                buffParams: { ...this.buffParams },
+                source: {
+                    sourceType: "monster-skill",
+                    sourceId: monster.id,
+                    monsterId: monster.id,
+                    monsterType: monster.type ?? "unknown",
+                    skillTypeId: this.typeId,
+                },
+                particleId: this.particleId,
+                particleLifetime: this.zoneDuration,
+            });
+        }
+
+        this._markTriggered();
+    }
+}

@@ -2,7 +2,8 @@
  * @module 怪物系统/技能基类
  */
 import { Instance } from "cs_script/point_script";
-
+import { Monster } from "../monster/monster/monster";
+import { Player } from "../player/player/player";
 /*
 技能分类规则（唯一权威）：
   有 animation 字段（非 null/undefined）= 主动技能：canTrigger 通过后进入请求队列，
@@ -60,7 +61,7 @@ MonsterEvents.AttackTrue   → "OnAttackTrue"
 MonsterEvents.ModelRemove  → "OnModelRemove"
  */
 /**
- * 怪物技能基类。所有具体技能继承此类并重写 `canTrigger` 和 `trigger`。
+ * 技能基类。所有具体技能继承此类，并在子类中按宿主类型重写专用入口。
  *
  * 技能分为两大类：
  * - **主动技能**（`animation` 非 null）— `canTrigger` 返回 true 后入队，
@@ -80,70 +81,39 @@ MonsterEvents.ModelRemove  → "OnModelRemove"
 export class SkillTemplate
 {
     /**
-     * 创建技能基类实例，绑定所属怪物。
-    * @param {import("./monster").Monster} monster
+     * 创建技能基类实例，绑定所属施法者。
+     * @param {Player|null} player
+     * @param {Monster|null} monster
+     * @param {string} typeid 
+     * @param {number} id
+     * @param {any} params
      */
-    constructor(monster) {
-        /** 所属怪物实例的引用，用于访问怪物属性、目标、事件系统等。 */
-        this.monster=monster;
+    constructor(player = null, monster = null,typeid,id,params={}) {
+        /** 玩家施法者；只有玩家技能实例会设置。 */
+        this.player = player;
+        /** 怪物施法者；只有怪物技能实例会设置。 */
+        this.monster = monster;
         /** 技能类型标识，对应 SkillFactory 注册键（如 "corestats"）。子类在构造函数里设置。 */
-        this.typeId = "unknown";
-        /** 运行时实例 id，由 MonsterSkillsManager.addSkill 按添加顺序分配（0,1,2,...）。id 越小优先级越高。 */
-        this.id = -1;
-        /** @type {string|null} 动作名称：非 null = 有动作；null = 无动作 */
-        this.animation = null;
+        this.typeId = typeid;
+        /** 运行时实例 id，由 addSkill 按添加顺序分配（0,1,2,...）。id 越小优先级越高。 */
+        this.id = id;
         /** 冷却（秒）。-1=一次性，0=无限制，>0=按秒冷却。默认 -1。 */
-        this.cooldown = -1;
+        this.cooldown = params.cooldown ?? -1;
         /** 上次触发的游戏时间。初始值 -999。由 `_markTriggered` 更新，供 `_cooldownReady` 判断冷却。 */
         this.lastTriggerTime = -999;
         /** 技能是否正在后台运行中（限时技能的执行期间为 true）。由子类 `tick` 逻辑控制。 */
         this.running=false;
-        /**
-         * 异步技能占用标记。非 null 时表示技能自行管理占用生命周期：
-         * - trigger() 中调用 `monster.animationOccupation.setOccupation(asyncOccupation)` 接管占用。
-         * - 技能结束时调用 `monster.onOccupationEnd(asyncOccupation)` 释放。
-         * - 动画完成时的 onOccupationEnd("skill") 因类型不匹配而跳过，不会提前释放。
-         * @type {string|null}
-         */
-        this.asyncOccupation = null;
-        /** 请求优先级次级排序（主排序为实例 id 升序；越大越优先，默认 0）*/
-        this.priority = 0;
-
-        /**
-         * 技能对应的 buff 类型标识，null 表示不施加 buff。
-         * @type {string|null}
-         */
-        this.buffTypeId = null;
-        /** 技能施加 buff 时的默认参数 */
-        this.buffParams = {};
     }
-
+    onSkillAdd(){}
+    onSkillDelete(){}
     /**
-     * 构建发送给玩家 buff 系统的标准 payload。
-     * 子类可重写以提供动态参数（如基于怪物属性计算伤害）。
-     * @returns {{skillTypeId: string, buffTypeId: string|null, params: Record<string,any>, source: {monsterId: number, monsterType: string, skillTypeId: string}}}
+     * @param {string} eventType
+     * @param {import("./skill_const").EmitEventPayload} payload
      */
-    buildBuffPayload() {
-        return {
-            skillTypeId: this.typeId,
-            buffTypeId: this.buffTypeId,
-            params: { ...this.buffParams },
-            source: {
-                sourceType: "monster-skill",
-                sourceId: this.monster.id,
-                monsterId: this.monster.id,
-                monsterType: this.monster.type ?? "unknown",
-                skillTypeId: this.typeId,
-            },
-        };
-    }
-    /**
-     * 是否为有动作技能（配置了 animation）。
-     * 有动作时由管理器进入 SKILL 状态并播放动作；无动作时在 canTrigger 内直接执行。
-     * @returns {boolean}
-     */
-    isActive() {
-        return this.animation !== null && this.animation !== undefined;
+    _emitEvent(eventType, payload = {}) {
+        if(this.canTrigger({ type: eventType, ...payload })) {
+            this._request();
+        }
     }
     /**
      * 这个事件能否执行。
@@ -152,14 +122,17 @@ export class SkillTemplate
      * @param {any} event
      */
     canTrigger(event) {
+        if(this.player)return false;
+        if(this.monster)return false;
         return false;
     }
     /**
      * 请求执行（基类默认实现，子类无需重写）。
      * 仅由 isActive()=true 的技能在 canTrigger 返回 true 后被 emitEvent 调用。
      */
-    request(){
-        this.monster.requestSkill(this);
+    _request(){
+        if(this.player)this.player.requestSkill(this);
+        if(this.monster)this.monster.requestSkill(this);
     }
     /**
      * 执行技能主体逻辑。仅对主动技能有效——动画播放完毕后由 MonsterSkillsManager 调用。
@@ -194,10 +167,5 @@ export class SkillTemplate
      */
     _markTriggered() {
         this.lastTriggerTime = Instance.GetGameTime();
-        // 如果技能配置了 buffTypeId 且怪物有目标，发布 SkillCast 事件
-        if (this.buffTypeId && this.monster.target) {
-            const payload = this.buildBuffPayload();
-            this.monster.events.OnSkillCast?.(this.typeId, this.monster.target, payload);
-        }
     }
 }

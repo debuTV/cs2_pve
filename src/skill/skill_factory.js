@@ -1,6 +1,8 @@
 /**
  * @module 怪物系统/技能工厂
  */
+import { Player } from "../player/player/player";
+import { Monster } from "../monster/monster/monster";
 import { CoreStats } from "./skills/corestats";
 import { PounceSkill } from "./skills/pounce";
 import { InitAnimSkill } from "./skills/initanim";
@@ -12,7 +14,7 @@ import { ShieldSkill } from "./skills/shield";
 import { SpeedBoostSkill } from "./skills/speedboost";
 import { ThrowStoneSkill } from "./skills/throwstone";
 import { LaserBeamSkill } from "./skills/laserbeam";
-import { SkillTemplate } from "./skill_manager";
+import { SkillTemplate } from "./skill_template";
 /*
 技能分类规则（唯一权威）：
   有 animation 参数（非 null）= 有动作：canTrigger 返回 true 后 request 入队，
@@ -85,35 +87,37 @@ spawn       事件触发产卵（默认 OnDie）
 export const SkillFactory = {
     /**
      * 根据 typeId 创建对应的技能实例。未识别的 id 返回 null。
-     * @param {import("./monster").Monster} monster 所属怪物实例
-     * @param {string} id 技能类型标识（如 "corestats"、"pounce"）
+     * @param {Player|null} player 施法玩家
+     * @param {Monster|null} monster 施法怪物
+     * @param {string} typeid 技能类型标识（如 "corestats"、"pounce"）
+     * @param {number} id 技能实例 id
      * @param {any} params 技能配置参数
      * @returns {SkillTemplate|null}
      */
-    create(monster,id, params) {
-        switch (id) {
+  create(player, monster, typeid, id, params = {}) {
+        switch (typeid) {
             case "corestats":
-                return new CoreStats(monster, params);
+        return new CoreStats(player, monster,id, params);
             case "pounce":
-                return new PounceSkill(monster, params);
+        return new PounceSkill(player, monster,id, params);
             case "initanim":
-                return new InitAnimSkill(monster, params);
+        return new InitAnimSkill(player, monster,id, params);
             case "doubleattack":
-                return new DoubleAttackSkill(monster, params);
+        return new DoubleAttackSkill(player, monster,id, params);
             case "powerattack":
-                return new PowerAttackSkill(monster, params);
+        return new PowerAttackSkill(player, monster,id, params);
             case "poisongas":
-                return new PoisonGasSkill(monster, params);
+        return new PoisonGasSkill(player, monster,id, params);
             case "spawn":
-                return new SpawnSkill(monster, params);
+        return new SpawnSkill(player, monster,id, params);
             case "shield":
-                return new ShieldSkill(monster, params);
+        return new ShieldSkill(player, monster,id, params);
             case "speedboost":
-                return new SpeedBoostSkill(monster, params);
+        return new SpeedBoostSkill(player, monster,id, params);
             case "throwstone":
-                return new ThrowStoneSkill(monster, params);
+        return new ThrowStoneSkill(player, monster,id, params);
             case "laserbeam":
-                return new LaserBeamSkill(monster, params);
+        return new LaserBeamSkill(player, monster,id, params);
             default:
                 return null;
         } 
