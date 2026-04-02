@@ -41,22 +41,22 @@ export class LaserBeamSkill extends SkillTemplate {
         this._tickAccumulator = 0;
         this._tickCtx = null;
     }
-
-    canTrigger(/** @type {any} */ event) {
+    /**
+     * @param {any} event
+     */
+    canTrigger(event) {
         if (!this.events.includes(event.type)) return false;
         if (!this._cooldownReady()) return false;
         if (!this.monster)return false;
-        const monster = this.monster;
-        if (monster) {
-            if (!monster.target) return false;
-            if (this.running) return false;
-            if (monster.isOccupied()) return false;
 
-            const distsq = monster.distanceTosq(monster.target);
-            if (distsq > this.distance * this.distance) return false;
+        if (!this.monster.target) return false;
+        if (this.running) return false;
+        if (this.monster.isOccupied()) return false;
 
-            this._tickCtx = { dt: event.dt, allmpos: event.allmpos };
-        }
+        const distsq = this.monster.distanceTosq(this.monster.target);
+        if (distsq > this.distance * this.distance) return false;
+
+        this._tickCtx = { dt: event.dt, allmpos: event.allmpos };
 
         if (this.animation === null) {
             this.trigger();
@@ -84,17 +84,16 @@ export class LaserBeamSkill extends SkillTemplate {
     }
 
     trigger() {
+        this._markTriggered();
         if (this.player) {
-            this._markTriggered();
             return;
         }
-        if (!this.monster) return;
-
-        if (this.duration > 0) {
-            this.running = true;
-            this._tickAccumulator = 0;
+        if(this.monster)
+        {
+            if (this.duration > 0) {
+                this.running = true;
+                this._tickAccumulator = 0;
+            }
         }
-
-        this._markTriggered();
     }
 }

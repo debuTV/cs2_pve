@@ -22,8 +22,10 @@ export class DoubleAttackSkill extends SkillTemplate {
         this.animation = params.animation ?? null;
         this.events = params.events ?? [SkillEvents.AttackTrue];
     }
-
-    canTrigger(/** @type {any} */ event) {
+    /**
+     * @param {any} event
+     */
+    canTrigger(event) {
         if (!this.events.includes(event.type)) return false;
         if (!this._cooldownReady()) return false;
         if (this.monster && !this.monster.target) return false;

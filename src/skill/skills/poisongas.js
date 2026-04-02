@@ -37,8 +37,10 @@ export class PoisonGasSkill extends SkillTemplate {
         this.zoneRadius = params.zoneRadius ?? 150;
         this.applyInterval = params.applyInterval ?? 1;
     }
-
-    canTrigger(/** @type {any} */ event) {
+    /**
+     * @param {any} event
+     */
+    canTrigger(event) {
         if (!this.events.includes(event.type)) return false;
         if (!this._cooldownReady()) return false;
         if (this.animation === null) {
@@ -49,8 +51,8 @@ export class PoisonGasSkill extends SkillTemplate {
     }
 
     trigger() {
+        this._markTriggered();
         if (this.player) {
-            this._markTriggered();
             return;
         }
 
@@ -80,7 +82,5 @@ export class PoisonGasSkill extends SkillTemplate {
                 particleLifetime: this.zoneDuration,
             });
         }
-
-        this._markTriggered();
     }
 }

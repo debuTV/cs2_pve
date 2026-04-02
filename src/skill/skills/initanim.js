@@ -22,8 +22,10 @@ export class InitAnimSkill extends SkillTemplate {
         this.animation = params.animation ?? null;
         this.events = params.events ?? [SkillEvents.Spawn];
     }
-
-    canTrigger(/** @type {any} */ event) {
+    /**
+     * @param {any} event
+     */
+    canTrigger(event) {
         if (!this.events.includes(event.type)) return false;
         if (!this._cooldownReady()) return false;
         // 怪物专属技能
