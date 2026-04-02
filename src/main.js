@@ -31,6 +31,7 @@ import { ShopManager } from "./shop/shop_manager";
 import { HudManager } from "./hud/hud_manager";
 import { CHANNAL } from "./hud/hud_const";
 import {SkillManager} from "./skill/skill_manager";
+import {MonsterManager} from "./monster/monster_manager"
 
 // ═══════════════════════════════════════════════
 // 1. 服务器初始化

@@ -486,19 +486,19 @@ export class PlayerManagerEvents {
     /** 设置全员准备就绪回调。 @param {() => void} callback */
     setOnAllPlayersReady(callback) { this.OnAllPlayersReady = callback; }
 
-    /** 设置玩家 Buff 添加请求回调。 @param {(player: any, typeId: string, params: Record<string, any>) => number|null} callback*/
+    /** 设置玩家 Buff 添加请求回调。 @param {(player: Player, typeId: string, params: Record<string, any>) => number|null} callback*/
     setOnPlayerBuffAddRequest(callback) { this.OnBuffAddRequest = callback; }
-    /** 设置玩家 Buff 删除请求回调。 @param {(player: any, buffid: number) => boolean} callback*/
+    /** 设置玩家 Buff 删除请求回调。 @param {(player: Player, buffid: number) => boolean} callback*/
     setOnPlayerBuffDeleteRequest(callback) { this.OnBuffRemoveRequest = callback; }
-    /** 设置玩家 Buff 刷新请求回调。 @param {(player: any, buffid: number, params: Record<string, any>) => boolean} callback*/
+    /** 设置玩家 Buff 刷新请求回调。 @param {(player: Player, buffid: number, params: Record<string, any>) => boolean} callback*/
     setOnPlayerBuffRefreshRequest(callback) { this.OnBuffRefreshRequest = callback; }
-    /** 设置玩家 Buff 发射事件回调。 @param {(player: any, buffid: number, event: string, params: any) => boolean} callback*/
+    /** 设置玩家 Buff 发射事件回调。 @param {(player: Player, buffid: number, event: string, params: any) => boolean} callback*/
     setOnPlayerBuffEmitEvent(callback) { this.OnBuffEmitEvent = callback; }
 
-    /** 设置玩家 Skill 添加请求回调 @param {(player: any, typeId: string, params: Record<string, any>) => number} callback*/
-    setOnSkillAddRequest(callback) { this.OnSkillAddRequest = callback; }
-    /** 设置玩家 Skill 使用请求回调 @param {(player: any, skillId: number, params: Record<string, any>) => boolean} callback*/
-    setOnSkillUseRequest(callback) { this.OnSkillUseRequest = callback; }
-    /** 设置玩家 Skill 发射事件回调 @param {(player: any, skillId: number,event:string, params: Record<string, any>) => boolean} callback*/
-    setOnSkillEmitEvent(callback) { this.OnSkillEmitEvent = callback; }
+    /** 设置玩家 Skill 添加请求回调 @param {(player: Player, typeId: string, params: Record<string, any>) => number} callback*/
+    setOnPlayerSkillAddRequest(callback) { this.OnSkillAddRequest = callback; }
+    /** 设置玩家 Skill 使用请求回调 @param {(player: Player, skillId: number, params: Record<string, any>) => boolean} callback*/
+    setOnPlayerSkillUseRequest(callback) { this.OnSkillUseRequest = callback; }
+    /** 设置玩家 Skill 发射事件回调 @param {(player: Player, skillId: number,event:string, params: Record<string, any>) => boolean} callback*/
+    setOnPlayerSkillEmitEvent(callback) { this.OnSkillEmitEvent = callback; }
 }

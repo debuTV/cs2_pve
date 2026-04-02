@@ -8,7 +8,7 @@ import { MonsterHealthCombat } from "./components/health_combat";
 import { MonsterBrainState } from "./components/brain_state";
 import { MonsterSkillsManager } from "./components/skills_manager";
 import { MonsterMovementPathAdapter } from "./components/movement_path_adapter";
-import { MonsterAnimationOccupation } from "./components/animation_occupation";
+import { MonsterAnimator } from "./components/animation";
 import { MonsterBuffManager } from "./components/buff_manager";
 import { vec } from "../../util/vector";
 
@@ -51,7 +51,7 @@ export class Monster {
         this.brainState = new MonsterBrainState(this);
         this.skillsManager = new MonsterSkillsManager(this);
         this.movementPath = new MonsterMovementPathAdapter(this);
-        this.animationOccupation = new MonsterAnimationOccupation(this);
+        this.animation = new MonsterAnimator(this, this.model, typeConfig.animations);
 
         this.initEntities(position, typeConfig);
 
@@ -69,12 +69,9 @@ export class Monster {
             currentGoalMode: null,
         };
 
-        /** @type {import("./animator").MonsterAnimator} */
-        this.animator = undefined;
-
         this.initSkills(typeConfig.skill_pool);
         this.movementPath.init(typeConfig);
-        this.animationOccupation.init(typeConfig.animations);
+        this.animation.init(typeConfig.animations);
         this.buffManager.recomputeModifiers();
     }
 
@@ -152,7 +149,7 @@ export class Monster {
 
         const intent = this.evaluateIntent();
         this.resolveIntent(intent);
-        this.animationOccupation.tick(this.state);
+        this.animation.tick(this.state);
     }
 
     updateTarget(allppos) {
@@ -164,7 +161,7 @@ export class Monster {
     }
 
     isOccupied() {
-        return this.animationOccupation.isOccupied();
+        return this.animation.isOccupied();
     }
 
     emitEvent(event) {
@@ -187,12 +184,12 @@ export class Monster {
         if (this.state === nextState) return true;
         if (this.state === MonsterState.DEAD) return false;
         if (this.isOccupied()) return false;
-        if (!this.animationOccupation.canSwitch()) return false;
+        if (!this.animation.canSwitch()) return false;
 
         const prevState = this.state;
         this.state = nextState;
         this.buffManager.onStateChange(prevState, nextState);
-        this.animationOccupation.enter(nextState);
+        this.animation.enter(nextState);
 
         if (nextState === MonsterState.CHASE || nextState === MonsterState.ATTACK) {
             this.movementPath.activate();
@@ -204,7 +201,7 @@ export class Monster {
 
     enterSkill() {
         this.movementPath.deactivate();
-        this.animationOccupation.setOccupation("skill");
+        this.animation.setOccupation("skill");
         this.skillsManager.triggerRequestedSkill();
     }
 
@@ -219,7 +216,7 @@ export class Monster {
     }
 
     onOccupationEnd(type) {
-        this.animationOccupation.onOccupationEnd(type);
+        this.animation.onOccupationEnd(type);
         this.movementPath.onOccupationChanged();
     }
 
@@ -242,20 +239,21 @@ export class MonsterEvents {
         this.OnDie = null;
         /** @type {((damage: number, target: CSPlayerPawn) => void) | null} */
         this.OnAttackTrue = null;
-        /** @type {((id: string, target: CSPlayerPawn, payload?: any) => void) | null} */
-        this.OnSkillCast = null;
         /** @type {((monster: Monster, amount: number, attacker: CSPlayerPawn | null) => number | void) | null} */
         this.OnBeforeTakeDamage = null;
-        /** @type {((caster: Monster, options: any) => boolean) | null} */
-        this.onSpawnRequest = null;
         /** @type {((desc: any) => void) | null} */
         this.onAreaEffectRequest = null;
         /** @type {((event: any) => void) | null} */
         this.onMovementEvent = null;
+
         this.OnBuffAddedRequest = null;
         this.OnBuffRemovedRequest = null;
         this.OnBuffRefreshedRequest = null;
         this.OnBuffEmitEvent=null;
+
+        this.OnSkillAddRequest = null;
+        this.OnSkillUseRequest = null;
+        this.OnSkillEmitEvent = null;
     }
     /**
      * @param {(typeId: string, params: Record<string, any>) => number|null} _OnBuffAddedRequest
@@ -286,30 +284,60 @@ export class MonsterEvents {
          */
         this.OnBuffEmitEvent = _OnBuffEmitEvent;
     }
+    /**
+     * @param {(typeId: string, params: Record<string, any>) => number|null} _OnSkillAddRequest 
+     * @param {(skillId: number, params: Record<string, any>) => boolean} _OnSkillUseRequest
+     * @param {(skillId: number, event: string, params: any) => boolean} _OnSkillEmitEvent
+     */
+    setSkillEvent(_OnSkillAddRequest,_OnSkillUseRequest,_OnSkillEmitEvent)
+    {
+        /**
+         * 请求添加技能事件回调。返回id
+         * @type {null|((typeId: string, params: Record<string, any>) => number|null)}
+         */
+        this.OnSkillAddRequest = _OnSkillAddRequest;
+        /**
+         * 请求使用技能事件回调。
+         * @type {null|((skillId: number, params: Record<string, any>) => boolean)}
+         */
+        this.OnSkillUseRequest = _OnSkillUseRequest;
+        /**
+         * 技能事件回调。
+         * @type {null|((skillId: number, event: string, params: any) => boolean)}
+         */
+        this.OnSkillEmitEvent = _OnSkillEmitEvent;
+    }
+    /**
+     * @param {((monster: Monster, killer: CSPlayerPawn | null) => void) | null} callback
+     */
     setOnDie(callback) {
         this.OnDie = callback;
     }
 
+    /**
+     * @param {((damage: number, target: CSPlayerPawn) => void) | null} callback
+     */
     setOnAttackTrue(callback) {
         this.OnAttackTrue = callback;
     }
 
-    setOnSkillCast(callback) {
-        this.OnSkillCast = callback;
-    }
-
+    /**
+     * @param {((monster: Monster, amount: number, attacker: CSPlayerPawn | null) => number | void) | null} callback
+     */
     setOnBeforeTakeDamage(callback) {
         this.OnBeforeTakeDamage = callback;
     }
 
-    setOnSpawnRequest(callback) {
-        this.onSpawnRequest = callback;
-    }
-
+    /**
+     * @param {((desc: any) => void) | null} callback
+     */
     setOnAreaEffectRequest(callback) {
         this.onAreaEffectRequest = callback;
     }
 
+    /**
+     * @param {((event: any) => void) | null} callback
+     */
     setOnMovementEvent(callback) {
         this.onMovementEvent = callback;
     }
