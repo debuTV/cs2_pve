@@ -96,7 +96,7 @@ export class PlayerManager {
                 player.respawn(
                     payload.health ?? 100,
                     payload.armor ?? 0,
-                    payload.targetState ?? this.ingame? PlayerState.ALIVE: PlayerState.PREPARING
+                    payload.targetState ?? this.ingame ? PlayerState.ALIVE : PlayerState.PREPARING
                 );
             },
             resetGameStatus: (player) => {
@@ -111,13 +111,12 @@ export class PlayerManager {
      *  - ready: 玩家准备状态变化，参数为玩家控制器。
      */
     init() {
-        Instance.OnScriptInput("ready",(e)=>{
+        Instance.OnScriptInput("ready", (e) => {
             const pawn = e.activator;
-            if(pawn && pawn instanceof CSPlayerPawn)
-            {
+            if (pawn && pawn instanceof CSPlayerPawn) {
                 const controller = pawn.GetPlayerController();
                 if (!controller) return;
-                const slot=controller.GetPlayerSlot();
+                const slot = controller.GetPlayerSlot();
                 const player = this.players.get(slot);
                 if (!player) return;
                 player.setReady(player.isReady ? false : true);
@@ -127,8 +126,7 @@ export class PlayerManager {
     /**
      * 所有类初始化完成后调用
      */
-    refresh()
-    {
+    refresh() {
         const players = Instance.FindEntitiesByClass("player");
         for (const player of players) {
             if (player && player instanceof CSPlayerPawn) {
@@ -168,7 +166,7 @@ export class PlayerManager {
 
         this._adapter.broadcast(`玩家 ${controller.GetPlayerName()} 加入游戏 (SLOT: ${slot})`);
         this.events.OnPlayerJoin?.(player);
-        
+
         this._adapter.sendMessage(slot, "=== 欢迎加入游戏 ===");
     }
 
@@ -184,9 +182,9 @@ export class PlayerManager {
         if (!player) return;
 
         const pawn = controller.GetPlayerPawn();
-        if(!pawn)return;
+        if (!pawn) return;
 
-        player.activate(pawn, this.ingame? PlayerState.ALIVE: PlayerState.PREPARING);
+        player.activate(pawn, this.ingame ? PlayerState.ALIVE : PlayerState.PREPARING);
     }
 
     /**
@@ -227,7 +225,7 @@ export class PlayerManager {
         let player = this.players.get(controller.GetPlayerSlot());
 
         if (player) {
-            
+
             player.handleReset(pawn, this.ingame ? PlayerState.ALIVE : PlayerState.PREPARING);
             this.events.OnPlayerRespawn?.(player);
 
@@ -245,7 +243,7 @@ export class PlayerManager {
     handlePlayerDeath(playerPawn) {
         const controller = playerPawn.GetPlayerController();
         if (!controller) return;
-        const slot=controller.GetPlayerSlot();
+        const slot = controller.GetPlayerSlot();
         const player = this.players.get(slot);
         if (!player) return;
 
@@ -322,11 +320,16 @@ export class PlayerManager {
             }
         });
         player.events.setBuffEvent(
-            (typeId,params)=> this.events.OnBuffAddedRequest?.(player,typeId,params)??null,
-            (buffId)=>this.events.OnBuffRemovedRequest?.(player,buffId)??false,
-            (buffId,params)=>this.events.OnBuffRefreshedRequest?.(player,buffId,params)??false,
-            (buffId,event,params)=>this.events.OnBuffEmitEvent?.(player,buffId,event,params)??false
-        )
+            (typeId, params) => this.events.OnBuffAddRequest?.(player, typeId, params) ?? null,
+            (buffId) => this.events.OnBuffRemoveRequest?.(player, buffId) ?? false,
+            (buffId, params) => this.events.OnBuffRefreshRequest?.(player, buffId, params) ?? false,
+            (buffId, event, params) => this.events.OnBuffEmitEvent?.(player, buffId, event, params) ?? false
+        );
+        player.events.setSkillEvent(
+            (typeId, params)=>this.events.OnSkillAddRequest?.(player,typeId,params)??null,
+            (skillId,params)=>this.events.OnSkillUseRequest?.(player,skillId,params)??false,
+            (skillId,event,params)=>this.events.OnSkillEmitEvent?.(player,skillId,event,params)??false,
+        );
     }
 
     // ——— 兼容 API ———
@@ -461,10 +464,14 @@ export class PlayerManagerEvents {
         this.OnPlayerRespawn = null;
         this.OnAllPlayersReady = null;
         //player buff事件回调
-        this.OnBuffAddedRequest = null;
-        this.OnBuffRemovedRequest = null;
-        this.OnBuffRefreshedRequest = null;
+        this.OnBuffAddRequest = null;
+        this.OnBuffRemoveRequest = null;
+        this.OnBuffRefreshRequest = null;
         this.OnBuffEmitEvent = null;
+        //player skill事件回调
+        this.OnSkillAddRequest = null;
+        this.OnSkillUseRequest = null;
+        this.OnSkillEmitEvent = null;
     }
     /** 设置玩家加入回调。 @param {(player: Player) => void} callback */
     setOnPlayerJoin(callback) { this.OnPlayerJoin = callback; }
@@ -480,11 +487,18 @@ export class PlayerManagerEvents {
     setOnAllPlayersReady(callback) { this.OnAllPlayersReady = callback; }
 
     /** 设置玩家 Buff 添加请求回调。 @param {(player: any, typeId: string, params: Record<string, any>) => number|null} callback*/
-    setOnPlayerBuffAddRequest(callback) { this.OnBuffAddedRequest = callback; }
+    setOnPlayerBuffAddRequest(callback) { this.OnBuffAddRequest = callback; }
     /** 设置玩家 Buff 删除请求回调。 @param {(player: any, buffid: number) => boolean} callback*/
-    setOnPlayerBuffDeleteRequest(callback) { this.OnBuffRemovedRequest = callback; }
+    setOnPlayerBuffDeleteRequest(callback) { this.OnBuffRemoveRequest = callback; }
     /** 设置玩家 Buff 刷新请求回调。 @param {(player: any, buffid: number, params: Record<string, any>) => boolean} callback*/
-    setOnPlayerBuffRefreshRequest(callback) { this.OnBuffRefreshedRequest = callback; }
+    setOnPlayerBuffRefreshRequest(callback) { this.OnBuffRefreshRequest = callback; }
     /** 设置玩家 Buff 发射事件回调。 @param {(player: any, buffid: number, event: string, params: any) => boolean} callback*/
     setOnPlayerBuffEmitEvent(callback) { this.OnBuffEmitEvent = callback; }
+
+    /** 设置玩家 Skill 添加请求回调 @param {(player: any, typeId: string, params: Record<string, any>) => number} callback*/
+    setOnSkillAddRequest(callback) { this.OnSkillAddRequest = callback; }
+    /** 设置玩家 Skill 使用请求回调 @param {(player: any, skillId: number, params: Record<string, any>) => boolean} callback*/
+    setOnSkillUseRequest(callback) { this.OnSkillUseRequest = callback; }
+    /** 设置玩家 Skill 发射事件回调 @param {(player: any, skillId: number,event:string, params: Record<string, any>) => boolean} callback*/
+    setOnSkillEmitEvent(callback) { this.OnSkillEmitEvent = callback; }
 }

@@ -1,16 +1,11 @@
-export const PlayerBuffEvents = {
-    Spawn:        "OnSpawn",// 出生/重生事件，允许 Buff 进行一次性修正或标记需要重算派生属性
-    Recompute:    "OnRecompute",
-    Die:          "OnDeath",
-    StateChange:  "OnStateChange",
-    BeforeTakeDamage: "OnDamage", // 受伤前事件，允许修改伤害
-    Attack:          "OnAttack", // 攻击事件，允许修改伤害
-    Tick:         "OnTick",
-};
-export class PlayerBuffManager {
-    /** @param {import("../player").Player} player */
-    constructor(player) {
-        this.player = player;
+import { GenericBuffManager } from "../../../buff/buff_manager";
+import { BuffTargetType } from "../../../buff/buff_const";
+
+
+export class MonsterBuffManager {
+    /** @param {import("../monster").Monster} monster */
+    constructor(monster) {
+        this.monster = monster;
         /**
          * key 为 buff 类型。
          * value 为 buff id。
@@ -26,7 +21,7 @@ export class PlayerBuffManager {
      */
     addBuff(typeId, params) {
         if(this.buffMap.has(typeId))return false;
-        const id=this.player.events.OnBuffAddRequest?.(typeId, params);
+        const id=this.monster.events.OnBuffAddedRequest?.(typeId, params);
         if(id == null)return false;
         this.buffMap.set(typeId, id);
         return true;
@@ -39,7 +34,7 @@ export class PlayerBuffManager {
     removeBuff(typeId) {
         const id=this.buffMap.get(typeId);
         if(id == null)return false;
-        const success=this.player.events.OnBuffRemoveRequest?.(id);
+        const success=this.monster.events.OnBuffRemovedRequest?.(id);
         if(!success)return false;
         this.buffMap.delete(typeId);
         return true;
@@ -52,7 +47,7 @@ export class PlayerBuffManager {
     refreshBuff(typeId, params) {
         const id=this.buffMap.get(typeId);
         if(id == null)return this.addBuff(typeId, params);
-        const success=this.player.events.OnBuffRefreshRequest?.(id, params);
+        const success=this.monster.events.OnBuffRefreshedRequest?.(id, params);
         if(!success)return false;
         return true;
     }
@@ -67,7 +62,7 @@ export class PlayerBuffManager {
      */
     emitEvent(event,params) {
         for(const [, id] of this.buffMap.entries()){
-            this.player.events.OnBuffEmitEvent?.(id, event, params);
+            this.monster.events.OnBuffEmitEvent?.(id, event, params);
         }
     }
 }

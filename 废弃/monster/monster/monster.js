@@ -252,8 +252,40 @@ export class MonsterEvents {
         this.onAreaEffectRequest = null;
         /** @type {((event: any) => void) | null} */
         this.onMovementEvent = null;
+        this.OnBuffAddedRequest = null;
+        this.OnBuffRemovedRequest = null;
+        this.OnBuffRefreshedRequest = null;
+        this.OnBuffEmitEvent=null;
     }
-
+    /**
+     * @param {(typeId: string, params: Record<string, any>) => number|null} _OnBuffAddedRequest
+     * @param {(buffId: number) => boolean} _OnBuffRemovedRequest
+     * @param {(buffId: number, params: Record<string, any>) => boolean} _OnBuffRefreshedRequest
+     * @param {(buffId: number, event: string, params: any) => boolean} _OnBuffEmitEvent
+     */
+    setBuffEvent(_OnBuffAddedRequest, _OnBuffRemovedRequest, _OnBuffRefreshedRequest,_OnBuffEmitEvent)
+    {
+        /**
+         * 请求获得Buff事件回调。
+         * @type {null|((typeId: string, params: Record<string, any>) => number|null)}
+         */
+        this.OnBuffAddedRequest = _OnBuffAddedRequest;
+        /**
+         * 请求失去Buff事件回调。
+         * @type {null|((buffId: number) => boolean)}
+         */
+        this.OnBuffRemovedRequest = _OnBuffRemovedRequest;
+        /**
+         * 请求刷新Buff事件回调。
+         * @type {null|((buffId: number, params: Record<string, any>) => boolean)}
+         */
+        this.OnBuffRefreshedRequest = _OnBuffRefreshedRequest;
+        /**
+         * Buff 发出事件回调。
+         * @type {null|((buffId: number, event: string, params: any) => boolean)}
+         */
+        this.OnBuffEmitEvent = _OnBuffEmitEvent;
+    }
     setOnDie(callback) {
         this.OnDie = callback;
     }

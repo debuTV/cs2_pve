@@ -281,33 +281,56 @@ export class PlayerEvents {
         this.clear()
     }
     /**
-     * @param {(typeId: string, params: Record<string, any>) => number|null} _OnBuffAddedRequest
-     * @param {(buffId: number) => boolean} _OnBuffRemovedRequest
-     * @param {(buffId: number, params: Record<string, any>) => boolean} _OnBuffRefreshedRequest
+     * @param {(typeId: string, params: Record<string, any>) => number|null} _OnBuffAddRequest
+     * @param {(buffId: number) => boolean} _OnBuffRemoveRequest
+     * @param {(buffId: number, params: Record<string, any>) => boolean} _OnBuffRefreshRequest
      * @param {(buffId: number, event: string, params: any) => boolean} _OnBuffEmitEvent
      */
-    setBuffEvent(_OnBuffAddedRequest, _OnBuffRemovedRequest, _OnBuffRefreshedRequest,_OnBuffEmitEvent)
+    setBuffEvent(_OnBuffAddRequest, _OnBuffRemoveRequest, _OnBuffRefreshRequest,_OnBuffEmitEvent)
     {
         /**
          * 请求获得Buff事件回调。
          * @type {null|((typeId: string, params: Record<string, any>) => number|null)}
          */
-        this.OnBuffAddedRequest = _OnBuffAddedRequest;
+        this.OnBuffAddRequest = _OnBuffAddRequest;
         /**
          * 请求失去Buff事件回调。
          * @type {null|((buffId: number) => boolean)}
          */
-        this.OnBuffRemovedRequest = _OnBuffRemovedRequest;
+        this.OnBuffRemoveRequest = _OnBuffRemoveRequest;
         /**
          * 请求刷新Buff事件回调。
          * @type {null|((buffId: number, params: Record<string, any>) => boolean)}
          */
-        this.OnBuffRefreshedRequest = _OnBuffRefreshedRequest;
+        this.OnBuffRefreshRequest = _OnBuffRefreshRequest;
         /**
          * Buff 发出事件回调。
          * @type {null|((buffId: number, event: string, params: any) => boolean)}
          */
         this.OnBuffEmitEvent = _OnBuffEmitEvent;
+    }
+    /**
+     * @param {(typeId: string, params: Record<string, any>) => number|null} _OnSkillAddRequest 
+     * @param {(skillId: number, params: Record<string, any>) => boolean} _OnSkillUseRequest
+     * @param {(skillId: number, event: string, params: any) => boolean} _OnSkillEmitEvent
+     */
+    setSkillEvent(_OnSkillAddRequest,_OnSkillUseRequest,_OnSkillEmitEvent)
+    {
+        /**
+         * 请求添加技能事件回调。返回id
+         * @type {null|((typeId: string, params: Record<string, any>) => number|null)}
+         */
+        this.OnSkillAddRequest = _OnSkillAddRequest;
+        /**
+         * 请求使用技能事件回调。
+         * @type {null|((skillId: number, params: Record<string, any>) => boolean)}
+         */
+        this.OnSkillUseRequest = _OnSkillUseRequest;
+        /**
+         * 技能事件回调。
+         * @type {null|((skillId: number, event: string, params: any) => boolean)}
+         */
+        this.OnSkillEmitEvent = _OnSkillEmitEvent;
     }
     /**
      * 玩家准备状态变化事件回调。
@@ -319,9 +342,14 @@ export class PlayerEvents {
     /** 清除所有回调 */
     clear() {
         this.OnReadyChanged = null;
-        this.OnBuffAddedRequest = null;
-        this.OnBuffRemovedRequest = null;
-        this.OnBuffRefreshedRequest = null;
+
+        this.OnBuffAddRequest = null;
+        this.OnBuffRemoveRequest = null;
+        this.OnBuffRefreshRequest = null;
         this.OnBuffEmitEvent=null;
+
+        this.OnSkillAddRequest=null;
+        this.OnSkillUseRequest=null;
+        this.OnSkillEmitEvent=null;
     }
 }
