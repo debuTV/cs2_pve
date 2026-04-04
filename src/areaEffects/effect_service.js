@@ -3,7 +3,9 @@
  */
 import { Instance } from "cs_script/point_script";
 import { vec } from "../util/vector";
-import { AreaEffectTargetType } from "./area_const";
+import { event } from "../util/definition";
+import { eventBus } from "../eventBus/event_bus";
+import { areaEffectStatics, Target } from "./area_const";
 
 /**
  * 单个区域效果实例（毒区、燃烧地面等）。
@@ -20,46 +22,34 @@ export class AreaEffect {
 
     /**
      * 创建区域效果实例。
-     * @param {import("./area_manager").AreaEffectManager} manager
      * @param {import("./area_const").areaEffectDesc} desc
      */
-    constructor(manager, desc) {
-        /** 所属管理器。
-         * @type {import("./area_manager").AreaEffectManager} */
-        this._manager = manager;
+    constructor(desc) {
         /** 自增唯一 ID。 */
         this.id = AreaEffect._nextId++;
         /** 效果类型标识（如 "poisongas"）。 */
-        this.effectType = desc.effectType;
+        this.effectName = areaEffectStatics[desc.areaEffectStaticKey].effectName;
+        /** Buff 类型名字。 */
+        this.buffName = areaEffectStatics[desc.areaEffectStaticKey].buffName;
+        /** 关联的粒子效果名字。
+         * @type {string} */
+        this.particleName = areaEffectStatics[desc.areaEffectStaticKey].particleName;
+
         /** 效果中心世界坐标。 */
         this.position = desc.position;
         /** 影响半径。 */
         this.radius = desc.radius;
         /** 总持续时间（秒）。 */
         this.duration = desc.duration;
-        /** 对同一目标施加效果的最小间隔（秒）。 */
-        this.applyInterval = desc.applyInterval;
-        /** Buff 类型 ID。 */
-        this.buffTypeId = desc.buffTypeId;
-        /** Buff 参数对象。 */
-        this.buffParams = desc.buffParams;
-        /** 来源信息（怪物 ID、怪物类型、技能 ID）。 */
-        this.source = desc.source;
         /** 命中目标类型数组。
-         * @type {import("./area_const").areaEffectTargetType[]} */
+         * @type {string[]} */
         this.targetTypes = desc.targetTypes;
-        /** 关联的粒子效果 id。
-         * @type {string|null} */
-        this.particleId = desc.particleId ?? null;
-        /** 粒子持续时间。缺省时沿用区域持续时间。
-         * @type {number} */
-        this.particleLifetime = desc.particleLifetime ?? desc.duration;
-
         /** 创建时的游戏时间戳。由 `start()` 设置，用于超时判定。 */
         this.startTime = 0;
         /** 是否存活。由 `start()` 置为 true，`stop()` 置为 false。 */
         this.alive = false;
-
+        /** 粒子效果 ID，由粒子管理器返回。 */
+        this.particleId=-1;
         /**
          * 每个目标的命中冷却记录。键采用：
          * - 玩家：`p:${slot}`
@@ -67,17 +57,10 @@ export class AreaEffect {
          * @type {Map<string, number>}
          */
         this._hitCooldowns = new Map();
-
-        /**
-         * 关联的粒子效果句柄。销毁时自动调用 stop。
-         * @type {import("./area_const").areaEffectParticleHandle|null}
-         */
-        this._particleHandle = null;
     }
 
     /**
      * 启动区域效果实例。
-     * 由 AreaEffectManager.create 调用。
      * @returns {boolean}
      */
     start() {
@@ -89,8 +72,7 @@ export class AreaEffect {
         this.startTime = Instance.GetGameTime();
         this.alive = true;
         this._requestParticle();
-
-        Instance.Msg(`[AreaEffect] #${this.id} ${this.effectType} 创建于 (${this.position.x.toFixed(0)},${this.position.y.toFixed(0)},${this.position.z.toFixed(0)}) 半径=${this.radius} 持续=${this.duration}s`);
+        eventBus.emit(event.AreaEffects.Out.OnCreated, this._createLifecyclePayload());
         return true;
     }
 
@@ -108,10 +90,10 @@ export class AreaEffect {
         }
 
         const r2 = this.radius * this.radius;
-        if (this.targetTypes.includes(AreaEffectTargetType.Player)) {
+        if (this.targetTypes.includes(Target.Player)) {
             this._tickPlayers(now, tickContext?.players ?? [], r2);
         }
-        if (this.targetTypes.includes(AreaEffectTargetType.Monster)) {
+        if (this.targetTypes.includes(Target.Monster)) {
             this._tickMonsters(now, tickContext?.monsters ?? [], r2);
         }
     }
@@ -120,14 +102,14 @@ export class AreaEffect {
      * 停止效果并清理粒子句柄。
      */
     stop() {
-        if (!this.alive && !this._particleHandle && this._hitCooldowns.size === 0) return;
+        if (!this.alive && !this.particleId) return;
 
         this.alive = false;
         this._stopParticle();
         this._hitCooldowns.clear();
         this.startTime = 0;
-
-        Instance.Msg(`[AreaEffect] #${this.id} ${this.effectType} 已停止销毁`);
+        eventBus.emit(event.AreaEffects.Out.OnStopped, this._createLifecyclePayload());
+        Instance.Msg(`[AreaEffect] #${this.id} ${this.effectName} 已停止销毁`);
     }
 
     /** @returns {boolean} 当前实例是否仍处于存活状态 */
@@ -153,8 +135,8 @@ export class AreaEffect {
             if (this._isInCooldown(cooldownKey, now)) continue;
 
             this._hitCooldowns.set(cooldownKey, now);
-
-            this._manager.event.OnHitPlayer?.(pawn, this._createHitPayload());
+            eventBus.emit(event.Buff.In.BuffRefreshRequest,{});
+            eventBus.emit(event.AreaEffects.Out.OnHitPlayer, { payload: this._createHitPayload(Target.Player, slot) });
         }
     }
 
@@ -168,14 +150,14 @@ export class AreaEffect {
         for (const monster of monsters) {
             const monsterId = monster?.id;
             const pos = monster?.model?.GetAbsOrigin?.();
-            if (typeof monsterId !== "number" || !pos || vec.lengthsq(pos, this.position) > r2) continue;
+            if (!pos || vec.lengthsq(pos, this.position) > r2) continue;
 
             const cooldownKey = `m:${monsterId}`;
             if (this._isInCooldown(cooldownKey, now)) continue;
 
             this._hitCooldowns.set(cooldownKey, now);
-
-            this._manager.event.OnHitMonster?.(monster, this._createHitPayload());
+            eventBus.emit(event.Buff.In.BuffRefreshRequest,{});
+            eventBus.emit(event.AreaEffects.Out.OnHitMonster, { payload: this._createHitPayload(Target.Monster, monsterId) });
         }
     }
 
@@ -187,43 +169,58 @@ export class AreaEffect {
      */
     _isInCooldown(cooldownKey, now) {
         const lastApply = this._hitCooldowns.get(cooldownKey) ?? -Infinity;
-        return now - lastApply < this.applyInterval;
+        return now - lastApply < 500; // 默认 500ms 冷却时间，避免同一帧多次命中
     }
 
     /**
      * 构造命中事件负载。每次都返回一份新对象，避免外部修改内部状态。
+     * @param {string} targetType
+     * @param {number} hit
      * @returns {import("./area_const").areaEffectHitPayload}
      */
-    _createHitPayload() {
+    _createHitPayload(targetType,hit) {
         return {
             effectId: this.id,
-            effectType: this.effectType,
-            buffTypeId: this.buffTypeId,
-            buffParams: { ...this.buffParams },
-            source: this.source && typeof this.source === "object" ? { ...this.source } : this.source,
+            targetType: targetType,
+            hit:hit,
         };
     }
 
     /** 按需向管理器请求粒子系统。 */
     _requestParticle() {
-        if (!this.particleId || !this._manager) return;
-
-        this._particleHandle = this._manager.event.OnParticleRequest?.({
-            particleId: this.particleId,
+        /**@type {import("../particle/particle_const").ParticleCreateRequest} */
+        const payload = {
+            particleName: this.particleName,
             position: { ...this.position },
-            lifetime: this.particleLifetime,
-            effectId: this.id,
-            effectType: this.effectType,
-            source: this.source && typeof this.source === "object" ? { ...this.source } : this.source,
-        });
+            lifetime: this.duration,
+            result:-1,
+        };
+        eventBus.emit(event.Particle.In.CreateRequest, {payload});
+        this.particleId = payload.result;
     }
 
     /** 停止并释放粒子句柄。 */
     _stopParticle() {
-        if (!this._particleHandle) return;
+        /**@type {import("../particle/particle_const").ParticleStopRequest} */
+        const payload = {
+            particleId: this.particleId,
+            result: false,
+        };
+        eventBus.emit(event.Particle.In.StopRequest, {payload});
+        return payload.result;
+    }
 
-        this._particleHandle.stop?.();
-        
-        this._particleHandle = null;
+    /**
+     * 构造区域效果生命周期事件负载。
+     * @returns {Record<string, any>}
+     */
+    _createLifecyclePayload() {
+        return {
+            effectId: this.id,
+            position: { ...this.position },
+            radius: this.radius,
+            duration: this.duration,
+            targetTypes: [...this.targetTypes],
+        };
     }
 }

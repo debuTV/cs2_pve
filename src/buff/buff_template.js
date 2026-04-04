@@ -1,6 +1,8 @@
 import { Instance } from "cs_script/point_script";
 import { Monster } from "../monster/monster/monster";
 import { Player } from "../player/player/player";
+import { eventBus } from "../eventBus/event_bus";
+import { event } from "../util/definition";
 export const BuffFactory = {
     /**
      * 根据 typeId 创建对应的buff实例。未识别的 id 返回 null。
@@ -23,15 +25,20 @@ export class BuffTemplate{
     /**
      * @param {number}id
      * @param {Monster|Player} target Buff 作用的目标
+     * @param {string} typeId Buff 类型标识
      * @param {number} duration Buff 持续时间(单位秒，为-1表示无限持续)
+     * @param {Record<string, any>} [params] Buff 运行参数
+     * @param {any} [source] Buff 来源
      */
-    constructor(id,target,duration)
+    constructor(id, target, typeId, duration, params = {}, source = null)
     {
-        this.id=id;
-        this.target=target;
-        this.duration=duration;
-        this.startTime=Instance.GetGameTime();
-        this.use=false;
+        this.id = id;
+        this.target = target;
+        this.typeId = typeId;
+        this.duration = duration;
+        this.params = { ...(params ?? {}) };
+        this.startTime = Instance.GetGameTime();
+        this.use = false;
     }
     tick()
     {
@@ -40,64 +47,64 @@ export class BuffTemplate{
     }
     start()
     {
-        this.use=true;
-        this.startTime=Instance.GetGameTime();
+        if (this.use) return false;
+        this.use = true;
+        this.startTime = Instance.GetGameTime();
+        eventBus.emit(event.Buff.Out.OnBuffAdded, this._createEventPayload());
+        return true;
     }
     stop()
     {
-        this.use=false;
+        if (!this.use) return false;
+        this.use = false;
+        eventBus.emit(event.Buff.Out.OnBuffRemoved, this._createEventPayload({ reason }));
+        return true;
     }
     /**
      * @param {any} params
      */
     refresh(params)
     {
-
+        this.params = {
+            ...this.params,
+            ...(params ?? {}),
+        };
+        if (typeof this.params.duration === "number") {
+            this.duration = this.params.duration;
+        }
+        this.startTime = Instance.GetGameTime();
+        eventBus.emit(event.Buff.Out.OnBuffRefreshed, this._createEventPayload());
+        return true;
     }
     /**
      * 事件对外接口
      */
-    
     /**
      * 目标每tick调用
      * @param {import("./buff_const").EmitEventPayload} payload
+     * @param {string} [eventName]
      * @returns {import("./buff_const").EmitEventPayload}
      */
-    OnTick(payload){return payload;}
+    OnBuffEmit(payload, eventName)
+    {
+        void eventName;
+        {return payload;}
+    }
+
     /**
-     * 目标对外发起攻击之前调用
-     * @param {import("./buff_const").EmitEventPayload} payload
-     * @returns {import("./buff_const").EmitEventPayload}
+     * 构造 Buff 生命周期事件负载。
+     * @param {Record<string, any>} [extra]
+     * @returns {Record<string, any>}
      */
-    OnAttack(payload){return payload;}
-    /**
-     * 目标受到伤害之前调用
-     * @param {import("./buff_const").EmitEventPayload} payload
-     * @returns {import("./buff_const").EmitEventPayload}
-     */
-    OnDamage(payload){return payload;}
-    /**
-     * 目标死亡之前调用
-     * @param {import("./buff_const").EmitEventPayload} payload
-     * @returns {import("./buff_const").EmitEventPayload}
-     */
-    OnDeath(payload){return payload;}
-    /**
-     * 目标状态切换时调用
-     * @param {import("./buff_const").EmitEventPayload} payload
-     * @returns {import("./buff_const").EmitEventPayload}
-     */
-    OnStateChange(payload){return payload;}
-    /**
-     * 目标出生之后调用
-     * @param {import("./buff_const").EmitEventPayload} payload
-     * @returns {import("./buff_const").EmitEventPayload}
-     */
-    OnSpawn(payload){return payload;}
-    /**
-     * 目标派生属性重算时调用
-     * @param {import("./buff_const").EmitEventPayload} payload
-     * @returns {import("./buff_const").EmitEventPayload}
-     */
-    OnRecompute(payload){return payload;}
+    _createEventPayload(extra = {}) {
+        return {
+            buffId: this.id,
+            typeId: this.typeId,
+            target: this.target,
+            duration: this.duration,
+            params: { ...this.params },
+            source: this.source && typeof this.source === "object" ? { ...this.source } : this.source,
+            ...extra,
+        };
+    }
 }

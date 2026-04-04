@@ -4,6 +4,8 @@
 
 import { Instance } from "cs_script/point_script";
 import { GameState } from "./game_const";
+import { eventBus } from "../eventBus/event_bus";
+import { event } from "../util/definition";
 
 /**
  * 游戏管理器，维护游戏生命周期状态机（WAITING → PREPARE → PLAYING → WON/LOST）。
@@ -29,12 +31,19 @@ export class GameManager {
          * @type {import("../util/definition").Adapter}
          */
         this._adapter = adapter;
-        this.events = new GameManagerEvents();
+        /** @type {Array<() => boolean>} */
+        this._unsubscribers = [
+            eventBus.on(event.Game.In.StartGameRequest, () => this.startGame()),
+            eventBus.on(event.Game.In.EnterPreparePhaseRequest, () => this.enterPreparePhase()),
+            eventBus.on(event.Game.In.ResetGameRequest, () => this.resetGame()),
+            eventBus.on(event.Game.In.GameWinRequest, () => this.gameWon()),
+            eventBus.on(event.Game.In.GameLoseRequest, () => this.gameLost())
+        ];
         this.init();
     }
 
     /**
-     * 启用实体监听，强制切换
+     * 启用实体监听，强制切换，以后会移动到main.js中编排。
      * - startGame: 启动游戏（必须先进入准备阶段），切换到 PLAYING 状态
      * - enterPreparePhase: 进入准备阶段，广播等待消息
      * - resetGame: 重置游戏状态
@@ -111,7 +120,7 @@ export class GameManager {
     enterPreparePhase() {
         this.gameState = GameState.PREPARE;
         this._adapter.broadcast("=== 准备阶段开始 ===");
-        this.events.onGamePrepare?.();
+        eventBus.emit(event.Game.Out.OnEnterPreparePhase);
     }
 
     /**
@@ -121,7 +130,7 @@ export class GameManager {
         if (this.gameState !== GameState.PREPARE) return;
         this.gameState = GameState.PLAYING;
         this._adapter.broadcast("=== 游戏开始 ===");
-        this.events.onGameStart?.();
+        eventBus.emit(event.Game.Out.OnStartGame);
     }
 
     /**
@@ -130,7 +139,7 @@ export class GameManager {
     gameLost() {
         this.gameState = GameState.LOST;
         this._adapter.broadcast("=== 游戏失败 ===");
-        this.events.onGameLost?.();
+        eventBus.emit(event.Game.Out.OnGameLost);
     }
 
     /**
@@ -139,7 +148,7 @@ export class GameManager {
     gameWon() {
         this.gameState = GameState.WON;
         this._adapter.broadcast("=== 游戏胜利 ===");
-        this.events.onGameWin?.();
+        eventBus.emit(event.Game.Out.OnGameWin);
     }
 
     /**
@@ -148,7 +157,7 @@ export class GameManager {
     resetGame() {
         this.gameState = GameState.WAITING;
         this._adapter.broadcast("重置游戏...");
-        this.events.onResetGame?.();
+        eventBus.emit(event.Game.Out.OnResetGame);
     }
     /**
      * 检查游戏状态。是否正在游戏
@@ -156,23 +165,4 @@ export class GameManager {
     checkGameState() {
         return this.gameState == GameState.PLAYING;
     }
-}
-export class GameManagerEvents {
-    constructor() {
-        this.onGameStart = null;
-        this.onGameWin = null;
-        this.onGameLost = null;
-        this.onGamePrepare = null;
-        this.onResetGame = null;
-    }
-    /** 设置游戏开始回调。 @param {() => void} callback */
-    setOnGameStart(callback) { this.onGameStart = callback; }
-    /** 设置游戏胜利回调。 @param {() => void} callback */
-    setOnGameWin(callback) { this.onGameWin = callback; }
-    /** 设置游戏失败回调。 @param {() => void} callback */
-    setOnGameLost(callback) { this.onGameLost = callback; }
-    /** 设置游戏准备回调。 @param {() => void} callback */
-    setOnGamePrepare(callback) { this.onGamePrepare = callback; }
-    /** 设置游戏重置回调。 @param {() => void} callback */
-    setOnResetGame(callback) { this.onResetGame = callback; }
 }

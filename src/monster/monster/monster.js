@@ -2,7 +2,6 @@
  * @module 怪物系统/怪物实体
  */
 import { CSPlayerPawn, Entity, Instance } from "cs_script/point_script";
-import { MonsterBuffEvents, MonsterState } from "./monster_state";
 import { MonsterEntityBridge } from "./components/entity_bridge";
 import { MonsterHealthCombat } from "./components/health_combat";
 import { MonsterBrainState } from "./components/brain_state";
@@ -11,6 +10,7 @@ import { MonsterMovementPathAdapter } from "./components/movement_path_adapter";
 import { MonsterAnimator } from "./components/animation";
 import { MonsterBuffManager } from "./components/buff_manager";
 import { vec } from "../../util/vector";
+import { MonsterBuffEvents, MonsterState } from "../monster_const";
 
 export class Monster {
     constructor(id, position, typeConfig) {

@@ -1,6 +1,8 @@
 /**
  * @module 怪物系统/怪物技能/毒气
  */
+import { eventBus } from "../../eventBus/event_bus";
+import { event } from "../../util/definition";
 import { SkillEvents } from "../skill_const";
 import { SkillTemplate } from "../skill_template";
 
@@ -10,32 +12,21 @@ export class PoisonGasSkill extends SkillTemplate {
      * @param {import("../../monster/monster/monster").Monster|null} monster
      * @param {number} id
      * @param {{
+     *   areaEffectStaticKey?: string;
      *   cooldown?: number;
      *   events?: string[];
      *   animation?: string | null;
-     *   particleId?: string;
-     *   dps?: number;
-     *   buffDuration?: number;
-     *   tickInterval?: number;
      *   zoneDuration?: number;
      *   zoneRadius?: number;
-     *   applyInterval?: number;
-     * }} [params]
+     * }} params
      */
     constructor(player, monster, id, params = {}) {
         super(player, monster, "poisongas", id, params);
         this.animation = params.animation ?? null;
         this.events = params.events ?? [SkillEvents.Die];
-        this.particleId = params.particleId ?? "poisongas";
-        this.buffTypeId = "poison";
-        this.buffParams = {
-            dps: params.dps ?? 5,
-            duration: params.buffDuration ?? 4,
-            tickInterval: params.tickInterval ?? 1,
-        };
+        this.areaEffectStaticKey= "poisongas";
         this.zoneDuration = params.zoneDuration ?? 5;
         this.zoneRadius = params.zoneRadius ?? 150;
-        this.applyInterval = params.applyInterval ?? 1;
     }
     /**
      * @param {any} event
@@ -61,26 +52,16 @@ export class PoisonGasSkill extends SkillTemplate {
 
         const pos = monster.model?.GetAbsOrigin?.();
         if (!pos) return;
-
-        if (monster.events.onAreaEffectRequest) {
-            monster.events.onAreaEffectRequest({
-                effectType: "poisongas",
-                position: { x: pos.x, y: pos.y, z: pos.z },
-                radius: this.zoneRadius,
-                duration: this.zoneDuration,
-                applyInterval: this.applyInterval,
-                buffTypeId: this.buffTypeId,
-                buffParams: { ...this.buffParams },
-                source: {
-                    sourceType: "monster-skill",
-                    sourceId: monster.id,
-                    monsterId: monster.id,
-                    monsterType: monster.type ?? "unknown",
-                    skillTypeId: this.typeId,
-                },
-                particleId: this.particleId,
-                particleLifetime: this.zoneDuration,
-            });
-        }
+        /**@type {import("../../areaEffects/area_const").areaEffectDesc} */
+        const payload = {
+            areaEffectStaticKey: "poisongas",
+            position: { x: pos.x, y: pos.y, z: pos.z },
+            radius: this.zoneRadius,
+            duration: this.zoneDuration,
+            targetTypes: ["player"],
+            result: false,
+        };
+        eventBus.emit(event.AreaEffects.In.CreateRequest, payload);
+        return payload.result;
     }
 }

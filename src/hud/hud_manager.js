@@ -78,16 +78,6 @@ export class HudManager {
     }
 
     /**
-     * 获取指定玩家当前生效的 channel。
-     * @param {number} slot
-     * @returns {number}
-     */
-    getActiveChannel(slot) {
-        const session = this._sessions.get(slot);
-        return session ? session.activeChannel : CHANNAL.NONE;
-    }
-
-    /**
      * 每 tick 刷新全部可见 HUD 的贴脸位置。
      * @param {{ id: number; name: string; slot: number; level: number; money: number; health: number; maxHealth: number; armor: number; attack: number; critChance: number; critMultiplier: number; kills: number; score: number; exp: number; expNeeded: number; pawn: import("cs_script/point_script").CSPlayerPawn | null; }[]} [allAlivePlayersSummary=[]]
      */

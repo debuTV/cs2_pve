@@ -3,6 +3,8 @@
  */
 
 import { Instance } from "cs_script/point_script";
+import { eventBus } from "../eventBus/event_bus";
+import { event } from "../util/definition";
 import { WaveState,wavesConfig } from "./wave_const";
 
 /**
@@ -37,7 +39,15 @@ export class WaveManager {
          * @type {import("../util/definition").Adapter} 
          */
         this._adapter = adapter;
-        this.events = new WaveManagerEvents();
+        /** @type {Array<() => boolean>} */
+        this._unsubscribers = [
+            eventBus.on(event.Wave.In.WaveStartRequest, (payload = {}) => {
+                payload.result = this.startWave(payload.waveIndex);
+            }),
+            eventBus.on(event.Wave.In.WaveEndRequest, (payload = {}) => {
+                payload.result = this.completeWave();
+            })
+        ];
         // ——— 预热阶段内部状态 ———
         /**
          * 预热阶段上下文。
@@ -112,7 +122,10 @@ export class WaveManager {
         this.waveState = WaveState.ACTIVE;
         this._resetPrepareState();
         this._adapter.log(`=== 第 ${this.currentWave} 波开始 ===`);
-        this.events.onWaveStart?.(this.currentWave, wave);
+        eventBus.emit(event.Wave.Out.OnWaveStart, {
+            waveIndex: this.currentWave,
+            waveConfig: wave,
+        });
     }
 
     // ═══════════════════════════════════════════════
@@ -172,7 +185,7 @@ export class WaveManager {
         }
         this._adapter.broadcast(message);
 
-        this.events.onWaveComplete?.(this.currentWave);
+        eventBus.emit(event.Wave.Out.OnWaveEnd, {waveIndex: this.currentWave,});
         return true;
     }
 
@@ -269,14 +282,4 @@ export class WaveManager {
             this._activateCurrentWave(wave);
         }
     }
-}
-export class WaveManagerEvents {
-    constructor() {
-        this.onWaveStart = null;
-        this.onWaveComplete = null;
-    }
-    /** 绑定波次开始回调，当波次从 PREPARING 进入 ACTIVE 时触发。 @param {(waveNumber: number, waveConfig: import("../util/definition").waveConfig) => void} callback */
-    setOnWaveStart(callback) {this.onWaveStart = callback;}
-    /** 绑定波次完成回调，当 {@link completeWave} 被外部调用时触发。 @param {(waveNumber: number) => void} callback */
-    setOnWaveComplete(callback) {this.onWaveComplete = callback;}
 }

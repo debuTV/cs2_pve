@@ -1,7 +1,8 @@
 /**
  * @module 怪物系统/怪物组件/AI状态机
  */
-import { MonsterBuffEvents, MonsterState } from "../monster_state";
+
+import { MonsterBuffEvents, MonsterState } from "../../monster_const";
 
 /**
  * 怪物 AI 决策组件。

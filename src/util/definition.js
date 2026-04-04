@@ -100,3 +100,102 @@ export const MovementPriority = {
     StateChange: 1,
     Chase:       2,
 };
+export const event={
+    AreaEffects:{
+        In:{
+            CreateRequest:"AreaEffects_OnCreateRequest",    //请求创建区域效果，payload 包含 {effectType: string, position: Vector, radius: number, duration: number, applyInterval: number, buffTypeId: string, buffParams: any, source: {monsterId: number, monsterType: string, skillId: string}, targetTypes: areaEffectTargetType[]}
+            StopRequest:"AreaEffects_OnStopRequest",        //请求停止区域效果，payload 包含 {areaEffectId: number}
+        },
+        Out:{
+            OnCreated:"AreaEffects_OnCreated",                    //区域效果创建后
+            OnHitPlayer:"AreaEffects_OnHitPlayer",                //玩家被范围伤害击中
+            OnHitMonster:"AreaEffects_OnHitMonster",              //怪物被范围伤害击中
+            OnStopped:"AreaEffects_OnStopped",                    //区域效果停止后
+        }
+    },
+    Buff:{
+        In:{
+            BuffAddRequest:"Buff_OnBuffAddRequest",                //请求Buff 添加
+            BuffRefreshRequest:"Buff_OnBuffRefreshRequest",        //请求Buff 刷新
+            BuffRemoveRequest:"Buff_OnBuffRemoveRequest",          //请求Buff 移除
+        },
+        Out:{
+            OnBuffAdded:"Buff_OnBuffAdded",                //Buff 添加后
+            OnBuffRefreshed:"Buff_OnBuffRefreshed",        //Buff 刷新后
+            OnBuffRemoved:"Buff_OnBuffRemoved",            //Buff 移除后
+            OnBuffEmit:"Buff_OnBuffEmit",                  //Buff 触发（例如伤害/治疗生效）
+        }
+    },
+    Game:{
+        In:{
+            StartGameRequest:"Game_OnStartGameRequest",    //请求开始游戏
+            EnterPreparePhaseRequest:"Game_OnEnterPreparePhaseRequest",    //请求进入准备阶段
+            ResetGameRequest:"Game_OnResetGameRequest",    //请求重置游戏
+            GameWinRequest:"Game_OnGameWinRequest",    //请求游戏胜利
+            GameLoseRequest:"Game_OnGameLoseRequest",    //请求游戏失败
+        },
+        Out:{
+            OnStartGame:"Game_OnStartGame",    //开始游戏后
+            OnEnterPreparePhase:"Game_OnEnterPreparePhase",    //进入准备阶段后
+            OnResetGame:"Game_OnResetGame",    //重置游戏后
+            OnGameWin:"Game_OnGameWin",    //游戏胜利后
+            OnGameLost:"Game_OnGameLost",    //游戏失败后
+        }
+    },
+    Hud:{
+        In:{
+            ShowHudRequest:"Hud_OnShowHudRequest",    //显示 Hud 请求，payload 包含 {hudType: string, params: any}
+            HideHudRequest:"Hud_OnHideHudRequest",    //隐藏 Hud 请求，payload 包含 {hudType: string}
+        }
+    },
+    Input:{
+        In:{
+            StartRequest:"Input_OnStartRequest",    //请求开始输入检测，payload 包含 {slot: number, pawn: CSPlayerPawn}
+            StopRequest:"Input_OnStopRequest",    //请求停止输入检测，payload 包含 {slot: number}
+        },
+        Out:{
+            OnInput:"Input_OnInput",    //输入事件，payload 包含 {slot: number, key: string}
+        }
+    },
+    Monster:{
+
+    },
+    Movement:{
+
+    },
+    Particle:{
+        In:{
+            CreateRequest:"Particle_OnCreateRequest",    //粒子特效创建请求
+            StopRequest:"Particle_OnStopRequest",        //粒子特效停止请求
+        }
+    },
+    Player:{
+        In:{
+            GetPlayerSummaryRequest:"Player_OnGetPlayerSummaryRequest",    //请求玩家信息摘要，payload 包含 {slot: number}
+        }
+    },
+    Shop:{
+        In:{
+            ShopOpenRequest:"Shop_OnShopOpenRequest",    //请求打开商店，payload 包含 {slot: number}
+            ShopCloseRequest:"Shop_OnShopCloseRequest",  //请求关闭商店，payload 包含 {slot: number}
+        },
+        Out:{
+            OnShopOpen:"Shop_OnShopOpen",    //商店打开后，payload 包含 {slot: number}
+            OnShopClose:"Shop_OnShopClose",  //商店关闭后，payload 包含 {slot: number}
+            OnBought:"Shop_OnBought",    //购买商品后，payload 包含 {slot: number, itemId: string}
+        }
+    },
+    Skill:{
+
+    },
+    Wave:{
+        In:{
+            WaveStartRequest:"Wave_OnWaveStartRequest",    //请求开始波次，payload 包含 {waveIndex: number}
+            WaveEndRequest:"Wave_OnWaveEndRequest",        //请求结束波次，payload 包含 {waveIndex: number, survived: boolean}
+        },
+        Out:{
+            OnWaveStart:"Wave_OnWaveStart",    //波次开始后，payload 包含 {waveIndex: number}
+            OnWaveEnd:"Wave_OnWaveEnd",        //波次结束后，payload 包含 {waveIndex: number, survived: boolean}
+        }
+    }
+};

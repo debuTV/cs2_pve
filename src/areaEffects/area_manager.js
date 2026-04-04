@@ -1,10 +1,9 @@
 /**
  * @module 区域效果/区域效果管理器
  */
-
-import { AreaEffectTargetType, DEFAULT_AREA_EFFECT_TARGET_TYPES } from "./area_const";
 import { AreaEffect } from "./effect_service";
-
+import { eventBus } from "../eventBus/event_bus";
+import { event } from "../util/definition";
 /**
  * 区域效果管理器级别的服务。
  *
@@ -22,20 +21,43 @@ export class AreaEffectManager {
         /** 所有活跃的区域效果实例。尾部追加，失活后在 tick 中移除。
          * @type {AreaEffect[]} */
         this._effects = [];
-        this.event=new AreaEffectManagerEvents();
+        /** @type {Array<() => boolean>} */
+        this._unsubscribers = [
+            eventBus.on(event.AreaEffects.In.CreateRequest, (payload = {}) => {
+                payload.result = this.create(payload);
+            }),
+            eventBus.on(event.AreaEffects.In.StopRequest, (payload = {}) => {
+                payload.result = this.stop(payload.areaEffectId ?? payload.effectId ?? null);
+            })
+        ];
     }
 
     /**
      * 创建一个新的区域效果。
      * @param {import("./area_const").areaEffectDesc} desc
-     * @returns {AreaEffect}
+     * @returns {boolean} 是否成功创建
      */
     create(desc) {
-        const normalizedDesc = desc;
-        const effect = new AreaEffect(this, normalizedDesc);
+        const effect = new AreaEffect(desc);
         effect.start();
         this._register(effect);
-        return effect;
+        return true;
+    }
+
+    /**
+     * 停止指定区域效果。
+     * @param {number} areaEffectId
+     * @returns {boolean}
+     */
+    stop(areaEffectId) {
+        for (const effect of this._effects) {
+            if (!effect || effect.id !== areaEffectId) continue;
+            effect.stop();
+            this._unregister(effect);
+            return true;
+        }
+
+        return false;
     }
 
     /**
@@ -44,7 +66,6 @@ export class AreaEffectManager {
      * @param {import("./area_const").areaEffectTickContext} tickContext
      */
     tick(now, tickContext) {
-        const normalizedTickContext = this._normalizeTickContext(tickContext);
         for (let i = this._effects.length - 1; i >= 0; i--) {
             const effect = this._effects[i];
             if (!effect) {
@@ -56,7 +77,7 @@ export class AreaEffectManager {
                 continue;
             }
 
-            effect.tick(now, normalizedTickContext);
+            effect.tick(now, tickContext);
             if (!effect.isAlive()) {
                 this._unregister(effect);
             }
@@ -69,6 +90,15 @@ export class AreaEffectManager {
             this._effects[i]?.stop();
         }
         this._effects.length = 0;
+    }
+
+    /** 销毁服务并注销事件监听。 */
+    destroy() {
+        this.cleanup();
+        for (const unsubscribe of this._unsubscribers) {
+            unsubscribe();
+        }
+        this._unsubscribers.length = 0;
     }
 
     /**
@@ -89,21 +119,4 @@ export class AreaEffectManager {
         const idx = this._effects.indexOf(effect);
         if (idx !== -1) this._effects.splice(idx, 1);
     }
-}
-
-export class AreaEffectManagerEvents {
-    constructor() {
-        /** @type {import("./area_const").areaEffectHitPlayerCallback|null} */
-        this.OnHitPlayer = null;
-        /** @type {import("./area_const").areaEffectHitMonsterCallback|null} */
-        this.OnHitMonster = null;
-        /** @type {import("./area_const").areaEffectParticleRequestCallback|null} */
-        this.OnParticleRequest = null;
-    }
-    /** 注册命中玩家回调。 @param {import("./area_const").areaEffectHitPlayerCallback} callback*/
-    setOnHitPlayer(callback) {this.OnHitPlayer = callback;}
-    /** 注册命中怪物回调。 @param {import("./area_const").areaEffectHitMonsterCallback} callback*/
-    setOnHitMonster(callback) {this.OnHitMonster = callback;}
-    /** 注册粒子请求回调。 * @param {import("./area_const").areaEffectParticleRequestCallback} callback */
-    setOnParticleRequest(callback) {this.OnParticleRequest = callback;}
 }

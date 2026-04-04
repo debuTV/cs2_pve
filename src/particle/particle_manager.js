@@ -2,6 +2,8 @@
  * @module 粒子系统/粒子管理器
  */
 import { Instance } from "cs_script/point_script";
+import { eventBus } from "../eventBus/event_bus";
+import { event } from "../util/definition";
 import { particleConfigs } from "./particle_const";
 import { Particle } from "./particle";
 /**
@@ -18,28 +20,38 @@ export class ParticleManager {
     constructor() {
         /**
          * 当前管理器持有的活跃粒子池。
-         * @type {Particle[]}
+         * @type {Map<number, Particle>}
          */
-        this.activeParticles = [];
+        this.activeParticles = new Map();
+        this._nextParticleId = 1;
+        /** @type {Array<() => boolean>} */
+        this._unsubscribers = [
+            eventBus.on(event.Particle.In.CreateRequest, (/**@type {import("../particle/particle_const").ParticleCreateRequest}*/ payload) => {
+                payload.result = this.create(payload);
+            }),
+            eventBus.on(event.Particle.In.StopRequest, (/**@type {import("../particle/particle_const").ParticleStopRequest}*/ payload) => {
+                const particle=this.activeParticles.get(payload.particleId);
+                payload.result=particle?.stop()??false;
+            })
+        ];
     }
 
     /**
      * 按粒子 id 创建并立即在指定位置生成粒子。
-     * @param {string} particleId  particleConfigs 中的 key
-     * @param {{x:number, y:number, z:number}} position
-     * @param {{lifetime?: number, followEntity?: import("cs_script/point_script").Entity}} [options]
-     * @returns {Particle|null}
+     * @param {import("../particle/particle_const").ParticleCreateRequest} particleCreateRequest
+     * @returns {number} 成功时返回粒子 id，失败返回 -1
      */
-    create(particleId, position, options) {
-        const config = particleConfigs[particleId];
+    create(particleCreateRequest) {
+        const config = particleConfigs[particleCreateRequest.particleName];
         if (!config) {
-            Instance.Msg(`Particle: 未找到粒子配置 "${particleId}"\n`);
-            return null;
+            Instance.Msg(`Particle: 未找到粒子配置 "${particleCreateRequest.particleName}"\n`);
+            return -1;
         }
 
-        const p = new Particle(this, config, options);
-        if (!p.start(position)) return null;
-        return p;
+        const p = new Particle(this._nextParticleId++,config, particleCreateRequest);
+        if (!p.start(particleCreateRequest.position)) return -1;
+        this.activeParticles.set(p.id, p);
+        return p.id;
     }
 
     /**
@@ -47,61 +59,29 @@ export class ParticleManager {
      * @param {number} now  当前游戏时间（Instance.GetGameTime()）
      */
     tickAll(now) {
-        for (let i = this.activeParticles.length - 1; i >= 0; i--) {
-            const particle = this.activeParticles[i];
-            if (!particle) {
-                this.activeParticles.splice(i, 1);
-                continue;
+        for (const particle of this.activeParticles.values()) {
+            if (particle) {
+                particle.tick(now);
             }
-            if (!particle.isAlive()) {
-                continue;
-            }
-            particle.tick(now);
         }
     }
 
     /** 停止并清理当前管理器中的全部粒子。 */
-    stopAll() {
-        for (let i = this.activeParticles.length - 1; i >= 0; i--) {
-            const particle = this.activeParticles[i];
+    cleanup() {
+        for (const particle of this.activeParticles.values()) {
             if (particle) {
                 particle.stop();
             }
         }
-        this.activeParticles.length = 0;
+        this.activeParticles.clear();
     }
 
-    /** cleanup 语义等同于 stopAll，便于和其他 manager 模块保持一致。 */
-    cleanup() {
-        this.stopAll();
-    }
-
-    /** @returns {number} 当前活跃粒子数量 */
-    get count() {
-        return this.activeParticles.length;
-    }
-
-    /** @returns {Particle[]} 当前所有活跃粒子的只读快照 */
-    getAll() {
-        return [...this.activeParticles];
-    }
-
-    /**
-     * 注册单个粒子到活跃池。
-     * @param {Particle} particle
-     */
-    _register(particle) {
-        if (particle && !this.activeParticles.includes(particle)) {
-            this.activeParticles.push(particle);
+    /** 销毁服务并注销事件监听。 */
+    destroy() {
+        this.cleanup();
+        for (const unsubscribe of this._unsubscribers) {
+            unsubscribe();
         }
-    }
-
-    /**
-     * 从活跃池中注销单个粒子。
-     * @param {Particle} particle
-     */
-    _unregister(particle) {
-        const idx = this.activeParticles.indexOf(particle);
-        if (idx !== -1) this.activeParticles.splice(idx, 1);
+        this._unsubscribers.length = 0;
     }
 }

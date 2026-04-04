@@ -21,6 +21,8 @@
  */
 
 import { Instance } from "cs_script/point_script";
+import { eventBus } from "./eventBus/event_bus";
+import { event } from "./util/definition";
 
 // ——— 各模块独立导入 ———
 import { GameManager } from "./game/game_manager";
@@ -30,9 +32,14 @@ import { InputManager } from "./input/input_manager";
 import { ShopManager } from "./shop/shop_manager";
 import { HudManager } from "./hud/hud_manager";
 import { CHANNAL } from "./hud/hud_const";
-import {SkillManager} from "./skill/skill_manager";
-import {MonsterManager} from "./monster/monster_manager"
-
+import { SkillManager } from "./skill/skill_manager";
+import { MonsterManager } from "./monster/monster_manager";
+import { BuffManager } from "./buff/buff_manager";
+import { ParticleManager } from "./particle/particle_manager";
+import { NavMesh } from "./navmesh/path_manager";
+import { MovementManager } from "./movement/movement_manager";
+import { contextManager } from "./tempContext/tempContext_manager";
+import { AreaEffectManager } from "./areaEffects/area_manager";
 // ═══════════════════════════════════════════════
 // 1. 服务器初始化
 // ═══════════════════════════════════════════════
@@ -62,15 +69,19 @@ const playerManager = new PlayerManager(adapter);
 const inputManager = new InputManager();
 const shopManager = new ShopManager();
 const hudManager = new HudManager();
+const monsterManager = new MonsterManager();
 const buffManager = new BuffManager();
+const particleManager = new ParticleManager();
+const areaEffectManager = new AreaEffectManager();
 
 // ═══════════════════════════════════════════════
 // 3. 跨模块回调绑定（全部集中在此）
 // ═══════════════════════════════════════════════
 
-// ——— 3.1 波次结算 → 玩家 / 游戏 ———
+// ——— 3.1 波次结算 / Game / Wave / 区域效果编排 ———
 
-waveManager.setOnWaveComplete((waveNumber) => {
+eventBus.on(event.Wave.Out.OnWaveEnd, ({ waveIndex }) => {
+    const waveNumber = waveIndex;
     const waveConfig = waveManager.getWaveConfig(waveNumber);
 
     // 给予玩家波次奖励
@@ -82,10 +93,67 @@ waveManager.setOnWaveComplete((waveNumber) => {
 
     // 推进下一波或胜利
     if (waveManager.hasNextWave()) {
-        waveManager.nextWave();
+        eventBus.emit(event.Wave.In.WaveStartRequest, { waveIndex: waveNumber + 1 });
     } else {
-        gameManager.gameWon();
+        eventBus.emit(event.Game.In.GameWinRequest, { source: "wave-end" });
     }
+});
+
+eventBus.on(event.Wave.Out.OnWaveStart, ({ waveConfig }) => {
+    if (waveConfig) {
+        monsterManager.spawnWave(waveConfig);
+    }
+});
+
+eventBus.on(event.Game.Out.OnEnterPreparePhase, () => {
+    playerManager.dispatchReward(null, {
+        type: "ready",
+        isReady: false
+    });
+});
+
+eventBus.on(event.Game.Out.OnStartGame, () => {
+    playerManager.enterGameStart();
+    eventBus.emit(event.Wave.In.WaveStartRequest, { waveIndex: 1 });
+});
+
+eventBus.on(event.Game.Out.OnGameLost, () => {
+    shopManager.closeAll();
+});
+
+eventBus.on(event.Game.Out.OnGameWin, () => {
+    shopManager.closeAll();
+});
+
+eventBus.on(event.Game.Out.OnResetGame, () => {
+    shopManager.closeAll();
+    waveManager.resetGame();
+    monsterManager.resetAllGameStatus();
+    areaEffectManager.cleanup();
+    particleManager.cleanup();
+    buffManager.clearAll();
+    playerManager.resetAllGameStatus();
+    Instance.ServerCommand("mp_restartgame 5");
+});
+
+eventBus.on(event.AreaEffects.Out.OnHitPlayer, ({ pawn, payload }) => {
+    const slot = pawn?.GetPlayerController?.()?.GetPlayerSlot?.();
+    const player = typeof slot === "number" ? playerManager.getPlayer(slot) : null;
+    if (!player || !payload?.buffTypeId) return;
+
+    player.buffManager.refreshBuff(payload.buffTypeId, {
+        ...(payload.buffParams ?? {}),
+        source: payload.source ?? null,
+    });
+});
+
+eventBus.on(event.AreaEffects.Out.OnHitMonster, ({ monster, payload }) => {
+    if (!monster || !payload?.buffTypeId) return;
+
+    monster.buffManager.refreshBuff(payload.buffTypeId, {
+        ...(payload.buffParams ?? {}),
+        source: payload.source ?? null,
+    });
 });
 
 /**
@@ -135,22 +203,21 @@ function emitPlayerBuffEvent(buffId, event, params) {
     }
 }
 
-// ——— 3.2 玩家 → 游戏 / Buff ———
+// ——— 3.2 玩家 / 怪物 → 游戏 / Buff ———
 
-playerManager.events.setOnPlayerBuffAddRequest((player, typeId, params) => {
-    return buffManager.addbuff(player, { ...(params ?? {}), id: typeId });
-});
-playerManager.events.setOnPlayerBuffDeleteRequest((player, buffid) => {
-    void player;
-    return buffManager.deletebuff(buffid);
-});
-playerManager.events.setOnPlayerBuffRefreshRequest((player, buffid, params) => {
-    void player;
-    return buffManager.refreshbuff(buffid, params);
-});
 playerManager.events.setOnPlayerBuffEmitEvent((player, buffId, event, params) => {
     void player;
     return emitPlayerBuffEvent(buffId, event, params);
+});
+monsterManager.events.setOnMonsterBuffEmitEvent((monster, buffId, event, params) => {
+    void monster;
+    return emitPlayerBuffEvent(buffId, event, params);
+});
+monsterManager.events.setOnAllMonstersDead(() => {
+    eventBus.emit(event.Wave.In.WaveEndRequest, {
+        waveIndex: waveManager.currentWave,
+        survived: true,
+    });
 });
 playerManager.events.setOnPlayerJoin((player) => {
     void player;
@@ -163,7 +230,7 @@ playerManager.events.setOnPlayerLeave((player) => {
 
     const wasPlaying = gameManager.onPlayerLeave(player.slot);
     if (wasPlaying && !playerManager.hasAlivePlayers()) {
-        gameManager.gameLost();
+        eventBus.emit(event.Game.In.GameLoseRequest, { source: "player-leave" });
     }
 });
 
@@ -177,7 +244,7 @@ playerManager.events.setOnPlayerDeath((playerPawn) => {
 
         const wasPlaying = gameManager.onPlayerDeath();
         if (wasPlaying && !playerManager.hasAlivePlayers()) {
-            gameManager.gameLost();
+            eventBus.emit(event.Game.In.GameLoseRequest, { source: "player-death" });
         }
     }
 });
@@ -190,35 +257,7 @@ playerManager.events.setOnPlayerRespawn((player) => {
 // ——— 3.3 全员准备 → 开始游戏 → 开始波次 ———
 
 playerManager.events.setOnAllPlayersReady(() => {
-    gameManager.startGame();
-});
-
-gameManager.setOnGamePrepare(() => {
-    playerManager.dispatchReward(null, {
-        type: "ready",
-        isReady: false
-    });
-});
-
-gameManager.setOnGameStart(() => {
-    playerManager.enterGameStart();
-    waveManager.startWave(1);
-});
-
-gameManager.setOnGameLost(() => {
-    shopManager.closeAll();
-});
-//游戏胜利
-gameManager.setOnGameWin(() => {
-    shopManager.closeAll();
-});
-// ——— 3.4 游戏重置 → 联动各模块 ———
-
-gameManager.setOnResetGame(() => {
-    shopManager.closeAll();
-    waveManager.resetGame();
-    playerManager.resetAllGameStatus();
-    Instance.ServerCommand("mp_restartgame 5");
+    eventBus.emit(event.Game.In.StartGameRequest, { source: "all-players-ready" });
 });
 
 // ——— 3.5 输入 → 商店 ———
@@ -229,19 +268,19 @@ inputManager.setOnInput((slot, key) => {
 
 // ——— 3.6 商店 ← 玩家 ———
 
-shopManager.setOpenShop((slot, pawn) => {
+shopManager.events.setOpenShop((slot, pawn) => {
     hudManager.showHud(slot, pawn, "", CHANNAL.SHOP);
-    inputManager.start(slot,pawn);
+    inputManager.start(slot, pawn);
 });
-shopManager.setRefreshText((slot, pawn, text) => {
+shopManager.events.setRefreshText((slot, pawn, text) => {
     hudManager.showHud(slot, pawn, text, CHANNAL.SHOP);
 });
-shopManager.setCloseShop((slot) => {
+shopManager.events.setCloseShop((slot) => {
     hudManager.hideHud(slot, CHANNAL.SHOP);
     inputManager.stop(slot);
 });
 
-shopManager.setGetPlayerInfo((slot) => {
+shopManager.events.setGetPlayerInfo((slot) => {
     const player = playerManager.getPlayer(slot);
     if (!player) return null;
     const s = player.getSummary();
@@ -254,12 +293,12 @@ shopManager.setGetPlayerInfo((slot) => {
     };
 });
 
-shopManager.setGrantReward((slot, item, ctx) => {
+shopManager.events.setGrantReward((slot, item, ctx) => {
     const player = playerManager.getPlayer(slot);
     if (!player) return { success: false, message: "玩家不存在" };
 
     const payload = item.payload;
-    
+
     if (!payload) return { success: false, message: "商品无效果定义" };
 
     player.addMoney(-ctx.price);
@@ -340,11 +379,11 @@ Instance.OnPlayerChat((event) => {
     if (command === "shop" || command === "!shop") {
         const pawn = controller.GetPlayerPawn();
         if (pawn) {
-             shopManager.openShop(controller.GetPlayerSlot(), pawn);
+            shopManager.openShop(controller.GetPlayerSlot(), pawn);
         }
     }
     if (command === "debug" || command === "!debug") {
-        
+
     }
 });
 
@@ -358,16 +397,30 @@ let _lastTime = Instance.GetGameTime();
 Instance.SetThink(() => {
     const now = Instance.GetGameTime();
     _lastTime = now;
+    const activePlayers = playerManager.getActivePlayers();
+    const alivePlayers = playerManager.getAlivePlayers()
+        .map((player) => player.entityBridge.pawn)
+        .filter((pawn) => pawn != null);
+    const activeMonsters = monsterManager.getActiveMonsters();
+    const monsterEntities = activeMonsters
+        .map((monster) => monster.model)
+        .filter((entity) => entity != null);
 
     // ── 5.1 输入 / 玩家 / 波次 / Buff ──
     inputManager.tick();
     playerManager.tick();
     waveManager.tick();
+    monsterManager.tick(monsterEntities, alivePlayers);
+    areaEffectManager.tick(now, {
+        players: alivePlayers,
+        monsters: activeMonsters,
+    });
+    particleManager.tickAll(now);
     buffManager.tick();
 
     // ── 5.2 其他模块 tick ──
     shopManager.tick();
-    hudManager.tick(playerManager.getActivePlayers().map(p => p.getSummary()));
+    hudManager.tick(activePlayers.map(p => p.getSummary()));
 
     // ── 5.3 玩家状态 HUD 同步 ──
     Instance.SetNextThink(now + 1 / 64);
