@@ -67,7 +67,12 @@ export class InputManager {
             if (!source.use) continue;
             const justPressed = source.detector.pollJustPressed(source.pawn);
             for (const key of justPressed) {
-                eventBus.emit(event.Input.Out.OnInput, { slot, key });
+                /** @type {import("./input_const").OnInput} */
+                const payload = {
+                    slot,
+                    key: /** @type {import("./input_const").InputKey} */ (key),
+                };
+                eventBus.emit(event.Input.Out.OnInput, payload);
             }
         }
     }

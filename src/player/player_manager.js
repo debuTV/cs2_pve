@@ -30,13 +30,12 @@ import { PlayerState } from "./player_const";
  * - 维护 `players` Map（slot → Player），跟踪在线人数和准备状态。
  * - 提供聚合操作 API：`dispatchReward` 等，
  *   按 slot 定位玩家并委托执行。
- * - 通过回调（`onPlayerJoin`、`onPlayerDeath` 等）向上层暴露关键生命周期事件。
+ * - 通过 eventBus 发出 Player.Out 生命周期事件，供其他模块编排。
  * - 提供查询方法：`getAllPlayers`、`getAlivePlayers`、`areAllPlayersReady` 等。
  *
- * 使用方式：先构造 `new PlayerManager()`，由 main.js 调用
- * `initializeExistingPlayers()` 完成初始玩家同步，再调用
- * `setupEventListeners()` 注册仅保留在模块内的脚本输入监听，
- * 然后在主循环中每帧调用 `tick(now)` 驱动所有玩家的持续逻辑。
+ * 使用方式：先构造 `new PlayerManager()`，构造期间会注册模块内脚本输入监听；
+ * 之后由 main.js 调用 `refresh()` 完成已有玩家同步，
+ * 并在主循环中每帧调用 `tick()` 驱动所有玩家的持续逻辑。
  *
  * @navigationTitle 玩家管理器
  */
@@ -69,7 +68,6 @@ export class PlayerManager {
         //this._statusTextCache = new Map();
         //this._tempDisableLogKeys = new Set();
         this.ingame = false;
-        this.events = new PlayerManagerEvents();
         /** @type {Record<string, (player: Player, payload: TP_playerRewardPayload) => void>} */
         this._rewardHandlers = {
             buff: (player, payload) => {
@@ -92,7 +90,7 @@ export class PlayerManager {
                 player.takeDamage(payload.amount ?? 0, null);
             },
             ready: (player, payload) => {
-                player.setReady(payload.isReady ?? false);
+                this._setPlayerReady(player, payload.isReady ?? false);
             },
             respawn: (player, payload) => {
                 player.respawn(
@@ -143,7 +141,7 @@ export class PlayerManager {
                 const slot = controller.GetPlayerSlot();
                 const player = this.players.get(slot);
                 if (!player) return;
-                player.setReady(player.isReady ? false : true);
+                this._setPlayerReady(player, !player.isReady);
             }
         });
     }
@@ -191,13 +189,14 @@ export class PlayerManager {
 
         const player = new Player(slot);
         player.connect(controller);
-        // 订阅玩家领域事件，桥接到 manager 级回调
-        this._bindPlayerEvents(player);
         this.players.set(slot, player);
         this.totalPlayers++;
 
         this._adapter.broadcast(`玩家 ${controller.GetPlayerName()} 加入游戏 (SLOT: ${slot})`);
-        this.events.OnPlayerJoin?.(player);
+        eventBus.emit(event.Player.Out.OnPlayerJoin, {
+            player,
+            slot,
+        });
 
         this._adapter.sendMessage(slot, "=== 欢迎加入游戏 ===");
     }
@@ -239,10 +238,18 @@ export class PlayerManager {
         this.players.delete(playerSlot);
         this.totalPlayers--;
 
-        this.events.OnPlayerLeave?.(player);
+        eventBus.emit(event.Player.Out.OnPlayerLeave, {
+            player,
+            slot: playerSlot,
+            wasReady,
+            wasLobbyState,
+        });
 
         if (wasLobbyState && this.areAllPlayersReady()) {
-            this.events.OnAllPlayersReady?.();
+            eventBus.emit(event.Player.Out.OnAllPlayersReady, {
+                readyCount: this.readyCount,
+                totalPlayers: this.totalPlayers,
+            });
         }
     }
 
@@ -259,7 +266,11 @@ export class PlayerManager {
         if (player) {
 
             player.handleReset(pawn, this.ingame ? PlayerState.ALIVE : PlayerState.PREPARING);
-            this.events.OnPlayerRespawn?.(player);
+            eventBus.emit(event.Player.Out.OnPlayerRespawn, {
+                player,
+                slot: controller.GetPlayerSlot(),
+                pawn,
+            });
 
         } else {
             // 全新未知玩家，走 connect + activate
@@ -279,7 +290,11 @@ export class PlayerManager {
         const player = this.players.get(slot);
         if (!player) return;
 
-        this.events.OnPlayerDeath?.(playerPawn);
+        eventBus.emit(event.Player.Out.OnPlayerDeath, {
+            player,
+            slot,
+            playerPawn,
+        });
     }
 
     /**
@@ -300,7 +315,7 @@ export class PlayerManager {
 
         if (command === "r" || command === "!r") {
             //玩家准备
-            player.setReady(true);
+            this._setPlayerReady(player, true);
         }
     }
 
@@ -327,41 +342,40 @@ export class PlayerManager {
         player.syncDamageFromEngine(event.damage, event.attacker, event.inflictor);
     }
 
-    // ——— 订阅 Player 领域事件 ———
-
     /**
-     * 订阅玩家领域事件，将准备状态变化、金钱变化、升级等事件桥接到 manager 级回调。
-     * @param {Player} player 玩家实例
+     * 统一更新玩家 ready 状态，并在成功切换后发出 Player.Out 事件。
+     * @param {Player} player
+     * @param {boolean} ready
+     * @returns {boolean}
      */
-    _bindPlayerEvents(player) {
-        player.events.setOnReadyChanged((ready) => {
-            if (ready) this.readyCount++;
-            else this.readyCount--;
+    _setPlayerReady(player, ready) {
+        if (!player.setReady(ready)) return false;
 
-            const name = player.entityBridge.getPlayerName();
-            this._adapter.broadcast(
-                ready
-                    ? `${name} 已准备 (${this.readyCount}/${this.totalPlayers})`
-                    : `${name} 取消准备 (${this.readyCount}/${this.totalPlayers})`
-            );
-            this.events.OnPlayerReady?.(player, ready);
+        if (ready) this.readyCount++;
+        else this.readyCount--;
 
-            // 检查是否全员准备就绪
-            if (ready && this.areAllPlayersReady()) {
-                this.events.OnAllPlayersReady?.();
-            }
+        const name = player.entityBridge.getPlayerName();
+        this._adapter.broadcast(
+            ready
+                ? `${name} 已准备 (${this.readyCount}/${this.totalPlayers})`
+                : `${name} 取消准备 (${this.readyCount}/${this.totalPlayers})`
+        );
+        eventBus.emit(event.Player.Out.OnPlayerReadyChanged, {
+            player,
+            slot: player.slot,
+            ready,
+            readyCount: this.readyCount,
+            totalPlayers: this.totalPlayers,
         });
-        player.events.setBuffEvent(
-            (typeId, params) => this.events.OnBuffAddRequest?.(player, typeId, params) ?? null,
-            (buffId) => this.events.OnBuffRemoveRequest?.(player, buffId) ?? false,
-            (buffId, params) => this.events.OnBuffRefreshRequest?.(player, buffId, params) ?? false,
-            (buffId, event, params) => this.events.OnBuffEmitEvent?.(player, buffId, event, params) ?? false
-        );
-        player.events.setSkillEvent(
-            (typeId, params)=>this.events.OnSkillAddRequest?.(player,typeId,params)??null,
-            (skillId,params)=>this.events.OnSkillUseRequest?.(player,skillId,params)??false,
-            (skillId,event,params)=>this.events.OnSkillEmitEvent?.(player,skillId,event,params)??false,
-        );
+
+        if (ready && this.areAllPlayersReady()) {
+            eventBus.emit(event.Player.Out.OnAllPlayersReady, {
+                readyCount: this.readyCount,
+                totalPlayers: this.totalPlayers,
+            });
+        }
+
+        return true;
     }
 
     // ——— 兼容 API ———
@@ -542,56 +556,4 @@ export class PlayerManager {
             player.tick();
         }
     }
-}
-
-/**
- * PlayerManager 级事件集合。
- */
-export class PlayerManagerEvents {
-    constructor() {
-        // manager 级事件回调
-        this.OnPlayerJoin = null;
-        this.OnPlayerLeave = null;
-        this.OnPlayerReady = null;
-        this.OnPlayerDeath = null;
-        this.OnPlayerRespawn = null;
-        this.OnAllPlayersReady = null;
-        //player buff事件回调
-        this.OnBuffAddRequest = null;
-        this.OnBuffRemoveRequest = null;
-        this.OnBuffRefreshRequest = null;
-        this.OnBuffEmitEvent = null;
-        //player skill事件回调
-        this.OnSkillAddRequest = null;
-        this.OnSkillUseRequest = null;
-        this.OnSkillEmitEvent = null;
-    }
-    /** 设置玩家加入回调。 @param {(player: Player) => void} callback */
-    setOnPlayerJoin(callback) { this.OnPlayerJoin = callback; }
-    /** 设置玩家离开回调。 @param {(player: Player) => void} callback */
-    setOnPlayerLeave(callback) { this.OnPlayerLeave = callback; }
-    /** 设置玩家准备状态变化回调。 @param {(player: Player, isReady: boolean) => void} callback */
-    setOnPlayerReady(callback) { this.OnPlayerReady = callback; }
-    /** 设置玩家死亡回调。 @param {(playerPawn: CSPlayerPawn) => void} callback */
-    setOnPlayerDeath(callback) { this.OnPlayerDeath = callback; }
-    /** 设置玩家重生回调。 @param {(player: Player) => void} callback */
-    setOnPlayerRespawn(callback) { this.OnPlayerRespawn = callback; }
-    /** 设置全员准备就绪回调。 @param {() => void} callback */
-    setOnAllPlayersReady(callback) { this.OnAllPlayersReady = callback; }
-
-    /** 设置玩家 Buff 添加请求回调。 @param {(player: Player, typeId: string, params: Record<string, any>) => number|null} callback*/
-    setOnPlayerBuffAddRequest(callback) { this.OnBuffAddRequest = callback; }
-    /** 设置玩家 Buff 删除请求回调。 @param {(player: Player, buffid: number) => boolean} callback*/
-    setOnPlayerBuffDeleteRequest(callback) { this.OnBuffRemoveRequest = callback; }
-    /** 设置玩家 Buff 刷新请求回调。 @param {(player: Player, buffid: number, params: Record<string, any>) => boolean} callback*/
-    setOnPlayerBuffRefreshRequest(callback) { this.OnBuffRefreshRequest = callback; }
-    /** 设置玩家 Buff 发射事件回调。 @param {(player: Player, buffid: number, event: string, params: any) => boolean} callback*/
-    setOnPlayerBuffEmitEvent(callback) { this.OnBuffEmitEvent = callback; }
-
-    /** 设置玩家 Skill 添加请求回调 @param {(player: Player, typeId: string, params: Record<string, any>) => number} callback*/
-    setOnPlayerSkillAddRequest(callback) { this.OnSkillAddRequest = callback; }
-    /** 设置玩家 Skill 使用请求回调 @param {(player: Player, skillId: number, params: Record<string, any>) => boolean} callback*/
-    setOnPlayerSkillUseRequest(callback) { this.OnSkillUseRequest = callback; }
-    /** 设置玩家 Skill 发射事件回调 @param {(player: Player, skillId: number,event:string, params: Record<string, any>) => boolean} callback*/
-    setOnPlayerSkillEmitEvent(callback) { this.OnSkillEmitEvent = callback; }
 }

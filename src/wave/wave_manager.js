@@ -41,10 +41,10 @@ export class WaveManager {
         this._adapter = adapter;
         /** @type {Array<() => boolean>} */
         this._unsubscribers = [
-            eventBus.on(event.Wave.In.WaveStartRequest, (payload = {}) => {
-                payload.result = this.startWave(payload.waveIndex);
+            eventBus.on(event.Wave.In.WaveStartRequest, (/**@type {import("./wave_const").WaveStartRequest}*/ payload) => {
+                payload.result = this.startWave(payload);
             }),
-            eventBus.on(event.Wave.In.WaveEndRequest, (payload = {}) => {
+            eventBus.on(event.Wave.In.WaveEndRequest, (/**@type {import("./wave_const").WaveEndRequest}*/ payload) => {
                 payload.result = this.completeWave();
             })
         ];
@@ -73,7 +73,7 @@ export class WaveManager {
             //脚本输入 startWave 的 parseInt 可能返回 NaN，需要验证
             const waveNumber = parseInt(parts[parts.length - 1], 10);
             if (!isNaN(waveNumber)) {
-                this.startWave(waveNumber);
+                this.startWave({ waveIndex: waveNumber, result: false });
             }
         });
     }
@@ -122,10 +122,12 @@ export class WaveManager {
         this.waveState = WaveState.ACTIVE;
         this._resetPrepareState();
         this._adapter.log(`=== 第 ${this.currentWave} 波开始 ===`);
-        eventBus.emit(event.Wave.Out.OnWaveStart, {
+        /** @type {import("./wave_const").OnWaveStart} */
+        const payload = {
             waveIndex: this.currentWave,
             waveConfig: wave,
-        });
+        };
+        eventBus.emit(event.Wave.Out.OnWaveStart, payload);
     }
 
     // ═══════════════════════════════════════════════
@@ -136,32 +138,32 @@ export class WaveManager {
      * 开始指定波次。
      * - 若当前波次正在进行中（ACTIVE 或 PREPARING），则拒绝开始新波次。
      * - 参数 waveNumber 从 1 开始计数，必须在配置范围内。
-     * @param {number} waveNumber 
+     * @param {import("./wave_const").WaveStartRequest} waveStartRequest 
      * @returns {boolean}
      */
-    startWave(waveNumber) {
+    startWave(waveStartRequest) {
         if (this.waveState === WaveState.ACTIVE || this.waveState === WaveState.PREPARING) {
-            this._adapter.log(`无法开始波次 ${waveNumber}，当前波次进行中 (state=${this.waveState})`);
+            this._adapter.log(`无法开始波次 ${waveStartRequest.waveIndex}，当前波次进行中 (state=${this.waveState})`);
             return false;
         }
 
-        if (waveNumber < 1 || waveNumber > this.waves.length) {
-            this._adapter.log(`波次 ${waveNumber} 超出范围 (1-${this.waves.length})`);
+        if (waveStartRequest.waveIndex < 1 || waveStartRequest.waveIndex > this.waves.length) {
+            this._adapter.log(`波次 ${waveStartRequest.waveIndex} 超出范围 (1-${this.waves.length})`);
             return false;
         }
 
-        const wave = this.getWaveConfig(waveNumber);
+        const wave = this.getWaveConfig(waveStartRequest.waveIndex);
 
         // 广播波次信息
         const message =
-            `=== 第 ${waveNumber} 波: ${wave.name ?? "?"} ===\n` +
-            `怪物总数: ${wave.totalMonsters ?? "?"}\n` +
-            `奖励: $${wave.reward ?? "?"}\n` +
+            `=== 第 ${waveStartRequest.waveIndex} 波: ${wave.name} ===\n` +
+            `怪物总数: ${wave.totalMonsters}\n` +
+            `奖励: $${wave.reward}\n` +
             `准备时间: ${wave.preparationTime} 秒`;
         this._adapter.broadcast(message);
 
         // 进入预热阶段
-        this._enterPreparingState(waveNumber, wave);
+        this._enterPreparingState(waveStartRequest.waveIndex, wave);
 
         return true;
     }
@@ -179,13 +181,15 @@ export class WaveManager {
 
         let message =
             `=== 第 ${this.currentWave} 波完成 ===\n` +
-            `奖励: $${wave?.reward ?? "?"}`;
+            `奖励: $${wave.reward}`;
         if (!this.hasNextWave()) {
             message += "\n=== 所有波次完成 ===";
         }
         this._adapter.broadcast(message);
 
-        eventBus.emit(event.Wave.Out.OnWaveEnd, {waveIndex: this.currentWave,});
+        /** @type {import("./wave_const").OnWaveEnd} */
+        const payload = { waveIndex: this.currentWave};
+        eventBus.emit(event.Wave.Out.OnWaveEnd, payload);
         return true;
     }
 
@@ -198,7 +202,7 @@ export class WaveManager {
             this._adapter.log("所有波次已完成！");
             return false;
         }
-        return this.startWave(this.currentWave + 1);
+        return this.startWave({ waveIndex: this.currentWave + 1 ,result: false});
     }
 
     /**

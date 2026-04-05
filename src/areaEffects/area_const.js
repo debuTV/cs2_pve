@@ -9,8 +9,7 @@
  * @property {string} particleName - 需要创建的粒子系统预制名字
  */
 /**
- * 区域效果创建描述。
- * @typedef {object} areaEffectDesc
+ * @typedef {object} AreaEffectCreateRequest
  * @property {string} areaEffectStaticKey - 预制区域效果配置的 key
  * @property {{x:number,y:number,z:number}} position - 区域中心点
  * @property {number} radius - 区域半径
@@ -18,20 +17,41 @@
  * @property {string[]} targetTypes - 该区域效果可命中的目标类型
  * @property {boolean} result - 结果是否成功
  */
+/**
+ * @typedef {object} AreaEffectStopRequest
+ * @property {number} areaEffectId - 区域效果实例 id
+ * @property {boolean} result - 结果是否成功
+ */
 
 /**
  * 区域效果每帧检测上下文。
  * @typedef {object} areaEffectTickContext
- * @property {import("cs_script/point_script").CSPlayerPawn[]} players - 当帧可被命中的玩家列表
+ * @property {import("../player/player/player").Player[]} players - 当帧可被命中的玩家列表
  * @property {import("../monster/monster/monster").Monster[]} monsters - 当帧可被命中的怪物列表
  */
-
 /**
- * 区域效果命中事件负载。
- * @typedef {object} areaEffectHitPayload
+ * @typedef {object} OnAreaEffectCreated
+ * @property {number} effectId - 区域效果实例 id
+ */
+/**
+ * @typedef {object} OnAreaEffectStopped
+ * @property {number} effectId - 区域效果实例 id
+ */
+/**
+ * @typedef {object} OnAreaEffectHitPlayer
+ * @property {import("../player/player/player").Player} player - 命中的玩家实例
  * @property {number} effectId - 区域效果实例 id
  * @property {string} targetType - 命中的目标类型
  * @property {number} hit -  玩家：`slot`  怪物：`monsterId`
+ * @property {string} buffName - 命中后要施加的预制 Buff 名称
+ */
+/**
+ * @typedef {object} OnAreaEffectHitMonster
+ * @property {import("../monster/monster/monster").Monster} monster - 命中的怪物实例
+ * @property {number} effectId - 区域效果实例 id
+ * @property {string} targetType - 命中的目标类型
+ * @property {number} hit -  玩家：`slot`  怪物：`monsterId`
+ * @property {string} buffName - 命中后要施加的预制 Buff 名称
  */
 /**
  * 区域效果目标类型常量。

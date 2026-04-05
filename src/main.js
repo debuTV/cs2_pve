@@ -22,7 +22,7 @@
 
 import { Instance } from "cs_script/point_script";
 import { eventBus } from "./eventBus/event_bus";
-import { event } from "./util/definition";
+import { event, MovementRequestType } from "./util/definition";
 
 // ——— 各模块独立导入 ———
 import { GameManager } from "./game/game_manager";
@@ -69,13 +69,115 @@ const inputManager = new InputManager();
 const shopManager = new ShopManager();
 const hudManager = new HudManager();
 const monsterManager = new MonsterManager();
+const navMesh = new NavMesh();
+navMesh.init();
+const movementManager = new MovementManager();
+movementManager.initPathScheduler((start, end) => navMesh.findPath(start, end));
 const buffManager = new BuffManager();
 const particleManager = new ParticleManager();
 const areaEffectManager = new AreaEffectManager();
 
+/**
+ * @param {number} slot
+ */
+function emitShopCloseRequest(slot) {
+    /** @type {import("./shop/shop_const").ShopCloseRequest} */
+    const payload = { slot, result: false };
+    eventBus.emit(event.Shop.In.ShopCloseRequest, payload);
+}
+
+/**
+ * @param {number} slot
+ */
+function emitInputStopRequest(slot) {
+    /** @type {import("./input/input_const").StopRequest} */
+    const payload = { slot, result: false };
+    eventBus.emit(event.Input.In.StopRequest, payload);
+}
+
+/**
+ * @param {number} slot
+ * @param {number} [channel]
+ */
+function emitHideHudRequest(slot, channel) {
+    /** @type {import("./hud/hud_const").HideHudRequest} */
+    const payload = channel === undefined ? { slot, result: false } : { slot, channel, result: false };
+    eventBus.emit(event.Hud.In.HideHudRequest, payload);
+}
+
+/**
+ * @param {number} slot
+ * @param {import("cs_script/point_script").CSPlayerPawn} pawn
+ */
+function emitShopOpenRequest(slot, pawn) {
+    /** @type {import("./shop/shop_const").ShopOpenRequest} */
+    const payload = { slot, pawn, result: false };
+    eventBus.emit(event.Shop.In.ShopOpenRequest, payload);
+}
+
+/**
+ * @param {number} waveIndex
+ */
+function emitWaveStartRequest(waveIndex) {
+    /** @type {import("./wave/wave_const").WaveStartRequest} */
+    const payload = { waveIndex, result: false };
+    eventBus.emit(event.Wave.In.WaveStartRequest, payload);
+}
+
+/**
+ * @param {number} waveIndex
+ * @param {boolean} survived
+ */
+function emitWaveEndRequest(waveIndex, survived) {
+    /** @type {import("./wave/wave_const").WaveEndRequest} */
+    const payload = { waveIndex, survived, result: false };
+    eventBus.emit(event.Wave.In.WaveEndRequest, payload);
+}
+
+/**
+ * @param {string} source
+ */
+function emitGameStartRequest(source) {
+    /** @type {import("./game/game_const").StartGameRequest} */
+    const payload = { source };
+    eventBus.emit(event.Game.In.StartGameRequest, payload);
+}
+
+/**
+ * @param {string} source
+ */
+function emitGameWinRequest(source) {
+    /** @type {import("./game/game_const").GameWinRequest} */
+    const payload = { source };
+    eventBus.emit(event.Game.In.GameWinRequest, payload);
+}
+
+/**
+ * @param {string} source
+ */
+function emitGameLoseRequest(source) {
+    /** @type {import("./game/game_const").GameLoseRequest} */
+    const payload = { source };
+    eventBus.emit(event.Game.In.GameLoseRequest, payload);
+}
+
+/**
+ * @param {import("cs_script/point_script").Entity|null|undefined} entity
+ */
+function emitMovementRemoveRequest(entity) {
+    if (!entity) return;
+    /** @type {import("./util/definition").MovementRequest} */
+    const payload = {
+        type: MovementRequestType.Remove,
+        entity,
+        priority: -1,
+    };
+    eventBus.emit(event.Movement.In.RemoveRequest, payload);
+}
+
 function requestCloseAllShops() {
     for (const player of playerManager.getActivePlayers()) {
-        eventBus.emit(event.Shop.In.ShopCloseRequest, { slot: player.slot });
+        emitShopCloseRequest(player.slot);
     }
 }
 
@@ -85,8 +187,8 @@ function requestCloseAllShops() {
 
 // ——— 3.1 波次结算 / Game / Wave / 区域效果编排 ———
 
-eventBus.on(event.Wave.Out.OnWaveEnd, ({ waveIndex }) => {
-    const waveNumber = waveIndex;
+eventBus.on(event.Wave.Out.OnWaveEnd, (/** @type {import("./wave/wave_const").OnWaveEnd} */ payload) => {
+    const waveNumber = payload.waveIndex;
     const waveConfig = waveManager.getWaveConfig(waveNumber);
 
     // 给予玩家波次奖励
@@ -98,67 +200,54 @@ eventBus.on(event.Wave.Out.OnWaveEnd, ({ waveIndex }) => {
 
     // 推进下一波或胜利
     if (waveManager.hasNextWave()) {
-        eventBus.emit(event.Wave.In.WaveStartRequest, { waveIndex: waveNumber + 1 });
+        emitWaveStartRequest(waveNumber + 1);
     } else {
-        eventBus.emit(event.Game.In.GameWinRequest, { source: "wave-end" });
+        emitGameWinRequest("wave-end");
     }
 });
 
-eventBus.on(event.Wave.Out.OnWaveStart, ({ waveConfig }) => {
+eventBus.on(event.Wave.Out.OnWaveStart, (/** @type {import("./wave/wave_const").OnWaveStart} */ payload) => {
+    const { waveConfig } = payload;
     if (waveConfig) {
         monsterManager.spawnWave(waveConfig);
     }
 });
 
-eventBus.on(event.Game.Out.OnEnterPreparePhase, () => {
+eventBus.on(event.Game.Out.OnEnterPreparePhase, (payload) => {
+    void payload;
     playerManager.dispatchReward(null, {
         type: "ready",
         isReady: false
     });
 });
 
-eventBus.on(event.Game.Out.OnStartGame, () => {
+eventBus.on(event.Game.Out.OnStartGame, (payload) => {
+    void payload;
     playerManager.enterGameStart();
-    eventBus.emit(event.Wave.In.WaveStartRequest, { waveIndex: 1 });
+    emitWaveStartRequest(1);
 });
 
-eventBus.on(event.Game.Out.OnGameLost, () => {
+eventBus.on(event.Game.Out.OnGameLost, (payload) => {
+    void payload;
     requestCloseAllShops();
 });
 
-eventBus.on(event.Game.Out.OnGameWin, () => {
+eventBus.on(event.Game.Out.OnGameWin, (payload) => {
+    void payload;
     requestCloseAllShops();
 });
 
-eventBus.on(event.Game.Out.OnResetGame, () => {
+eventBus.on(event.Game.Out.OnResetGame, (payload) => {
+    void payload;
     requestCloseAllShops();
     waveManager.resetGame();
     monsterManager.resetAllGameStatus();
+    movementManager.cleanup();
     areaEffectManager.cleanup();
     particleManager.cleanup();
     buffManager.clearAll();
     playerManager.resetAllGameStatus();
     Instance.ServerCommand("mp_restartgame 5");
-});
-
-eventBus.on(event.AreaEffects.Out.OnHitPlayer, ({ pawn, payload }) => {
-    const slot = pawn?.GetPlayerController?.()?.GetPlayerSlot?.();
-    const player = typeof slot === "number" ? playerManager.getPlayer(slot) : null;
-    if (!player || !payload?.buffTypeId) return;
-
-    player.buffManager.refreshBuff(payload.buffTypeId, {
-        ...(payload.buffParams ?? {}),
-        source: payload.source ?? null,
-    });
-});
-
-eventBus.on(event.AreaEffects.Out.OnHitMonster, ({ monster, payload }) => {
-    if (!monster || !payload?.buffTypeId) return;
-
-    monster.buffManager.refreshBuff(payload.buffTypeId, {
-        ...(payload.buffParams ?? {}),
-        source: payload.source ?? null,
-    });
 });
 
 /**
@@ -174,95 +263,49 @@ function grantPlayerBuff(playerSlot, buffTypeId, params) {
     return playerManager.applyBuff(playerSlot, buffTypeId, params ?? {});
 }
 
-/**
- * @param {number} buffId
- * @param {string} event
- * @param {any} params
- * @returns {boolean}
- */
-function emitPlayerBuffEvent(buffId, event, params) {
-    switch (event) {
-        case "OnTick":
-            buffManager.OnTick(buffId, params);
-            return true;
-        case "OnAttack":
-            buffManager.OnAttack(buffId, params);
-            return true;
-        case "OnDamage":
-            buffManager.OnDamage(buffId, params);
-            return true;
-        case "OnDeath":
-            buffManager.OnDeath(buffId, params);
-            return true;
-        case "OnStateChange":
-            buffManager.OnStateChange(buffId, params);
-            return true;
-        case "OnSpawn":
-            buffManager.OnSpawn(buffId, params);
-            return true;
-        case "OnRecompute":
-            buffManager.OnRecompute(buffId, params);
-            return true;
-        default:
-            return false;
-    }
-}
-
 // ——— 3.2 玩家 / 怪物 → 游戏 / Buff ———
 
-playerManager.events.setOnPlayerBuffEmitEvent((player, buffId, event, params) => {
-    void player;
-    return emitPlayerBuffEvent(buffId, event, params);
-});
-monsterManager.events.setOnMonsterBuffEmitEvent((monster, buffId, event, params) => {
-    void monster;
-    return emitPlayerBuffEvent(buffId, event, params);
+monsterManager.events.setOnMonsterDeath((monster) => {
+    emitMovementRemoveRequest(monster.model);
 });
 monsterManager.events.setOnAllMonstersDead(() => {
-    eventBus.emit(event.Wave.In.WaveEndRequest, {
-        waveIndex: waveManager.currentWave,
-        survived: true,
-    });
+    emitWaveEndRequest(waveManager.currentWave, true);
 });
-playerManager.events.setOnPlayerJoin((player) => {
-    void player;
+eventBus.on(event.Player.Out.OnPlayerJoin, (payload) => {
+    void payload;
     gameManager.onPlayerJoin();
 });
-playerManager.events.setOnPlayerLeave((player) => {
-    eventBus.emit(event.Shop.In.ShopCloseRequest, { slot: player.slot });
-    eventBus.emit(event.Input.In.StopRequest, { slot: player.slot });
-    eventBus.emit(event.Hud.In.HideHudRequest, { slot: player.slot });
+eventBus.on(event.Player.Out.OnPlayerLeave, (payload) => {
+    emitShopCloseRequest(payload.slot);
+    emitInputStopRequest(payload.slot);
+    emitHideHudRequest(payload.slot);
 
-    const wasPlaying = gameManager.onPlayerLeave(player.slot);
+    const wasPlaying = gameManager.onPlayerLeave(payload.slot);
     if (wasPlaying && !playerManager.hasAlivePlayers()) {
-        eventBus.emit(event.Game.In.GameLoseRequest, { source: "player-leave" });
+        emitGameLoseRequest("player-leave");
     }
 });
 
-playerManager.events.setOnPlayerDeath((playerPawn) => {
-    const controller = playerPawn.GetPlayerController();
-    if (controller) {
-        const slot = controller.GetPlayerSlot();
-        eventBus.emit(event.Shop.In.ShopCloseRequest, { slot });
-        eventBus.emit(event.Input.In.StopRequest, { slot });
-        eventBus.emit(event.Hud.In.HideHudRequest, { slot });
+eventBus.on(event.Player.Out.OnPlayerDeath, (payload) => {
+    emitShopCloseRequest(payload.slot);
+    emitInputStopRequest(payload.slot);
+    emitHideHudRequest(payload.slot);
 
-        const wasPlaying = gameManager.onPlayerDeath();
-        if (wasPlaying && !playerManager.hasAlivePlayers()) {
-            eventBus.emit(event.Game.In.GameLoseRequest, { source: "player-death" });
-        }
+    const wasPlaying = gameManager.onPlayerDeath();
+    if (wasPlaying && !playerManager.hasAlivePlayers()) {
+        emitGameLoseRequest("player-death");
     }
 });
 
-playerManager.events.setOnPlayerRespawn((player) => {
-    void player;
+eventBus.on(event.Player.Out.OnPlayerRespawn, (payload) => {
+    void payload;
     gameManager.onPlayerRespawn();
 });
 
 // ——— 3.3 全员准备 → 开始游戏 → 开始波次 ———
 
-playerManager.events.setOnAllPlayersReady(() => {
-    eventBus.emit(event.Game.In.StartGameRequest, { source: "all-players-ready" });
+eventBus.on(event.Player.Out.OnAllPlayersReady, () => {
+    emitGameStartRequest("all-players-ready");
 });
 
 // ——— 3.5 输入 → 商店 ———
@@ -311,10 +354,7 @@ Instance.OnPlayerChat((event) => {
     if (command === "shop" || command === "!shop") {
         const pawn = controller.GetPlayerPawn();
         if (pawn) {
-            eventBus.emit(event.Shop.In.ShopOpenRequest, {
-                slot: controller.GetPlayerSlot(),
-                pawn,
-            });
+            emitShopOpenRequest(controller.GetPlayerSlot(), pawn);
         }
     }
     if (command === "debug" || command === "!debug") {
@@ -331,13 +371,15 @@ let _lastTime = Instance.GetGameTime();
 
 Instance.SetThink(() => {
     const now = Instance.GetGameTime();
+    const dt = Math.max(0, now - _lastTime);
     _lastTime = now;
     const activePlayers = playerManager.getActivePlayers();
-    const alivePlayers = playerManager.getAlivePlayers()
+    const alivePlayers = playerManager.getAlivePlayers();
+    const alivePawns = alivePlayers
         .map((player) => player.entityBridge.pawn)
         .filter((pawn) => pawn != null);
-    const activeMonsters = monsterManager.getActiveMonsters();
-    const monsterEntities = activeMonsters
+    const currentMonsters = monsterManager.getActiveMonsters();
+    const currentMonsterEntities = currentMonsters
         .map((monster) => monster.model)
         .filter((entity) => entity != null);
 
@@ -345,13 +387,23 @@ Instance.SetThink(() => {
     inputManager.tick();
     playerManager.tick();
     waveManager.tick();
-    monsterManager.tick(monsterEntities, alivePlayers);
+    monsterManager.tick(currentMonsterEntities, alivePawns);
+    const activeMonsters = monsterManager.getActiveMonsters();
+    const monsterEntities = activeMonsters
+        .map((monster) => monster.model)
+        .filter((entity) => entity != null);
+    const separationPositions = monsterEntities
+        .map((entity) => entity.GetAbsOrigin())
+        .filter((position) => position != null);
+    movementManager.tick(now, dt, separationPositions);
+    monsterManager.syncMovementStates(movementManager.getAllStates());
     areaEffectManager.tick(now, {
         players: alivePlayers,
         monsters: activeMonsters,
     });
     particleManager.tickAll(now);
     buffManager.tick();
+    navMesh.tick(alivePawns[0]?.GetAbsOrigin?.());
 
     // ── 5.2 其他模块 tick ──
     shopManager.tick();

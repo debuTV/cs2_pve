@@ -9,7 +9,9 @@ import { MonsterSkillsManager } from "./components/skills_manager";
 import { MonsterMovementPathAdapter } from "./components/movement_path_adapter";
 import { MonsterAnimator } from "./components/animation";
 import { MonsterBuffManager } from "./components/buff_manager";
+import { eventBus } from "../../eventBus/event_bus";
 import { vec } from "../../util/vector";
+import { event, MovementRequestType } from "../../util/definition";
 import { MonsterBuffEvents, MonsterState } from "../monster_const";
 
 export class Monster {
@@ -225,7 +227,19 @@ export class Monster {
     }
 
     submitMovementEvent(request) {
-        this.events.onMovementEvent?.(request);
+        switch (request?.type) {
+            case MovementRequestType.Move:
+                eventBus.emit(event.Movement.In.MoveRequest, request);
+                return true;
+            case MovementRequestType.Stop:
+                eventBus.emit(event.Movement.In.StopRequest, request);
+                return true;
+            case MovementRequestType.Remove:
+                eventBus.emit(event.Movement.In.RemoveRequest, request);
+                return true;
+            default:
+                return false;
+        }
     }
 
     updateMovementSnapshot(snapshot) {

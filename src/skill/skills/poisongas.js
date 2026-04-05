@@ -52,7 +52,7 @@ export class PoisonGasSkill extends SkillTemplate {
 
         const pos = monster.model?.GetAbsOrigin?.();
         if (!pos) return;
-        /**@type {import("../../areaEffects/area_const").areaEffectDesc} */
+        /**@type {import("../../areaEffects/area_const").AreaEffectCreateRequest} */
         const payload = {
             areaEffectStaticKey: "poisongas",
             position: { x: pos.x, y: pos.y, z: pos.z },

@@ -1,3 +1,6 @@
+import { eventBus } from "../../../eventBus/event_bus";
+import { event as eventDefs } from "../../../util/definition";
+
 export const PlayerBuffEvents = {
     Spawn:        "OnSpawn",// 出生/重生事件，允许 Buff 进行一次性修正或标记需要重算派生属性
     Recompute:    "OnRecompute",
@@ -26,9 +29,16 @@ export class PlayerBuffManager {
      */
     addBuff(typeId, params) {
         if(this.buffMap.has(typeId))return false;
-        const id=this.player.events.OnBuffAddRequest?.(typeId, params);
-        if(id == null)return false;
-        this.buffMap.set(typeId, id);
+        /** @type {import("../../../buff/buff_const").BuffAddRequest} */
+        const addRequest = {
+            configid: typeId,
+            target: this.player,
+            targetType: "player",
+            result: -1,
+        };
+        eventBus.emit(eventDefs.Buff.In.BuffAddRequest, addRequest);
+        if(addRequest.result <= 0)return false;
+        this.buffMap.set(typeId, addRequest.result);
         return true;
     }
 
@@ -39,8 +49,13 @@ export class PlayerBuffManager {
     removeBuff(typeId) {
         const id=this.buffMap.get(typeId);
         if(id == null)return false;
-        const success=this.player.events.OnBuffRemoveRequest?.(id);
-        if(!success)return false;
+        /** @type {import("../../../buff/buff_const").BuffRemoveRequest} */
+        const removeRequest = {
+            buffId: id,
+            result: false,
+        };
+        eventBus.emit(eventDefs.Buff.In.BuffRemoveRequest, removeRequest);
+        if(!removeRequest.result)return false;
         this.buffMap.delete(typeId);
         return true;
     }
@@ -52,8 +67,13 @@ export class PlayerBuffManager {
     refreshBuff(typeId, params) {
         const id=this.buffMap.get(typeId);
         if(id == null)return this.addBuff(typeId, params);
-        const success=this.player.events.OnBuffRefreshRequest?.(id, params);
-        if(!success)return false;
+        /** @type {import("../../../buff/buff_const").BuffRefreshRequest} */
+        const refreshRequest = {
+            buffId: id,
+            result: false,
+        };
+        eventBus.emit(eventDefs.Buff.In.BuffRefreshRequest, refreshRequest);
+        if(!refreshRequest.result)return false;
         return true;
     }
     clearAll() {
@@ -62,12 +82,19 @@ export class PlayerBuffManager {
         }
     }
     /**
-     * @param {string} event
+     * @param {string} eventName
      * @param {any} params 
      */
-    emitEvent(event,params) {
+    emitEvent(eventName,params) {
         for(const [, id] of this.buffMap.entries()){
-            this.player.events.OnBuffEmitEvent?.(id, event, params);
+            /** @type {import("../../../buff/buff_const").BuffEmitRequest} */
+            const emitRequest = {
+                buffId: id,
+                eventName,
+                params,
+                result: { result: false },
+            };
+            eventBus.emit(eventDefs.Buff.In.BuffEmitRequest, emitRequest);
         }
     }
 }

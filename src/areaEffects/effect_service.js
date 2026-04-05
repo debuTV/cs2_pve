@@ -22,7 +22,7 @@ export class AreaEffect {
 
     /**
      * 创建区域效果实例。
-     * @param {import("./area_const").areaEffectDesc} desc
+     * @param {import("./area_const").AreaEffectCreateRequest} desc
      */
     constructor(desc) {
         /** 自增唯一 ID。 */
@@ -57,6 +57,13 @@ export class AreaEffect {
          * @type {Map<string, number>}
          */
         this._hitCooldowns = new Map();
+        /**
+         * 每个目标的 Buff ID 记录。键采用：
+         * - 玩家：`p:${slot}`
+         * - 怪物：`m:${monsterId}`
+         * @type {Map<string, number>}
+         */
+        this._buffid=new Map();
     }
 
     /**
@@ -67,12 +74,16 @@ export class AreaEffect {
         if (this.alive) {
             this.stop();
         }
-
+        this._buffid.clear();
         this._hitCooldowns.clear();
         this.startTime = Instance.GetGameTime();
         this.alive = true;
         this._requestParticle();
-        eventBus.emit(event.AreaEffects.Out.OnCreated, this._createLifecyclePayload());
+        /** @type {import("./area_const").OnAreaEffectCreated} */
+        const payload = {
+            effectId: this.id,
+        };
+        eventBus.emit(event.AreaEffects.Out.OnCreated, payload);
         return true;
     }
 
@@ -108,7 +119,11 @@ export class AreaEffect {
         this._stopParticle();
         this._hitCooldowns.clear();
         this.startTime = 0;
-        eventBus.emit(event.AreaEffects.Out.OnStopped, this._createLifecyclePayload());
+        /** @type {import("./area_const").OnAreaEffectStopped} */
+        const payload = {
+            effectId: this.id,
+        };
+        eventBus.emit(event.AreaEffects.Out.OnStopped, payload);
         Instance.Msg(`[AreaEffect] #${this.id} ${this.effectName} 已停止销毁`);
     }
 
@@ -120,23 +135,31 @@ export class AreaEffect {
     /**
      * 处理玩家命中判定。
      * @param {number} now
-     * @param {import("cs_script/point_script").CSPlayerPawn[]} players
+     * @param {import("../player/player/player").Player[]} players
      * @param {number} r2
      */
     _tickPlayers(now, players, r2) {
-        for (const pawn of players) {
+        for (const player of players) {
+            const pawn = player?.entityBridge?.pawn;
             const pos = pawn?.GetAbsOrigin?.();
             if (!pos || vec.lengthsq(pos, this.position) > r2) continue;
 
-            const slot = pawn.GetPlayerController?.()?.GetPlayerSlot?.() ?? -1;
+            const slot = pawn?.GetPlayerController?.()?.GetPlayerSlot?.() ?? -1;
             if (slot < 0) continue;
 
             const cooldownKey = `p:${slot}`;
             if (this._isInCooldown(cooldownKey, now)) continue;
 
             this._hitCooldowns.set(cooldownKey, now);
-            eventBus.emit(event.Buff.In.BuffRefreshRequest,{});
-            eventBus.emit(event.AreaEffects.Out.OnHitPlayer, { payload: this._createHitPayload(Target.Player, slot) });
+            this._ensureBuff(cooldownKey, player, Target.Player);
+            /** @type {import("./area_const").OnAreaEffectHitPlayer} */
+            const payload = { player, 
+                effectId: this.id,
+                targetType: Target.Player,
+                hit: slot,
+                buffName: this.buffName,
+            };
+            eventBus.emit(event.AreaEffects.Out.OnHitPlayer, payload);
         }
     }
 
@@ -156,9 +179,56 @@ export class AreaEffect {
             if (this._isInCooldown(cooldownKey, now)) continue;
 
             this._hitCooldowns.set(cooldownKey, now);
-            eventBus.emit(event.Buff.In.BuffRefreshRequest,{});
-            eventBus.emit(event.AreaEffects.Out.OnHitMonster, { payload: this._createHitPayload(Target.Monster, monsterId) });
+            this._ensureBuff(cooldownKey, monster, Target.Monster);
+            /** @type {import("./area_const").OnAreaEffectHitMonster} */
+            const payload = { monster, 
+                effectId: this.id,
+                targetType: Target.Monster,
+                hit: monsterId,
+                buffName: this.buffName
+            };
+            eventBus.emit(event.AreaEffects.Out.OnHitMonster, payload);
         }
+    }
+
+    /**
+     * 优先刷新目标当前缓存的 Buff；若缓存失效则当场回退到重新创建。
+     *
+     * 这里只在命中路径消费 _buffid，因此采用懒修复即可：
+     * refresh 失败说明本地缓存已过期，立刻删掉并重新 add。
+     *
+     * @param {string} cooldownKey
+     * @param {import("../player/player/player").Player | import("../monster/monster/monster").Monster} target
+     * @param {string} targetType
+     * @returns {number} 成功时返回有效 buffId，失败返回 -1
+     */
+    _ensureBuff(cooldownKey, target, targetType) {
+        const cachedBuffId = this._buffid.get(cooldownKey);
+        if (cachedBuffId&& cachedBuffId > 0) {
+            /** @type {import("../buff/buff_const").BuffRefreshRequest} */
+            const refreshRequest = { buffId: cachedBuffId, result: false };
+            eventBus.emit(event.Buff.In.BuffRefreshRequest, refreshRequest);
+            if (refreshRequest.result) {
+                return cachedBuffId;
+            }
+            this._buffid.delete(cooldownKey);
+        }
+
+        /** @type {import("../buff/buff_const").BuffAddRequest} */
+        const addRequest = {
+            configid: this.buffName,
+            target,
+            targetType,
+            result: -1,
+        };
+        eventBus.emit(event.Buff.In.BuffAddRequest, addRequest);
+        if (addRequest.result > 0) {
+            this._buffid.set(cooldownKey, addRequest.result);
+            return addRequest.result;
+        }
+
+        this._buffid.delete(cooldownKey);
+        return -1;
     }
 
     /**
@@ -169,21 +239,7 @@ export class AreaEffect {
      */
     _isInCooldown(cooldownKey, now) {
         const lastApply = this._hitCooldowns.get(cooldownKey) ?? -Infinity;
-        return now - lastApply < 500; // 默认 500ms 冷却时间，避免同一帧多次命中
-    }
-
-    /**
-     * 构造命中事件负载。每次都返回一份新对象，避免外部修改内部状态。
-     * @param {string} targetType
-     * @param {number} hit
-     * @returns {import("./area_const").areaEffectHitPayload}
-     */
-    _createHitPayload(targetType,hit) {
-        return {
-            effectId: this.id,
-            targetType: targetType,
-            hit:hit,
-        };
+        return now - lastApply < 0.5; // 默认 500ms 冷却时间，避免同一帧多次命中
     }
 
     /** 按需向管理器请求粒子系统。 */
@@ -195,7 +251,7 @@ export class AreaEffect {
             lifetime: this.duration,
             result:-1,
         };
-        eventBus.emit(event.Particle.In.CreateRequest, {payload});
+        eventBus.emit(event.Particle.In.CreateRequest, payload);
         this.particleId = payload.result;
     }
 
@@ -206,21 +262,8 @@ export class AreaEffect {
             particleId: this.particleId,
             result: false,
         };
-        eventBus.emit(event.Particle.In.StopRequest, {payload});
+        eventBus.emit(event.Particle.In.StopRequest, payload);
         return payload.result;
     }
 
-    /**
-     * 构造区域效果生命周期事件负载。
-     * @returns {Record<string, any>}
-     */
-    _createLifecyclePayload() {
-        return {
-            effectId: this.id,
-            position: { ...this.position },
-            radius: this.radius,
-            duration: this.duration,
-            targetTypes: [...this.targetTypes],
-        };
-    }
 }

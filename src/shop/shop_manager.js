@@ -42,7 +42,7 @@ export class ShopManager {
             eventBus.on(event.Shop.In.ShopCloseRequest, (/**@type {import("./shop_const").ShopCloseRequest} */ payload) => {
                 payload.result = this.closeShop(payload);
             }),
-            eventBus.on(event.Input.Out.OnInput, (payload) => {
+            eventBus.on(event.Input.Out.OnInput, (/** @type {import("../input/input_const").OnInput} */ payload) => {
                 this.handleRawKey(payload.slot, payload.key);
             })
         ];

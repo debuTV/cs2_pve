@@ -63,9 +63,13 @@ export class ShopSession {
         this.selectedIndex = 0;
         this._lastMessage = "";
         this.state = ShopState.OPEN;
-        eventBus.emit(event.Input.In.StartRequest, { slot: this.slot, pawn });
+        /** @type {import("../input/input_const").StartRequest} */
+        const startRequest = { slot: this.slot, pawn, result: false };
+        eventBus.emit(event.Input.In.StartRequest, startRequest);
         this._refreshHud();
-        eventBus.emit(event.Shop.Out.OnShopOpen, { slot: this.slot });
+        /** @type {import("./shop_const").OnShopOpen} */
+        const payload = { slot: this.slot};
+        eventBus.emit(event.Shop.Out.OnShopOpen, payload);
     }
 
     /**
@@ -74,12 +78,18 @@ export class ShopSession {
     close() {
         if (this.state !== ShopState.OPEN) return false;
 
-        eventBus.emit(event.Hud.In.HideHudRequest, { slot: this.slot, channel: CHANNAL.SHOP });
-        eventBus.emit(event.Input.In.StopRequest, { slot: this.slot });
+        /** @type {import("../hud/hud_const").HideHudRequest} */
+        const hideHudRequest = { slot: this.slot, channel: CHANNAL.SHOP,result:false };
+        /** @type {import("../input/input_const").StopRequest} */
+        const stopRequest = { slot: this.slot, result: false };
+        eventBus.emit(event.Hud.In.HideHudRequest, hideHudRequest);
+        eventBus.emit(event.Input.In.StopRequest, stopRequest);
         this.state = ShopState.CLOSED;
         this._pawn = null;
         this._lastMessage = "";
-        eventBus.emit(event.Shop.Out.OnShopClose, { slot: this.slot });
+        /** @type {import("./shop_const").OnShopClose} */
+        const payload = { slot: this.slot };
+        eventBus.emit(event.Shop.Out.OnShopClose, payload);
         return true;
     }
 
@@ -237,12 +247,9 @@ export class ShopSession {
 
         this._lastMessage = grantResult.message ?? `购买成功: ${item.displayName}`;
         this._refreshHud();
-        eventBus.emit(event.Shop.Out.OnBought, {
-            slot: this.slot,
-            itemId: item.id,
-            price: item.cost,
-            purchaseContext: ctx,
-        });
+        /** @type {import("./shop_const").OnBought} */
+        const payload = { slot: this.slot, itemId: item.id, price: item.cost, purchaseContext: ctx };
+        eventBus.emit(event.Shop.Out.OnBought, payload);
         return { result: ShopResult.SUCCESS, message: this._lastMessage };
     }
 
@@ -359,12 +366,15 @@ export class ShopSession {
         }
         text += `\n[W/S 选中] [A/D 翻页] [E 确认] [SHIFT 返回]`;
 
-        eventBus.emit(event.Hud.In.ShowHudRequest, {
+        /** @type {import("../hud/hud_const").ShowHudRequest} */
+        const payload = {
             slot: this.slot,
             pawn: this._pawn,
             text,
             channel: CHANNAL.SHOP,
-        });
+            result:false
+        };
+        eventBus.emit(event.Hud.In.ShowHudRequest, payload);
     }
 
     /**

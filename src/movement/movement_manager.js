@@ -10,6 +10,8 @@
  */
 import { Movement } from "./movement";
 import { PathState } from "./movement_const";
+import { eventBus } from "../eventBus/event_bus";
+import { event, MovementRequestType } from "../util/definition";
 
 /** @typedef {import("cs_script/point_script").Entity} Entity */
 /** @typedef {import("cs_script/point_script").Vector} Vector */
@@ -52,6 +54,21 @@ export class MovementManager {
         this._findPath = null;
         /** @type {import("../util/definition").MovementRequest[]} */
         this._pendingRequests = [];
+        /** @type {Array<() => boolean>} */
+        this._unsubscribers = [
+            eventBus.on(event.Movement.In.MoveRequest, (req = {}) => {
+                req.type = MovementRequestType.Move;
+                this.submitRequest(req);
+            }),
+            eventBus.on(event.Movement.In.StopRequest, (req = {}) => {
+                req.type = MovementRequestType.Stop;
+                this.submitRequest(req);
+            }),
+            eventBus.on(event.Movement.In.RemoveRequest, (req = {}) => {
+                req.type = MovementRequestType.Remove;
+                this.submitRequest(req);
+            }),
+        ];
     }
 
     /**
@@ -68,6 +85,7 @@ export class MovementManager {
      * @param {import("../util/definition").MovementRequest} req
      */
     submitRequest(req) {
+        if (!req?.entity) return;
         this._pendingRequests.push(req);
     }
 
@@ -98,6 +116,10 @@ export class MovementManager {
         });
         this._addIgnoreEntity(config.ignoreEntity ?? null);
         this._pathHeap.push(key, 0);
+        eventBus.emit(event.Movement.Out.OnRegistered, {
+            entity: key,
+            config,
+        });
     }
 
     /**
@@ -111,6 +133,9 @@ export class MovementManager {
         this._entries.delete(key);
         this._removeIgnoreEntity(entry.ignoreEntity);
         this._pathHeap.remove(key);
+        eventBus.emit(event.Movement.Out.OnRemoved, {
+            entity: key,
+        });
     }
 
     /** @param {any} key */
@@ -132,6 +157,10 @@ export class MovementManager {
         return result;
     }
 
+    /**
+     * @param {Entity} key
+     * @param {number} speed
+     */
     setSpeed(key, speed) {
         const entry = this._entries.get(key);
         if (!entry) return false;
@@ -232,6 +261,9 @@ export class MovementManager {
             entry.usePathRefresh = false;
             entry.targetEntity = null;
             entry.targetPosition = null;
+            eventBus.emit(event.Movement.Out.OnStopped, {
+                entity: key,
+            });
             return;
         }
 
@@ -365,6 +397,14 @@ export class MovementManager {
         this.ignoreEntity.length = 0;
         this._pathHeap.clear();
         this._pendingRequests.length = 0;
+    }
+
+    destroy() {
+        this.cleanup();
+        for (const unsubscribe of this._unsubscribers) {
+            unsubscribe();
+        }
+        this._unsubscribers.length = 0;
     }
 }
 

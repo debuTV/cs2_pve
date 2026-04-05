@@ -1,5 +1,5 @@
-import { GenericBuffManager } from "../../../buff/buff_manager";
-import { BuffTargetType } from "../../../buff/buff_const";
+import { eventBus } from "../../../eventBus/event_bus";
+import { event as eventDefs } from "../../../util/definition";
 
 
 export class MonsterBuffManager {
@@ -21,9 +21,16 @@ export class MonsterBuffManager {
      */
     addBuff(typeId, params) {
         if(this.buffMap.has(typeId))return false;
-        const id=this.monster.events.OnBuffAddedRequest?.(typeId, params);
-        if(id == null)return false;
-        this.buffMap.set(typeId, id);
+        /** @type {import("../../../buff/buff_const").BuffAddRequest} */
+        const addRequest = {
+            configid: typeId,
+            target: this.monster,
+            targetType: "monster",
+            result: -1,
+        };
+        eventBus.emit(eventDefs.Buff.In.BuffAddRequest, addRequest);
+        if(addRequest.result <= 0)return false;
+        this.buffMap.set(typeId, addRequest.result);
         return true;
     }
 
@@ -34,8 +41,13 @@ export class MonsterBuffManager {
     removeBuff(typeId) {
         const id=this.buffMap.get(typeId);
         if(id == null)return false;
-        const success=this.monster.events.OnBuffRemovedRequest?.(id);
-        if(!success)return false;
+        /** @type {import("../../../buff/buff_const").BuffRemoveRequest} */
+        const removeRequest = {
+            buffId: id,
+            result: false,
+        };
+        eventBus.emit(eventDefs.Buff.In.BuffRemoveRequest, removeRequest);
+        if(!removeRequest.result)return false;
         this.buffMap.delete(typeId);
         return true;
     }
@@ -47,8 +59,13 @@ export class MonsterBuffManager {
     refreshBuff(typeId, params) {
         const id=this.buffMap.get(typeId);
         if(id == null)return this.addBuff(typeId, params);
-        const success=this.monster.events.OnBuffRefreshedRequest?.(id, params);
-        if(!success)return false;
+        /** @type {import("../../../buff/buff_const").BuffRefreshRequest} */
+        const refreshRequest = {
+            buffId: id,
+            result: false,
+        };
+        eventBus.emit(eventDefs.Buff.In.BuffRefreshRequest, refreshRequest);
+        if(!refreshRequest.result)return false;
         return true;
     }
     clearAll() {
@@ -57,12 +74,19 @@ export class MonsterBuffManager {
         }
     }
     /**
-     * @param {string} event
+     * @param {string} eventName
      * @param {any} params 
      */
-    emitEvent(event,params) {
+    emitEvent(eventName,params) {
         for(const [, id] of this.buffMap.entries()){
-            this.monster.events.OnBuffEmitEvent?.(id, event, params);
+            /** @type {import("../../../buff/buff_const").BuffEmitRequest} */
+            const emitRequest = {
+                buffId: id,
+                eventName,
+                params,
+                result: { result: false },
+            };
+            eventBus.emit(eventDefs.Buff.In.BuffEmitRequest, emitRequest);
         }
     }
 }

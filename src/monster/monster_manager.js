@@ -124,15 +124,6 @@ export class MonsterManager {
             return this.events.OnBeforeTakeDamage?.(monsterInstance, amount, attacker);
         });
         monster.events.setOnAreaEffectRequest(()=>{});
-        // 移动意图事件转发：Monster 产生的移动事件汇入 Manager 级队列
-        monster.events.setOnMovementEvent((event) => {
-            this.events.OnMovementRequest?.(event);
-        });
-        monster.events.setBuffEvent((typeId, params) => this.events.OnBuffAddRequest?.(monster, typeId, params) ?? null,
-            (buffId) => this.events.OnBuffRemoveRequest?.(monster, buffId) ?? false,
-            (buffId, params) => this.events.OnBuffRefreshRequest?.(monster, buffId, params) ?? false,
-            (buffId, event, params) => this.events.OnBuffEmitEvent?.(monster, buffId, event, params) ?? false
-        );
         monster.events.setSkillEvent((typeId, params)=>this.events.OnSkillAddRequest?.(monster,typeId,params)??null,
             (skillId,params)=>this.events.OnSkillUseRequest?.(monster,skillId,params)??false,
             (skillId,event,params)=>this.events.OnSkillEmitEvent?.(monster,skillId,event,params)??false
@@ -150,6 +141,27 @@ export class MonsterManager {
         if (!monster) return null;
         return monster.addBuff(typeId, params);
     }
+
+    /**
+     * @returns {Monster[]}
+     */
+    getActiveMonsters() {
+        return Array.from(this.monsters.values());
+    }
+
+    /**
+     * @param {Map<Entity, {mode: string, onGround: boolean, currentGoalMode: number|null}>} movementStates
+     */
+    syncMovementStates(movementStates) {
+        for (const monster of this.monsters.values()) {
+            const model = monster.model;
+            if (!model) continue;
+            const snapshot = movementStates.get(model);
+            if (!snapshot) continue;
+            monster.updateMovementSnapshot(snapshot);
+        }
+    }
+
     /**
      * 获取管理器状态快照。
      * @returns {{totalMonsters: number, activeMonsters: number, nextId: number, totalKills: number}}

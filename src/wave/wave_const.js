@@ -20,7 +20,24 @@ export const WaveState = {
     ACTIVE: 'ACTIVE',
     COMPLETED: 'COMPLETED'
 };
-
+/**
+ * @typedef {object} WaveStartRequest - 请求开始波次的消息载荷
+ * @property {number} waveIndex - 要开始的波次索引
+ * @property {boolean} result - 结果回填字段
+ */
+/**
+ * @typedef {object} WaveEndRequest - 请求结束波次的消息载荷
+ * @property {boolean} result - 结果回填字段
+ */
+/**
+ * @typedef {object} OnWaveStart
+ * @property {number} waveIndex - 已开始的波次索引
+ * @property {import("../util/definition").waveConfig} waveConfig - 当前波次配置
+ */
+/**
+ * @typedef {object} OnWaveEnd
+ * @property {number} waveIndex - 已结束的波次索引
+ */
 /**
  * 内置的默认波次配置列表，包含三波递增难度的演示数据。
  * 实际使用时由 main.js 传入真实配置。

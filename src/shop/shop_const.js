@@ -70,6 +70,7 @@ export const BASE_SHOP_ITEMS = [
  * @property {boolean} success
  * @property {string} [message]
  */
+
 /**
  * @typedef {object} ShopOpenRequest
  * @property {number} slot - 玩家槽位
@@ -80,4 +81,19 @@ export const BASE_SHOP_ITEMS = [
  * @typedef {object} ShopCloseRequest
  * @property {number} slot - 玩家槽位
  * @property {boolean} result - 输出参数，表示是否成功关闭商店
+ */
+/**
+ * @typedef {object} OnShopOpen
+ * @property {number} slot - 玩家槽位
+ */
+/**
+ * @typedef {object} OnShopClose
+ * @property {number} slot - 玩家槽位
+ */
+/**
+ * @typedef {object} OnBought
+ * @property {number} slot - 玩家槽位
+ * @property {string} itemId - 购买的商品 id
+ * @property {number} price - 本次购买价格
+ * @property {ShopPurchaseContext} purchaseContext - 本次购买上下文
  */

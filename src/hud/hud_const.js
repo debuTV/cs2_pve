@@ -71,3 +71,21 @@ export const CHANNEL_PRIORITY = {
  * @property {number} [channel] - HUD 渠道
  * @property {boolean} result - 请求结果（是否成功提交）
  */
+/**
+ * @typedef {object} OnHudShown
+ * @property {number} slot - 玩家槽位
+ * @property {number} channel - 当前生效的 HUD 渠道
+ * @property {string} text - 当前显示的 HUD 文本
+ */
+/**
+ * @typedef {object} OnHudUpdated
+ * @property {number} slot - 玩家槽位
+ * @property {number} channel - 当前生效的 HUD 渠道
+ * @property {string} text - 当前显示的 HUD 文本
+ * @property {number} [previousChannel] - 更新前的 HUD 渠道
+ */
+/**
+ * @typedef {object} OnHudHidden
+ * @property {number} slot - 玩家槽位
+ * @property {number} channel - 隐藏前的 HUD 渠道
+ */

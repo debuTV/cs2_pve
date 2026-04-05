@@ -44,6 +44,18 @@ export const BuffPolarity = {
  * @property {object} params - 事件参数
  * @property {object} result - 结果
  */
+/**
+ * @typedef {Object} OnBuffAdded
+ * @property {number} buffId Buff id
+ */
+/**
+ * @typedef {Object} OnBuffRefreshed
+ * @property {number} buffId Buff id
+ */
+/**
+ * @typedef {Object} OnBuffRemoved
+ * @property {number} buffId Buff id
+ */
 //=====================预制buff配置====================
 /**@type {Record<string, BuffConfig>} */
 export const buffconfig={

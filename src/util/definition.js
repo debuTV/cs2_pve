@@ -51,7 +51,6 @@
  * @property {string} id - 业务粒子 id（代码中引用的 key）
  * @property {string} spawnTemplateName - 地图中 PointTemplate 的实体名称
  * @property {string} middleEntityName - PointTemplate 内目标 info_particle_system 的实体名称，如果是范围特效，选择范围中心点的实体，用于精确匹配
- * @property {number} [lifetime] - 默认活动时间（秒），为空时仅能外部 stop；运行时 options 可覆盖
  */
 /**
  * @typedef {object} Adapter - 外部适配器接口
@@ -166,18 +165,39 @@ export const event={
 
     },
     Movement:{
-
+        In:{
+            MoveRequest:"Movement_OnMoveRequest",    //请求移动，payload 使用 MovementRequest
+            StopRequest:"Movement_OnStopRequest",    //请求停止移动，payload 使用 MovementRequest
+            RemoveRequest:"Movement_OnRemoveRequest",    //请求移除 Movement 实例，payload 使用 MovementRequest
+        },
+        Out:{
+            OnRegistered:"Movement_OnRegistered",    //Movement 实例注册后
+            OnStopped:"Movement_OnStopped",          //Movement 停止后
+            OnRemoved:"Movement_OnRemoved",          //Movement 实例移除后
+        }
     },
     Particle:{
         In:{
             CreateRequest:"Particle_OnCreateRequest",    //粒子特效创建请求
             StopRequest:"Particle_OnStopRequest",        //粒子特效停止请求
+        },
+        Out:{
+            OnCreated:"Particle_OnCreated",    //粒子特效创建成功后
+            OnStopped:"Particle_OnStopped",    //粒子特效停止后
         }
     },
     Player:{
         In:{
             GetPlayerSummaryRequest:"Player_OnGetPlayerSummaryRequest",    //请求玩家信息摘要，payload 包含 {slot: number, result?: any}
             DispatchRewardRequest:"Player_OnDispatchRewardRequest",    //请求分发玩家奖励，payload 包含 {slot: number|null, reward?: any, rewards?: any[], result?: boolean}
+        },
+        Out:{
+            OnPlayerJoin:"Player_OnPlayerJoin",    //玩家加入后，payload 包含 {player: Player, slot: number}
+            OnPlayerLeave:"Player_OnPlayerLeave",  //玩家离开后，payload 包含 {player: Player, slot: number}
+            OnPlayerReadyChanged:"Player_OnPlayerReadyChanged",    //玩家准备状态变化后
+            OnAllPlayersReady:"Player_OnAllPlayersReady",    //全员准备后
+            OnPlayerDeath:"Player_OnPlayerDeath",  //玩家死亡后
+            OnPlayerRespawn:"Player_OnPlayerRespawn",    //玩家重生后
         }
     },
     Shop:{

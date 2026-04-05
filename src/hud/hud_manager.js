@@ -135,10 +135,12 @@ export class HudManager {
         if (winnerChannel === CHANNAL.NONE) {
             if (session.use) {
                 this._hideEntity(session);
-                eventBus.emit(event.Hud.Out.OnHudHidden, {
+                /** @type {import("./hud_const").OnHudHidden} */
+                const payload = {
                     slot: session.slot,
                     channel: previousChannel,
-                });
+                };
+                eventBus.emit(event.Hud.Out.OnHudHidden, payload);
             }
             session.activeChannel = CHANNAL.NONE;
             session.pawn = null;
@@ -192,18 +194,22 @@ export class HudManager {
         this._refreshHudPosition(session);
 
         if (!wasVisible && session.use) {
-            eventBus.emit(event.Hud.Out.OnHudShown, {
+            /** @type {import("./hud_const").OnHudShown} */
+            const payload = {
                 slot: session.slot,
                 channel: winnerChannel,
                 text: request.text,
-            });
+            };
+            eventBus.emit(event.Hud.Out.OnHudShown, payload);
         } else if ((channelChanged || textChanged || pawnChanged) && session.use) {
-            eventBus.emit(event.Hud.Out.OnHudUpdated, {
+            /** @type {import("./hud_const").OnHudUpdated} */
+            const payload = {
                 slot: session.slot,
                 channel: winnerChannel,
                 text: request.text,
                 previousChannel,
-            });
+            };
+            eventBus.emit(event.Hud.Out.OnHudUpdated, payload);
         }
     }
 

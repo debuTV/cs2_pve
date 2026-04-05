@@ -51,14 +51,18 @@ export class BuffTemplate{
         if (this.use) return false;
         this.use = true;
         this.startTime = Instance.GetGameTime();
-        eventBus.emit(event.Buff.Out.OnBuffAdded, {buffId:this.id});
+        /** @type {import("./buff_const").OnBuffAdded} */
+        const payload = { buffId: this.id };
+        eventBus.emit(event.Buff.Out.OnBuffAdded, payload);
         return true;
     }
     stop()
     {
         if (!this.use) return false;
         this.use = false;
-        eventBus.emit(event.Buff.Out.OnBuffRemoved, {buffId:this.id});
+        /** @type {import("./buff_const").OnBuffRemoved} */
+        const payload = { buffId: this.id };
+        eventBus.emit(event.Buff.Out.OnBuffRemoved, payload);
         return true;
     }
     refresh()
@@ -67,7 +71,9 @@ export class BuffTemplate{
             this.duration = this.params.duration;
         }
         this.startTime = Instance.GetGameTime();
-        eventBus.emit(event.Buff.Out.OnBuffRefreshed, {buffId:this.id});
+        /** @type {import("./buff_const").OnBuffRefreshed} */
+        const payload = { buffId: this.id };
+        eventBus.emit(event.Buff.Out.OnBuffRefreshed, payload);
         return true;
     }
     /**

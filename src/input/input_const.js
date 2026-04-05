@@ -25,6 +25,9 @@ const MONITORED_INPUTS = [
     { key: "InspectWeapon", binding: CSInputs.LOOK_AT_WEAPON },
 ];
 /**
+ * @typedef {"W"|"A"|"S"|"D"|"Walk"|"Duck"|"Jump"|"Use"|"Attack"|"Attack2"|"Reload"|"ShowScores"|"InspectWeapon"} InputKey
+ */
+/**
  * @typedef {object} StartRequest
  * @property {number} slot - 玩家槽位
  * @property {import("cs_script/point_script").CSPlayerPawn} pawn - 玩家 Pawn 引用
@@ -34,6 +37,11 @@ const MONITORED_INPUTS = [
  * @typedef {object} StopRequest
  * @property {number} slot - 玩家槽位
  * @property {boolean} result - 输出参数，表示是否成功停止检测
+ */
+/**
+ * @typedef {object} OnInput
+ * @property {number} slot - 玩家槽位
+ * @property {InputKey} key - 本帧检测到的原始输入键名
  */
 /**
  * 按键边沿检测器。

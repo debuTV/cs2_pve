@@ -23,10 +23,10 @@ import { PlayerState } from "../player_const";
  * - `tickDispatcher` – 每帧调度入口，推进 Buff tick 等持续逻辑。
  *
  * 外部系统（如 PlayerManager）通过 Player 上的公开方法与组件交互，
- * 通过专用回调事件订阅领域事件（死亡、升级、Buff 变化等）。
+ * Player 的生命周期事件统一由 PlayerManager 通过 eventBus 向外发出。
  *
  * 状态管理：所有状态变更必须经过 `applyStateTransition()` 统一入口，
- * 该方法会同步通知 Buff 系统和事件总线，确保状态一致性。
+ * 该方法会同步通知 Buff 系统，PlayerManager 再基于状态变化向外发出 eventBus 生命周期事件。
  *
  * @navigationTitle 玩家实体
  */
@@ -40,9 +40,6 @@ export class Player {
 
         /** @type {number} 玩家当前状态，取值见 {@link PlayerState} */
         this.state = PlayerState.DISCONNECTED;
-
-        /** @type {PlayerEvents} 玩家领域事件集合 */
-        this.events = new PlayerEvents();
 
         // 组件
         /** @type {PlayerEntityBridge} 引擎实体桥接组件 */
@@ -90,7 +87,6 @@ export class Player {
      */
     disconnect() {
         this.lifecycle.disconnect();
-        this.events.clear();
     }
 
     /**
@@ -225,15 +221,17 @@ export class Player {
     /**
      * 设置玩家准备状态。
      * @param {boolean} ready 是否准备
+     * @returns {boolean}
      */
     setReady(ready) {
         if (ready && this.state === PlayerState.PREPARING) {
             this.applyStateTransition(PlayerState.READY);
-            this.events.OnReadyChanged?.(true);
+            return true;
         } else if (!ready && this.state === PlayerState.READY) {
             this.applyStateTransition(PlayerState.PREPARING);
-            this.events.OnReadyChanged?.(false);
+            return true;
         }
+        return false;
     }
 
     // ——— 状态机 ———
@@ -271,85 +269,5 @@ export class Player {
      */
     getSummary() {
         return { ...this.stats.getSummary(), pawn: this.entityBridge.pawn };
-    }
-}
-/**
- * 玩家领域回调集合。
- */
-export class PlayerEvents {
-    constructor() {
-        this.clear()
-    }
-    /**
-     * @param {(typeId: string, params: Record<string, any>) => number|null} _OnBuffAddRequest
-     * @param {(buffId: number) => boolean} _OnBuffRemoveRequest
-     * @param {(buffId: number, params: Record<string, any>) => boolean} _OnBuffRefreshRequest
-     * @param {(buffId: number, event: string, params: any) => boolean} _OnBuffEmitEvent
-     */
-    setBuffEvent(_OnBuffAddRequest, _OnBuffRemoveRequest, _OnBuffRefreshRequest,_OnBuffEmitEvent)
-    {
-        /**
-         * 请求获得Buff事件回调。
-         * @type {null|((typeId: string, params: Record<string, any>) => number|null)}
-         */
-        this.OnBuffAddRequest = _OnBuffAddRequest;
-        /**
-         * 请求失去Buff事件回调。
-         * @type {null|((buffId: number) => boolean)}
-         */
-        this.OnBuffRemoveRequest = _OnBuffRemoveRequest;
-        /**
-         * 请求刷新Buff事件回调。
-         * @type {null|((buffId: number, params: Record<string, any>) => boolean)}
-         */
-        this.OnBuffRefreshRequest = _OnBuffRefreshRequest;
-        /**
-         * Buff 发出事件回调。
-         * @type {null|((buffId: number, event: string, params: any) => boolean)}
-         */
-        this.OnBuffEmitEvent = _OnBuffEmitEvent;
-    }
-    /**
-     * @param {(typeId: string, params: Record<string, any>) => number|null} _OnSkillAddRequest 
-     * @param {(skillId: number, params: Record<string, any>) => boolean} _OnSkillUseRequest
-     * @param {(skillId: number, event: string, params: any) => boolean} _OnSkillEmitEvent
-     */
-    setSkillEvent(_OnSkillAddRequest,_OnSkillUseRequest,_OnSkillEmitEvent)
-    {
-        /**
-         * 请求添加技能事件回调。返回id
-         * @type {null|((typeId: string, params: Record<string, any>) => number|null)}
-         */
-        this.OnSkillAddRequest = _OnSkillAddRequest;
-        /**
-         * 请求使用技能事件回调。
-         * @type {null|((skillId: number, params: Record<string, any>) => boolean)}
-         */
-        this.OnSkillUseRequest = _OnSkillUseRequest;
-        /**
-         * 技能事件回调。
-         * @type {null|((skillId: number, event: string, params: any) => boolean)}
-         */
-        this.OnSkillEmitEvent = _OnSkillEmitEvent;
-    }
-    /**
-     * 玩家准备状态变化事件回调。
-     * @param {null|((ready: boolean) => void)} callback
-     */
-    setOnReadyChanged(callback) {
-        this.OnReadyChanged = callback;
-    }
-    /** 清除所有回调 */
-    clear() {
-        this.OnReadyChanged = null;
-
-        this.OnBuffAddRequest = null;
-        this.OnBuffRemoveRequest = null;
-        this.OnBuffRefreshRequest = null;
-        this.OnBuffEmitEvent=null;
-
-        this.OnSkillAddRequest=null;
-        this.OnSkillUseRequest=null;
-        this.OnSkillEmitEvent=null;
     }
 }

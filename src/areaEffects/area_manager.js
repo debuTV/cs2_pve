@@ -19,28 +19,29 @@ import { event } from "../util/definition";
 export class AreaEffectManager {
     constructor() {
         /** 所有活跃的区域效果实例。尾部追加，失活后在 tick 中移除。
-         * @type {AreaEffect[]} */
-        this._effects = [];
+         * @type {Map<number, AreaEffect>} */
+        this._effects = new Map();
+        this._nextEffectId = 1;
         /** @type {Array<() => boolean>} */
         this._unsubscribers = [
-            eventBus.on(event.AreaEffects.In.CreateRequest, (payload = {}) => {
+            eventBus.on(event.AreaEffects.In.CreateRequest, (/** @type {import("./area_const").AreaEffectCreateRequest} */ payload) => {
                 payload.result = this.create(payload);
             }),
-            eventBus.on(event.AreaEffects.In.StopRequest, (payload = {}) => {
-                payload.result = this.stop(payload.areaEffectId ?? payload.effectId ?? null);
+            eventBus.on(event.AreaEffects.In.StopRequest, (/** @type {import("./area_const").AreaEffectStopRequest} */ payload) => {
+                payload.result = this.stop(payload.areaEffectId);
             })
         ];
     }
 
     /**
      * 创建一个新的区域效果。
-     * @param {import("./area_const").areaEffectDesc} desc
+     * @param {import("./area_const").AreaEffectCreateRequest} desc
      * @returns {boolean} 是否成功创建
      */
     create(desc) {
         const effect = new AreaEffect(desc);
         effect.start();
-        this._register(effect);
+        this._effects.set(effect.id, effect);
         return true;
     }
 
@@ -50,14 +51,11 @@ export class AreaEffectManager {
      * @returns {boolean}
      */
     stop(areaEffectId) {
-        for (const effect of this._effects) {
-            if (!effect || effect.id !== areaEffectId) continue;
-            effect.stop();
-            this._unregister(effect);
-            return true;
-        }
-
-        return false;
+        const effect = this._effects.get(areaEffectId);
+        if (!effect) return false;
+        effect.stop();
+        this._effects.delete(areaEffectId);
+        return true;
     }
 
     /**
@@ -66,30 +64,27 @@ export class AreaEffectManager {
      * @param {import("./area_const").areaEffectTickContext} tickContext
      */
     tick(now, tickContext) {
-        for (let i = this._effects.length - 1; i >= 0; i--) {
-            const effect = this._effects[i];
-            if (!effect) {
-                this._effects.splice(i, 1);
-                continue;
-            }
+        for (const [id,effect] of this._effects.entries()) {
+            if (!effect) continue;
+
             if (!effect.isAlive()) {
-                this._unregister(effect);
+                this._effects.delete(id);
                 continue;
             }
 
             effect.tick(now, tickContext);
             if (!effect.isAlive()) {
-                this._unregister(effect);
+                this._effects.delete(id);
             }
         }
     }
 
     /** 清理所有区域效果 */
     cleanup() {
-        for (let i = this._effects.length - 1; i >= 0; i--) {
-            this._effects[i]?.stop();
+        for (const effect of this._effects.values()) {
+            effect?.stop();
         }
-        this._effects.length = 0;
+        this._effects.clear();
     }
 
     /** 销毁服务并注销事件监听。 */
@@ -99,24 +94,5 @@ export class AreaEffectManager {
             unsubscribe();
         }
         this._unsubscribers.length = 0;
-    }
-
-    /**
-     * 注册单个区域效果实例。
-     * @param {AreaEffect} effect
-     */
-    _register(effect) {
-        if (effect && !this._effects.includes(effect)) {
-            this._effects.push(effect);
-        }
-    }
-
-    /**
-     * 从集合中移除单个区域效果实例。
-     * @param {AreaEffect} effect
-     */
-    _unregister(effect) {
-        const idx = this._effects.indexOf(effect);
-        if (idx !== -1) this._effects.splice(idx, 1);
     }
 }
