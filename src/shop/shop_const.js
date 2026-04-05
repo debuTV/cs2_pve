@@ -2,13 +2,14 @@
  * @module 商店系统/商店常量
  */
 
-export const ShopAction = {
-    UP: "up",
-    DOWN: "down",
-    PAGE_PREV: "page_prev",
-    PAGE_NEXT: "page_next",
-    CONFIRM: "confirm",
-    BACK: "back",
+/** @type {Record<string, string>} */
+export const RAW_KEY_TO_ACTION = {
+    W: "up",
+    S: "down",
+    A: "page_prev",
+    D: "page_next",
+    Use: "confirm",
+    Walk: "back",
 };
 
 export const SHOP_ITEMS_PER_PAGE = 4;
@@ -60,7 +61,6 @@ export const BASE_SHOP_ITEMS = [
  * @typedef {object} ShopPurchaseContext
  * @property {number} selectedIndex
  * @property {number} price
- * @property {number} openedAt
  * @property {number} purchasedAt
  * @property {ShopPlayerInfo} playerInfo
  */
@@ -69,4 +69,15 @@ export const BASE_SHOP_ITEMS = [
  * @typedef {object} ShopGrantResult
  * @property {boolean} success
  * @property {string} [message]
+ */
+/**
+ * @typedef {object} ShopOpenRequest
+ * @property {number} slot - 玩家槽位
+ * @property {import("cs_script/point_script").CSPlayerPawn} pawn - 玩家 Pawn 引用
+ * @property {boolean} result - 输出参数，表示是否成功打开商店
+ */
+/**
+ * @typedef {object} ShopCloseRequest
+ * @property {number} slot - 玩家槽位
+ * @property {boolean} result - 输出参数，表示是否成功关闭商店
  */

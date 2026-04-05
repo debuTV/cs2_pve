@@ -31,7 +31,6 @@ import { PlayerManager } from "./player/player_manager";
 import { InputManager } from "./input/input_manager";
 import { ShopManager } from "./shop/shop_manager";
 import { HudManager } from "./hud/hud_manager";
-import { CHANNAL } from "./hud/hud_const";
 import { SkillManager } from "./skill/skill_manager";
 import { MonsterManager } from "./monster/monster_manager";
 import { BuffManager } from "./buff/buff_manager";
@@ -73,6 +72,12 @@ const monsterManager = new MonsterManager();
 const buffManager = new BuffManager();
 const particleManager = new ParticleManager();
 const areaEffectManager = new AreaEffectManager();
+
+function requestCloseAllShops() {
+    for (const player of playerManager.getActivePlayers()) {
+        eventBus.emit(event.Shop.In.ShopCloseRequest, { slot: player.slot });
+    }
+}
 
 // ═══════════════════════════════════════════════
 // 3. 跨模块回调绑定（全部集中在此）
@@ -118,15 +123,15 @@ eventBus.on(event.Game.Out.OnStartGame, () => {
 });
 
 eventBus.on(event.Game.Out.OnGameLost, () => {
-    shopManager.closeAll();
+    requestCloseAllShops();
 });
 
 eventBus.on(event.Game.Out.OnGameWin, () => {
-    shopManager.closeAll();
+    requestCloseAllShops();
 });
 
 eventBus.on(event.Game.Out.OnResetGame, () => {
-    shopManager.closeAll();
+    requestCloseAllShops();
     waveManager.resetGame();
     monsterManager.resetAllGameStatus();
     areaEffectManager.cleanup();
@@ -224,9 +229,9 @@ playerManager.events.setOnPlayerJoin((player) => {
     gameManager.onPlayerJoin();
 });
 playerManager.events.setOnPlayerLeave((player) => {
-    shopManager.closeShop(player.slot);
-    inputManager.stop(player.slot);
-    hudManager.hideHud(player.slot);
+    eventBus.emit(event.Shop.In.ShopCloseRequest, { slot: player.slot });
+    eventBus.emit(event.Input.In.StopRequest, { slot: player.slot });
+    eventBus.emit(event.Hud.In.HideHudRequest, { slot: player.slot });
 
     const wasPlaying = gameManager.onPlayerLeave(player.slot);
     if (wasPlaying && !playerManager.hasAlivePlayers()) {
@@ -238,9 +243,9 @@ playerManager.events.setOnPlayerDeath((playerPawn) => {
     const controller = playerPawn.GetPlayerController();
     if (controller) {
         const slot = controller.GetPlayerSlot();
-        shopManager.closeShop(slot);
-        inputManager.stop(slot);
-        hudManager.hideHud(slot);
+        eventBus.emit(event.Shop.In.ShopCloseRequest, { slot });
+        eventBus.emit(event.Input.In.StopRequest, { slot });
+        eventBus.emit(event.Hud.In.HideHudRequest, { slot });
 
         const wasPlaying = gameManager.onPlayerDeath();
         if (wasPlaying && !playerManager.hasAlivePlayers()) {
@@ -261,79 +266,6 @@ playerManager.events.setOnAllPlayersReady(() => {
 });
 
 // ——— 3.5 输入 → 商店 ———
-
-inputManager.setOnInput((slot, key) => {
-    shopManager.handleRawKey(slot, key);
-});
-
-// ——— 3.6 商店 ← 玩家 ———
-
-shopManager.events.setOpenShop((slot, pawn) => {
-    hudManager.showHud(slot, pawn, "", CHANNAL.SHOP);
-    inputManager.start(slot, pawn);
-});
-shopManager.events.setRefreshText((slot, pawn, text) => {
-    hudManager.showHud(slot, pawn, text, CHANNAL.SHOP);
-});
-shopManager.events.setCloseShop((slot) => {
-    hudManager.hideHud(slot, CHANNAL.SHOP);
-    inputManager.stop(slot);
-});
-
-shopManager.events.setGetPlayerInfo((slot) => {
-    const player = playerManager.getPlayer(slot);
-    if (!player) return null;
-    const s = player.getSummary();
-    return {
-        money: s.money,
-        level: s.level,
-        health: s.health,
-        armor: s.armor,
-        weapons: [],
-    };
-});
-
-shopManager.events.setGrantReward((slot, item, ctx) => {
-    const player = playerManager.getPlayer(slot);
-    if (!player) return { success: false, message: "玩家不存在" };
-
-    const payload = item.payload;
-
-    if (!payload) return { success: false, message: "商品无效果定义" };
-
-    player.addMoney(-ctx.price);
-
-    switch (payload.type) {
-        case "heal":
-            player.heal(payload.amount ?? 0);
-            break;
-        case "armor":
-            player.giveArmor(payload.amount ?? 0);
-            break;
-        case "buff":
-            playerManager.dispatchReward(slot, {
-                type: "buff",
-                buffTypeId: payload.buffTypeId,
-                params: payload.params,
-                source: {
-                    sourceType: "shop",
-                    sourceId: item.id,
-                    itemId: item.id,
-                },
-            });
-            break;
-        case "weapon":
-            // 暂无武器系统集成，待添加
-            break;
-        case "money":
-            player.addMoney(payload.amount ?? 0);
-            break;
-        default:
-            return { success: false, message: `未知效果类型: ${payload.type}` };
-    }
-
-    return { success: true, message: `购买成功: ${item.displayName}` };
-});
 
 // ═══════════════════════════════════════════════
 // 4. 引擎事件注册
@@ -379,7 +311,10 @@ Instance.OnPlayerChat((event) => {
     if (command === "shop" || command === "!shop") {
         const pawn = controller.GetPlayerPawn();
         if (pawn) {
-            shopManager.openShop(controller.GetPlayerSlot(), pawn);
+            eventBus.emit(event.Shop.In.ShopOpenRequest, {
+                slot: controller.GetPlayerSlot(),
+                pawn,
+            });
         }
     }
     if (command === "debug" || command === "!debug") {

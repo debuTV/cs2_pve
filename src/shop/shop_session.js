@@ -2,7 +2,10 @@
  * @module 商店系统/商店会话
  */
 import { Instance } from "cs_script/point_script";
-import { ShopState, ShopResult, ShopAction, SHOP_ITEMS_PER_PAGE } from "./shop_const";
+import { eventBus } from "../eventBus/event_bus";
+import { event } from "../util/definition";
+import { CHANNAL } from "../hud/hud_const";
+import { ShopState, ShopResult, SHOP_ITEMS_PER_PAGE, RAW_KEY_TO_ACTION } from "./shop_const";
 
 /**
  * 单玩家商店会话。
@@ -10,7 +13,7 @@ import { ShopState, ShopResult, ShopAction, SHOP_ITEMS_PER_PAGE } from "./shop_c
  * 维护一个玩家在商店中的全部运行时状态：
  * 打开/关闭、当前选中项索引、HUD 渲染、购买校验链。
  *
- * 商店会话本身不做按键检测，只接收抽象动作（{@link ShopAction}）。
+ * 商店会话本身不做按键检测，只接收抽象动作。
  * 玩家信息获取和奖励发放全部通过外部回调完成。
  *
  * @navigationTitle 商店会话
@@ -18,14 +21,9 @@ import { ShopState, ShopResult, ShopAction, SHOP_ITEMS_PER_PAGE } from "./shop_c
 export class ShopSession {
     /**
      * @param {number} slot - 玩家槽位
-     * @param {import("./shop_const").ShopItemConfig[]} items - 商品列表
-     * @param {(slot: number) => import("./shop_const").ShopPlayerInfo | null} getPlayerInfo - 获取玩家信息回调
-     * @param {(slot: number, item: import("./shop_const").ShopItemConfig, ctx: import("./shop_const").ShopPurchaseContext) => import("./shop_const").ShopGrantResult} grantReward - 发奖回调
-     * @param {(slot: number, pawn: import("cs_script/point_script").CSPlayerPawn) => void} openShop - 渲染 HUD 回调
-     * @param {(slot: number, pawn: import("cs_script/point_script").CSPlayerPawn, text: string) => void} refreshShop 
-     * @param {(slot: number) => void} closeShop - 隐藏 HUD 回调
+    * @param {import("./shop_const").ShopItemConfig[]} items - 商品列表
      */
-    constructor(slot, items, getPlayerInfo, grantReward, openShop,refreshShop, closeShop) {
+    constructor(slot, items) {
         /**
          * 玩家槽位。
          * @type {number} 
@@ -33,16 +31,6 @@ export class ShopSession {
         this.slot = slot;
         /** @type {import("./shop_const").ShopItemConfig[]} */
         this._items = items;
-        /** @type {(slot: number) => import("./shop_const").ShopPlayerInfo | null} */
-        this._getPlayerInfo = getPlayerInfo;
-        /** @type {(slot: number, item: import("./shop_const").ShopItemConfig, ctx: import("./shop_const").ShopPurchaseContext) => import("./shop_const").ShopGrantResult} */
-        this._grantReward = grantReward;
-        /** @type {(slot: number, pawn: import("cs_script/point_script").CSPlayerPawn) => void} */
-        this._openShop = openShop;
-        /** @type {(slot: number, pawn: import("cs_script/point_script").CSPlayerPawn, text: string) => void} */
-        this._refreshShop = refreshShop;
-        /** @type {(slot: number) => void} */
-        this._closeShop = closeShop;
         /**
          * 当前商店状态
          * @type {string} 
@@ -53,16 +41,7 @@ export class ShopSession {
          * @type {number} 
          */
         this.selectedIndex = 0;
-        /**
-         * 每页显示数量。
-         * @type {number}
-         */
-        this._itemsPerPage = SHOP_ITEMS_PER_PAGE;
-        /** 
-         * 商店打开时的游戏时间
-         * @type {number} 
-         */
-        this._openedAt = 0;
+
         /** @type {import("cs_script/point_script").CSPlayerPawn | null} */
         this._pawn = null;
         /**
@@ -81,22 +60,27 @@ export class ShopSession {
      */
     open(pawn) {
         this._pawn = pawn;
-        this._openedAt = Instance.GetGameTime();
         this.selectedIndex = 0;
         this._lastMessage = "";
         this.state = ShopState.OPEN;
-        this._openShop(this.slot,pawn);
+        eventBus.emit(event.Input.In.StartRequest, { slot: this.slot, pawn });
         this._refreshHud();
+        eventBus.emit(event.Shop.Out.OnShopOpen, { slot: this.slot });
     }
 
     /**
      * 关闭商店，禁用 HUD 并清空会话状态。
      */
     close() {
-        this._closeShop(this.slot);
+        if (this.state !== ShopState.OPEN) return false;
+
+        eventBus.emit(event.Hud.In.HideHudRequest, { slot: this.slot, channel: CHANNAL.SHOP });
+        eventBus.emit(event.Input.In.StopRequest, { slot: this.slot });
         this.state = ShopState.CLOSED;
         this._pawn = null;
         this._lastMessage = "";
+        eventBus.emit(event.Shop.Out.OnShopClose, { slot: this.slot });
+        return true;
     }
 
     /**
@@ -116,8 +100,7 @@ export class ShopSession {
      * 这是输入层与商店核心逻辑的唯一桥梁。
      * 外部只需把键位映射成 ShopAction 后调用此方法。
      *
-     * @param {string} action - {@link ShopAction} 中定义的动作
-     * @returns {{ result: string, message?: string }} 操作结果
+     * @param {string} action - 定义的动作
      */
     handleAction(action) {
         if (this.state !== ShopState.OPEN) {
@@ -125,35 +108,35 @@ export class ShopSession {
         }
 
         switch (action) {
-            case ShopAction.UP:
+            case RAW_KEY_TO_ACTION.W:
                 this._moveSelection(-1);
                 this._refreshHud();
-                return { result: "moved" };
+                return;
 
-            case ShopAction.DOWN:
+            case RAW_KEY_TO_ACTION.S:
                 this._moveSelection(1);
                 this._refreshHud();
-                return { result: "moved" };
+                return;
 
-            case ShopAction.PAGE_PREV:
+            case RAW_KEY_TO_ACTION.A:
                 this._movePage(-1);
                 this._refreshHud();
-                return { result: "page_changed" };
+                return;
 
-            case ShopAction.PAGE_NEXT:
+            case RAW_KEY_TO_ACTION.D:
                 this._movePage(1);
                 this._refreshHud();
-                return { result: "page_changed" };
+                return;
 
-            case ShopAction.CONFIRM:
+            case RAW_KEY_TO_ACTION.Use:
                 return this._tryPurchase();
 
-            case ShopAction.BACK:
+            case RAW_KEY_TO_ACTION.Walk:
                 this.close();
-                return { result: "closed" };
+                return;
 
             default:
-                return { result: "unknown_action" };
+                return;
         }
     }
 
@@ -177,19 +160,19 @@ export class ShopSession {
 
         const pageCount = this._getPageCount();
         const currentPage = this._getCurrentPageIndex();
-        const pageOffset = this.selectedIndex % this._itemsPerPage;
+        const pageOffset = this.selectedIndex % SHOP_ITEMS_PER_PAGE;
         const nextPage = (currentPage + deltaPage + pageCount) % pageCount;
-        const nextPageStart = nextPage * this._itemsPerPage;
-        const nextPageEnd = Math.min(nextPageStart + this._itemsPerPage, this._items.length) - 1;
+        const nextPageStart = nextPage * SHOP_ITEMS_PER_PAGE;
+        const nextPageEnd = Math.min(nextPageStart + SHOP_ITEMS_PER_PAGE, this._items.length) - 1;
         this.selectedIndex = Math.min(nextPageStart + pageOffset, nextPageEnd);
     }
 
     _getPageCount() {
-        return Math.max(1, Math.ceil(this._items.length / this._itemsPerPage));
+        return Math.max(1, Math.ceil(this._items.length / SHOP_ITEMS_PER_PAGE));
     }
 
     _getCurrentPageIndex() {
-        return Math.floor(this.selectedIndex / this._itemsPerPage);
+        return Math.floor(this.selectedIndex / SHOP_ITEMS_PER_PAGE);
     }
 
     /**
@@ -207,7 +190,7 @@ export class ShopSession {
             return { result: ShopResult.ITEM_NOT_FOUND, message: this._lastMessage };
         }
 
-        const info = this._getPlayerInfo(this.slot);
+        const info = this._requestPlayerInfo();
         if (!info) {
             this._lastMessage = "无法获取玩家信息";
             this._refreshHud();
@@ -230,22 +213,109 @@ export class ShopSession {
         const ctx = {
             selectedIndex: this.selectedIndex,
             price: item.cost,
-            openedAt: this._openedAt,
             purchasedAt: Instance.GetGameTime(),
             playerInfo: { ...info },
         };
 
-        const grantResult = this._grantReward(this.slot, item, ctx);
+        const rewardBuildResult = this._buildRewardPayload(item);
+        if (!rewardBuildResult.reward) {
+            this._lastMessage = rewardBuildResult.message ?? "购买失败";
+            this._refreshHud();
+            return { result: ShopResult.GRANT_FAILED, message: this._lastMessage };
+        }
 
-        if (!grantResult || !grantResult.success) {
-            this._lastMessage = grantResult?.message ?? "购买失败";
+        const grantResult = this._dispatchRewards([
+            { type: "money", amount: -ctx.price },
+            rewardBuildResult.reward,
+        ]);
+
+        if (!grantResult.success) {
+            this._lastMessage = grantResult.message ?? "购买失败";
             this._refreshHud();
             return { result: ShopResult.GRANT_FAILED, message: this._lastMessage };
         }
 
         this._lastMessage = grantResult.message ?? `购买成功: ${item.displayName}`;
         this._refreshHud();
+        eventBus.emit(event.Shop.Out.OnBought, {
+            slot: this.slot,
+            itemId: item.id,
+            price: item.cost,
+            purchaseContext: ctx,
+        });
         return { result: ShopResult.SUCCESS, message: this._lastMessage };
+    }
+
+    /**
+     * @returns {import("./shop_const").ShopPlayerInfo & { pawn?: import("cs_script/point_script").CSPlayerPawn | null } | null}
+     */
+    _requestPlayerInfo() {
+        const payload = { slot: this.slot, result: null };
+        eventBus.emit(event.Player.In.GetPlayerSummaryRequest, payload);
+        return payload.result ?? null;
+    }
+
+    /**
+     * @param {import("./shop_const").ShopItemConfig} item
+     * @returns {{ reward: Record<string, any> | null, message?: string }}
+     */
+    _buildRewardPayload(item) {
+        const payload = item.payload;
+        if (!payload) {
+            return { reward: null, message: "商品无效果定义" };
+        }
+
+        switch (payload.type) {
+            case "heal":
+                return { reward: { type: "heal", amount: payload.amount ?? 0 } };
+            case "armor":
+                return { reward: { type: "armor", amount: payload.amount ?? 0 } };
+            case "buff":
+                if (!payload.buffTypeId) {
+                    return { reward: null, message: "商品无 Buff 定义" };
+                }
+
+                return {
+                    reward: {
+                        type: "buff",
+                        buffTypeId: payload.buffTypeId,
+                        params: payload.params,
+                        source: {
+                            sourceType: "shop",
+                            itemId: item.id,
+                        },
+                    },
+                };
+            case "money":
+                return { reward: { type: "money", amount: payload.amount ?? 0 } };
+            case "weapon":
+                return { reward: null, message: "武器系统暂未接入" };
+            default:
+                return { reward: null, message: `未知效果类型: ${payload.type}` };
+        }
+    }
+
+    /**
+     * @param {Record<string, any>[]} rewards
+     * @returns {import("./shop_const").ShopGrantResult}
+     */
+    _dispatchRewards(rewards) {
+        const payload = {
+            slot: this.slot,
+            rewards,
+            result: false,
+        };
+        eventBus.emit(event.Player.In.DispatchRewardRequest, payload);
+
+        if (!payload.result) {
+            return { success: false, message: "奖励发放失败" };
+        }
+
+        const item = this._items[this.selectedIndex];
+        return {
+            success: true,
+            message: item ? `购买成功: ${item.displayName}` : "购买成功",
+        };
     }
 
     /**
@@ -256,7 +326,7 @@ export class ShopSession {
     _refreshHud() {
         if (!this._pawn || this.state !== ShopState.OPEN) return;
 
-        const info = this._getPlayerInfo(this.slot);
+        const info = this._requestPlayerInfo();
 
         // —— 玩家摘要 ——
         let text = "";
@@ -273,8 +343,8 @@ export class ShopSession {
         if (this._items.length === 0) {
             text += `(无商品)\n`;
         } else {
-            const pageStart = this._getCurrentPageIndex() * this._itemsPerPage;
-            const pageEnd = Math.min(pageStart + this._itemsPerPage, this._items.length);
+            const pageStart = this._getCurrentPageIndex() * SHOP_ITEMS_PER_PAGE;
+            const pageEnd = Math.min(pageStart + SHOP_ITEMS_PER_PAGE, this._items.length);
             for (let i = pageStart; i < pageEnd; i++) {
                 const item = this._items[i];
                 const prefix = i === this.selectedIndex ? "► " : "  ";
@@ -289,7 +359,12 @@ export class ShopSession {
         }
         text += `\n[W/S 选中] [A/D 翻页] [E 确认] [SHIFT 返回]`;
 
-        this._refreshShop(this.slot, this._pawn, text);
+        eventBus.emit(event.Hud.In.ShowHudRequest, {
+            slot: this.slot,
+            pawn: this._pawn,
+            text,
+            channel: CHANNAL.SHOP,
+        });
     }
 
     /**

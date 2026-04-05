@@ -39,3 +39,35 @@ export const CHANNEL_PRIORITY = {
     [CHANNAL.STATUS]: 1,
     [CHANNAL.SHOP]: 2,
 };
+/**
+ * @typedef {object} HudRequest
+ * @property {string} text - 待显示文本
+ * @property {import("cs_script/point_script").CSPlayerPawn} pawn - 关联的玩家 Pawn
+ */
+
+/**
+ * @typedef {object} HudSession
+ * @property {number} slot - 玩家槽位
+ * @property {string} entityName - HUD 实体名
+ * @property {import("cs_script/point_script").Entity | undefined} entity - HUD 实体引用
+ * @property {number} activeChannel - 当前生效的渠道
+ * @property {import("cs_script/point_script").CSPlayerPawn | null} pawn - 当前跟随的 Pawn
+ * @property {boolean} use - 实体是否处于 Enable 状态
+ * @property {string} lastText - 上次渲染的文本（用于去重）
+ * @property {Map<number, HudRequest>} requests - 各渠道的显示请求
+ */
+
+/**
+ * @typedef {object} ShowHudRequest
+ * @property {number} slot - 玩家槽位
+ * @property {import("cs_script/point_script").CSPlayerPawn} pawn - 关联的玩家 Pawn
+ * @property {string} text - HUD 显示内容
+ * @property {number} channel - HUD 渠道
+ * @property {boolean} result - 请求结果（是否成功提交）
+ */
+/**
+ * @typedef {object} HideHudRequest
+ * @property {number} slot - 玩家槽位
+ * @property {number} [channel] - HUD 渠道
+ * @property {boolean} result - 请求结果（是否成功提交）
+ */

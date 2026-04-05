@@ -2,26 +2,9 @@
  * @module HUD系统/HUD管理器
  */
 import { Instance, PointTemplate } from "cs_script/point_script";
+import { eventBus } from "../eventBus/event_bus";
+import { event } from "../util/definition";
 import { CHANNAL, CHANNEL_PRIORITY, HUD_ENTITY_PREFIX, HUD_FACE_ATTACH, HUD_TEMPLATE_NAME } from "./hud_const";
-
-/**
- * @typedef {object} HudRequest
- * @property {string} text - 待显示文本
- * @property {import("cs_script/point_script").CSPlayerPawn} pawn - 关联的玩家 Pawn
- */
-
-/**
- * @typedef {object} HudSession
- * @property {number} slot - 玩家槽位
- * @property {string} entityName - HUD 实体名
- * @property {import("cs_script/point_script").Entity | undefined} entity - HUD 实体引用
- * @property {number} activeChannel - 当前生效的渠道
- * @property {import("cs_script/point_script").CSPlayerPawn | null} pawn - 当前跟随的 Pawn
- * @property {boolean} use - 实体是否处于 Enable 状态
- * @property {string} lastText - 上次渲染的文本（用于去重）
- * @property {Map<number, HudRequest>} requests - 各渠道的显示请求
- */
-
 /**
  * HUD 管理器（单 HUD 仲裁模式）。
  *
@@ -39,42 +22,55 @@ export class HudManager {
     constructor() {
         /**
          * 玩家槽位 → HUD 会话状态。
-         * @type {Map<number, HudSession>}
+         * @type {Map<number, import("./hud_const").HudSession>}
          */
         this._sessions = new Map();
+        /** @type {Array<() => boolean>} */
+        this._unsubscribers = [
+            eventBus.on(event.Hud.In.ShowHudRequest, (/** @type {import("./hud_const").ShowHudRequest} */ payload) => {
+                payload.result=this.showHud(payload);
+            }),
+            eventBus.on(event.Hud.In.HideHudRequest, (/** @type {import("./hud_const").HideHudRequest} */ payload) => {
+                payload.result=this.hideHud(payload);
+            })
+        ];
+    }
+
+    destroy() {
+        for (const unsubscribe of this._unsubscribers) {
+            unsubscribe();
+        }
+        this._unsubscribers.length = 0;
     }
 
     /**
      * 提交指定 channel 的显示请求，并重新仲裁当前应显示的内容。
-     *
-     * @param {number} slot - 玩家槽位
-     * @param {import("cs_script/point_script").CSPlayerPawn} pawn - 玩家 Pawn
-     * @param {string} text - HUD 文本
-     * @param {number} channel - HUD 渠道
+     * @param {import("./hud_const").ShowHudRequest}showHudRequest
      */
-    showHud(slot, pawn, text, channel) {
-        const session = this._getOrCreateSession(slot);
-        session.requests.set(channel, { text, pawn });
+    showHud(showHudRequest) {
+        const session = this._getOrCreateSession(showHudRequest.slot);
+        session.requests.set(showHudRequest.channel, { text: showHudRequest.text, pawn: showHudRequest.pawn });
         this._arbitrate(session);
+        return true;
     }
 
     /**
      * 撤销指定 channel 的显示请求（或全部请求），并重新仲裁。
      *
-     * @param {number} slot - 玩家槽位
-     * @param {number} [channel] - HUD 渠道；不传时撤销该玩家全部渠道请求
+     * @param {import("./hud_const").HideHudRequest} hideHudRequest
      */
-    hideHud(slot, channel) {
-        const session = this._sessions.get(slot);
-        if (!session) return;
+    hideHud(hideHudRequest) {
+        const session = this._sessions.get(hideHudRequest.slot);
+        if (!session) return false;
 
-        if (channel === undefined) {
+        if (hideHudRequest.channel === undefined) {
             session.requests.clear();
         } else {
-            session.requests.delete(channel);
+            session.requests.delete(hideHudRequest.channel);
         }
-
         this._arbitrate(session);
+
+        return true;
     }
 
     /**
@@ -85,7 +81,7 @@ export class HudManager {
         for (const s of allAlivePlayersSummary) {
             if(!s.pawn)continue;
             const text = `Lv.${s.level} HP:${s.health}/${s.maxHealth} 护甲:${s.armor}\n$${s.money} 升级还需:${s.expNeeded - s.exp}EXP`;
-            this.showHud(s.slot, s.pawn, text, CHANNAL.STATUS);
+            this.showHud({ slot: s.slot, pawn: s.pawn, text, channel: CHANNAL.STATUS, result: true });
         }
         for (const [, session] of this._sessions) {
             if (!session.use) continue;
@@ -99,7 +95,7 @@ export class HudManager {
     /**
      * 获取或创建指定玩家的 HUD 会话。
      * @param {number} slot
-     * @returns {HudSession}
+     * @returns {import("./hud_const").HudSession}
      */
     _getOrCreateSession(slot) {
         let session = this._sessions.get(slot);
@@ -121,7 +117,7 @@ export class HudManager {
 
     /**
      * 根据优先级重新决定当前应显示的 channel 内容。
-     * @param {HudSession} session
+     * @param {import("./hud_const").HudSession} session
      */
     _arbitrate(session) {
         // 找出最高优先级的活跃请求
@@ -132,16 +128,26 @@ export class HudManager {
             }
         }
 
+        const previousChannel = session.activeChannel;
+        const wasVisible = session.use;
+
         // 无活跃请求 → 隐藏 HUD
         if (winnerChannel === CHANNAL.NONE) {
-            if (session.use) this._hideEntity(session);
+            if (session.use) {
+                this._hideEntity(session);
+                eventBus.emit(event.Hud.Out.OnHudHidden, {
+                    slot: session.slot,
+                    channel: previousChannel,
+                });
+            }
             session.activeChannel = CHANNAL.NONE;
+            session.pawn = null;
             return;
         }
 
         const request = session.requests.get(winnerChannel);
         if(!request)return;
-        const channelChanged = session.activeChannel !== winnerChannel;
+        const channelChanged = previousChannel !== winnerChannel;
         const textChanged = session.lastText !== request.text;
         const pawnChanged = session.pawn !== request.pawn;
 
@@ -184,11 +190,26 @@ export class HudManager {
         }
 
         this._refreshHudPosition(session);
+
+        if (!wasVisible && session.use) {
+            eventBus.emit(event.Hud.Out.OnHudShown, {
+                slot: session.slot,
+                channel: winnerChannel,
+                text: request.text,
+            });
+        } else if ((channelChanged || textChanged || pawnChanged) && session.use) {
+            eventBus.emit(event.Hud.Out.OnHudUpdated, {
+                slot: session.slot,
+                channel: winnerChannel,
+                text: request.text,
+                previousChannel,
+            });
+        }
     }
 
     /**
      * 确保 HUD 实体已创建。
-     * @param {HudSession} session
+     * @param {import("./hud_const").HudSession} session
      */
     _ensureEntity(session) {
         if (session.entity?.IsValid()) return;
@@ -212,7 +233,7 @@ export class HudManager {
 
     /**
      * 禁用 HUD 实体。
-     * @param {HudSession} session
+     * @param {import("./hud_const").HudSession} session
      */
     _hideEntity(session) {
         if (!session.entity || !session.use) return;
@@ -228,7 +249,7 @@ export class HudManager {
 
     /**
      * 刷新 HUD 贴脸位置（基于当前生效 channel 的偏移配置）。
-     * @param {HudSession} session
+     * @param {import("./hud_const").HudSession} session
      * @returns {boolean}
      */
     _refreshHudPosition(session) {

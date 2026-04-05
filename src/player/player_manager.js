@@ -2,6 +2,8 @@
  * @module 玩家系统/玩家管理器
  */
 import { CSPlayerController, CSPlayerPawn, Instance } from "cs_script/point_script";
+import { eventBus } from "../eventBus/event_bus";
+import { event } from "../util/definition";
 import { Player } from "./player/player";
 import { PlayerState } from "./player_const";
 
@@ -103,6 +105,28 @@ export class PlayerManager {
                 player.resetGameStatus();
             }
         };
+        /** @type {Array<() => boolean>} */
+        this._unsubscribers = [
+            eventBus.on(event.Player.In.GetPlayerSummaryRequest, (payload = {}) => {
+                payload.result = typeof payload.slot === "number"
+                    ? this.getPlayerSummary(payload.slot)
+                    : null;
+            }),
+            eventBus.on(event.Player.In.DispatchRewardRequest, (payload = {}) => {
+                const rewards = Array.isArray(payload.rewards)
+                    ? payload.rewards
+                    : payload.reward
+                        ? [payload.reward]
+                        : [];
+                const targetSlot = typeof payload.slot === "number"
+                    ? payload.slot
+                    : payload.slot == null
+                        ? null
+                        : null;
+
+                payload.result = this.dispatchRewardRequest(targetSlot, rewards);
+            })
+        ];
         this.init();
     }
     // ——— 初始化 / 脚本输入监听 ———
@@ -138,6 +162,14 @@ export class PlayerManager {
             }
         }
     }
+
+    destroy() {
+        for (const unsubscribe of this._unsubscribers) {
+            unsubscribe();
+        }
+        this._unsubscribers.length = 0;
+    }
+
     // ——— 事件路由（只做解析 + 转发） ———
 
     /**
@@ -346,6 +378,37 @@ export class PlayerManager {
     }
 
     /**
+     * @param {number} playerSlot
+     * @returns {Player | null}
+     */
+    getPlayer(playerSlot) {
+        return this.players.get(playerSlot) ?? null;
+    }
+
+    /**
+     * @param {number} playerSlot
+     * @returns {ReturnType<Player["getSummary"]> | null}
+     */
+    getPlayerSummary(playerSlot) {
+        const player = this.getPlayer(playerSlot);
+        return player ? player.getSummary() : null;
+    }
+
+    /**
+     * @returns {Player[]}
+     */
+    getActivePlayers() {
+        return Array.from(this.players.values());
+    }
+
+    /**
+     * @returns {boolean}
+     */
+    hasAlivePlayers() {
+        return this.getAlivePlayers().length > 0;
+    }
+
+    /**
      * 由 main.js 统一调度的玩家 Buff 应用入口。
      * PlayerManager 不主动决定何时发 Buff；它只负责在 main 给出最终结论后，
      * 把请求路由到对应 Player，并补齐当前目标玩家上下文。
@@ -379,6 +442,36 @@ export class PlayerManager {
         this._forEachTargetPlayer(playerSlot, (player) => {
             handler(player, payload);
         });
+    }
+
+    /**
+     * @param {number|null} playerSlot
+     * @param {TP_playerRewardPayload[]} rewards
+     * @returns {boolean}
+     */
+    dispatchRewardRequest(playerSlot, rewards) {
+        if (!Array.isArray(rewards) || rewards.length === 0) return false;
+
+        for (const reward of rewards) {
+            if (!reward || typeof reward.type !== "string" || !this._rewardHandlers[reward.type]) {
+                return false;
+            }
+        }
+
+        const slots = playerSlot != null ? [playerSlot] : [...this.players.keys()];
+        if (slots.length === 0) return false;
+
+        for (const slot of slots) {
+            if (!this.players.get(slot)) {
+                return false;
+            }
+        }
+
+        for (const reward of rewards) {
+            this.dispatchReward(playerSlot, reward);
+        }
+
+        return true;
     }
 
     enterGameStart() {

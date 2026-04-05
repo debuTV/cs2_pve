@@ -24,7 +24,17 @@ const MONITORED_INPUTS = [
     { key: "ShowScores", binding: CSInputs.SHOW_SCORES },
     { key: "InspectWeapon", binding: CSInputs.LOOK_AT_WEAPON },
 ];
-
+/**
+ * @typedef {object} StartRequest
+ * @property {number} slot - 玩家槽位
+ * @property {import("cs_script/point_script").CSPlayerPawn} pawn - 玩家 Pawn 引用
+ * @property {boolean} result - 输出参数，表示是否成功开始检测
+ */
+/**
+ * @typedef {object} StopRequest
+ * @property {number} slot - 玩家槽位
+ * @property {boolean} result - 输出参数，表示是否成功停止检测
+ */
 /**
  * 按键边沿检测器。
  *

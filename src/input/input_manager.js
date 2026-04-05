@@ -1,7 +1,9 @@
 /**
  * @module 输入系统/输入管理器
  */
-import { InputDetector } from "./input_detector";
+import { eventBus } from "../eventBus/event_bus";
+import { event } from "../util/definition";
+import { InputDetector } from "./input_const";
 
 /**
  * 输入管理器。
@@ -16,35 +18,47 @@ export class InputManager {
          * @type {Map<number, { detector: InputDetector, pawn: import("cs_script/point_script").CSPlayerPawn | null, use: boolean }>}
          */
         this._sources = new Map();
-
-        /** 
-         * 输入事件回调。参数为玩家槽位和原始键名，由外部决定如何映射成具体操作。
-         * @type {((slot: number, key: string) => void) | null}
-         */
-        this._onInput = null;
+        /** @type {Array<() => boolean>} */
+        this._unsubscribers = [
+            eventBus.on(event.Input.In.StartRequest, (/** @type {import("./input_const").StartRequest} */ payload) => {
+                payload.result=this.start(payload);
+            }),
+            eventBus.on(event.Input.In.StopRequest, (/** @type {import("./input_const").StopRequest} */ payload) => {
+                payload.result=this.stop(payload);
+            })
+        ];
     }
     /**
      * 启用输入检测
-     * @param {number} slot - 玩家槽位
-     * @param {import("cs_script/point_script").CSPlayerPawn} pawn
+     * @param {import("./input_const").StartRequest} startRequest
      */
-    start(slot, pawn)
+    start(startRequest)
     {
-        const source = this._getOrCreateSource(slot);
-        source.pawn = pawn;
+        const source = this._getOrCreateSource(startRequest.slot);
+        source.pawn = startRequest.pawn;
         source.use = true;
+        return true;
     }
     /**
      * 停止输入检测
-     * @param {number} slot - 玩家槽位
+     * @param {import("./input_const").StopRequest} stopRequest
      */
-    stop(slot)
+    stop(stopRequest)
     {
-        const source = this._getOrCreateSource(slot);
+        const source = this._getOrCreateSource(stopRequest.slot);
         source.use = false;
         source.pawn = null;
         source.detector.reset();
+        return true;
     }
+
+    destroy() {
+        for (const unsubscribe of this._unsubscribers) {
+            unsubscribe();
+        }
+        this._unsubscribers.length = 0;
+    }
+
     /**
      * 每 tick 轮询全部已注册输入源，逐个回调新按键。
      */
@@ -53,17 +67,9 @@ export class InputManager {
             if (!source.use) continue;
             const justPressed = source.detector.pollJustPressed(source.pawn);
             for (const key of justPressed) {
-                this._onInput?.(slot, key);
+                eventBus.emit(event.Input.Out.OnInput, { slot, key });
             }
         }
-    }
-
-    /**
-     * 设置输入事件回调。
-     * @param {(slot: number, key: string) => void} callback
-     */
-    setOnInput(callback) {
-        this._onInput = callback;
     }
 
     /**

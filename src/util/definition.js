@@ -118,12 +118,12 @@ export const event={
             BuffAddRequest:"Buff_OnBuffAddRequest",                //请求Buff 添加
             BuffRefreshRequest:"Buff_OnBuffRefreshRequest",        //请求Buff 刷新
             BuffRemoveRequest:"Buff_OnBuffRemoveRequest",          //请求Buff 移除
+            BuffEmitRequest:"Buff_OnBuffEmitRequest",              //其他模块发生事件告诉buff
         },
         Out:{
             OnBuffAdded:"Buff_OnBuffAdded",                //Buff 添加后
             OnBuffRefreshed:"Buff_OnBuffRefreshed",        //Buff 刷新后
             OnBuffRemoved:"Buff_OnBuffRemoved",            //Buff 移除后
-            OnBuffEmit:"Buff_OnBuffEmit",                  //Buff 触发（例如伤害/治疗生效）
         }
     },
     Game:{
@@ -144,8 +144,13 @@ export const event={
     },
     Hud:{
         In:{
-            ShowHudRequest:"Hud_OnShowHudRequest",    //显示 Hud 请求，payload 包含 {hudType: string, params: any}
-            HideHudRequest:"Hud_OnHideHudRequest",    //隐藏 Hud 请求，payload 包含 {hudType: string}
+            ShowHudRequest:"Hud_OnShowHudRequest",    //显示 Hud 请求，payload 包含 {slot: number, pawn: CSPlayerPawn, text: string, channel: number}
+            HideHudRequest:"Hud_OnHideHudRequest",    //隐藏 Hud 请求，payload 包含 {slot: number, channel?: number}
+        },
+        Out:{
+            OnHudShown:"Hud_OnHudShown",    //Hud 显示后，payload 包含 {slot: number, channel: number, text: string}
+            OnHudUpdated:"Hud_OnHudUpdated",    //Hud 文本或渠道更新后，payload 包含 {slot: number, channel: number, text: string, previousChannel?: number}
+            OnHudHidden:"Hud_OnHudHidden",    //Hud 隐藏后，payload 包含 {slot: number, channel: number}
         }
     },
     Input:{
@@ -171,18 +176,19 @@ export const event={
     },
     Player:{
         In:{
-            GetPlayerSummaryRequest:"Player_OnGetPlayerSummaryRequest",    //请求玩家信息摘要，payload 包含 {slot: number}
+            GetPlayerSummaryRequest:"Player_OnGetPlayerSummaryRequest",    //请求玩家信息摘要，payload 包含 {slot: number, result?: any}
+            DispatchRewardRequest:"Player_OnDispatchRewardRequest",    //请求分发玩家奖励，payload 包含 {slot: number|null, reward?: any, rewards?: any[], result?: boolean}
         }
     },
     Shop:{
         In:{
-            ShopOpenRequest:"Shop_OnShopOpenRequest",    //请求打开商店，payload 包含 {slot: number}
-            ShopCloseRequest:"Shop_OnShopCloseRequest",  //请求关闭商店，payload 包含 {slot: number}
+            ShopOpenRequest:"Shop_OnShopOpenRequest",    //请求打开商店，payload 包含 {slot: number, pawn?: CSPlayerPawn, result?: boolean}
+            ShopCloseRequest:"Shop_OnShopCloseRequest",  //请求关闭商店，payload 包含 {slot: number, result?: boolean}
         },
         Out:{
             OnShopOpen:"Shop_OnShopOpen",    //商店打开后，payload 包含 {slot: number}
             OnShopClose:"Shop_OnShopClose",  //商店关闭后，payload 包含 {slot: number}
-            OnBought:"Shop_OnBought",    //购买商品后，payload 包含 {slot: number, itemId: string}
+            OnBought:"Shop_OnBought",    //购买商品后，payload 包含 {slot: number, itemId: string, price: number}
         }
     },
     Skill:{
