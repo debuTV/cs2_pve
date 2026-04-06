@@ -1,8 +1,8 @@
 /**
  * @module 玩家系统/玩家/组件/玩家数值
  */
+import { PlayerBuffEvents } from "../../../buff/buff_const";
 import { LEVEL_CONFIGS, LevelUpHealPolicy } from "../../player_const";
-import { PlayerBuffEvents } from "./buff_manager";
 
 const MAX_LEVEL = Math.max(LEVEL_CONFIGS.length, 1);
 
@@ -244,7 +244,7 @@ export class PlayerStats {
      */
     getAttackDamage(baseDamage) {
         const event = this._rollAttackDamage(baseDamage);
-        this.player.buffManager.emitEvent(PlayerBuffEvents.Attack, event);
+        this.player.emitBuffEvent(PlayerBuffEvents.Attack, event);
         event.damage = Math.max(0, Math.round(event.damage));
         return event.damage;
     }
@@ -364,7 +364,7 @@ export class PlayerStats {
      * @returns {void}
      */
     _recomputeBuffModifiers() {
-        this.player.buffManager?.emitEvent(PlayerBuffEvents.Recompute, { recompute: true });
+        this.player.emitBuffEvent(PlayerBuffEvents.Recompute, { recompute: true });
         this.setHealth(this.health);
         this.setArmor(this.armor);
     }

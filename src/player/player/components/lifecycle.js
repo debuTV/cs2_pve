@@ -127,7 +127,7 @@ export class PlayerLifecycle {
      * 断开连接。
      */
     disconnect() {
-        this.player.buffManager.clearAll();
+        this.player.clearBuffs();
         this.player.entityBridge.disconnect();
         this.player.applyStateTransition(PlayerState.DISCONNECTED);
     }
@@ -137,7 +137,7 @@ export class PlayerLifecycle {
      */
     resetGameStatus() {
         const stats = this.player.stats;
-        this.player.buffManager.clearAll();
+        this.player.clearBuffs();
         stats.resetGameProgress();
         this.player.entityBridge.syncMaxHealth(stats.maxHealth);
         this.player.entityBridge.syncHealth(stats.health);

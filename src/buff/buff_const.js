@@ -15,6 +15,20 @@ export const BuffPolarity = {
 };
 
 /**
+ * 玩家侧 Buff 运行时事件名。
+ * 统一放在 Buff 常量模块，避免 Player 再维护一层薄包装组件。
+ */
+export const PlayerBuffEvents = {
+	Spawn: "OnSpawn",
+	Recompute: "OnRecompute",
+	Die: "OnDeath",
+	StateChange: "OnStateChange",
+	BeforeTakeDamage: "OnDamage",
+	Attack: "OnAttack",
+	Tick: "OnTick",
+};
+
+/**
  * @typedef {Object} BuffConfig
  * @property {string} configid Buff 配置 id
  * @property {string} typeid Buff 种类

@@ -2,8 +2,8 @@
  * @module 玩家系统/玩家/组件/战斗组件
  */
 import { Instance } from "cs_script/point_script";
+import { PlayerBuffEvents } from "../../../buff/buff_const";
 import { PlayerState } from "../../player_const";
-import { PlayerBuffEvents } from "./buff_manager";
 
 /**
  * 玩家战斗组件 — 受伤、治疗与死亡判定。
@@ -11,7 +11,7 @@ import { PlayerBuffEvents } from "./buff_manager";
  * 所有对玩家的伤害都应通过 `takeDamage(damage, attacker)` 进入本组件。
  * 内部流程：
  * 1. 从引擎 Pawn 同步当前血量/护甲。
- * 2. 将伤害送入 PlayerBuffManager 的修饰器链（Buff 可减伤/增伤）。
+ * 2. 将伤害送入玩家 Buff 事件链（Buff 可减伤/增伤）。
  * 3. 优先扣护甲，再扣血量。
  * 4. 写回引擎并发布事件（DAMAGE_TAKEN / DEATH）。
  *
@@ -45,7 +45,7 @@ export class PlayerHealthCombat {
         // buff 修饰器链
         const ctx = { damage, attacker };
         // 触发前置事件，允许 buff 修改伤害,例如减伤、增伤、护甲一类的效果
-        this.player.buffManager.emitEvent(PlayerBuffEvents.BeforeTakeDamage, ctx);
+        this.player.emitBuffEvent(PlayerBuffEvents.BeforeTakeDamage, ctx);
         damage = ctx.damage;
 
         if (damage <= 0) return false;
@@ -141,7 +141,7 @@ export class PlayerHealthCombat {
         this.player.applyStateTransition(PlayerState.DEAD);
 
         // 清理临时战斗 buff
-        this.player.buffManager.emitEvent(PlayerBuffEvents.Die, { killer });
+        this.player.emitBuffEvent(PlayerBuffEvents.Die, { killer });
 
         // 切换到观察者
         this.player.entityBridge.joinTeam(1);
