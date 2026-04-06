@@ -49,7 +49,7 @@ export class MonsterMovementPathAdapter {
      * 激活追击。进入 CHASE / ATTACK 等需要持续移动的状态时调用。
      */
     activate() {
-        if (!this.monster.target) return;
+        if (!this._getMovementEntity() || !this.monster.target) return;
         this._active = true;
         this._submitChase();
     }
@@ -59,10 +59,12 @@ export class MonsterMovementPathAdapter {
      */
     deactivate() {
         if (!this._active) return;
+        const entity = this._getMovementEntity();
         this._active = false;
+        if (!entity) return;
         this.monster.submitMovementEvent({
             type: MovementRequestType.Stop,
-            entity: this.monster.model,
+            entity,
             priority: MovementPriority.StateChange,
             clearPath: false,
         });
@@ -92,15 +94,26 @@ export class MonsterMovementPathAdapter {
 
     /** 内部：提交一次 Chase Move 请求。 */
     _submitChase() {
+        const entity = this._getMovementEntity();
+        const target = this.monster.target;
+        if (!entity || !target) return;
+
         this.monster.submitMovementEvent({
             type: MovementRequestType.Move,
-            entity: this.monster.model,
+            entity,
             priority: MovementPriority.Chase,
-            targetEntity: this.monster.target??undefined,
+            targetEntity: target,
             usePathRefresh: !this.monster.isOccupied(),
             useNPCSeparation: true,
             Mode: this._defaultMode,
         });
+    }
+
+    /** @returns {import("cs_script/point_script").Entity | null} */
+    _getMovementEntity() {
+        const entity = this.monster.model;
+        if (!entity?.IsValid()) return null;
+        return entity;
     }
 
     /** 获取注册用的默认模式。 */

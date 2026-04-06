@@ -2,7 +2,6 @@
  * @module 游戏系统/游戏管理器
  */
 
-import { Instance } from "cs_script/point_script";
 import { GameState } from "./game_const";
 import { eventBus } from "../eventBus/event_bus";
 import { event } from "../util/definition";
@@ -39,38 +38,6 @@ export class GameManager {
             eventBus.on(event.Game.In.GameWinRequest, () => this.gameWon()),
             eventBus.on(event.Game.In.GameLoseRequest, () => this.gameLost())
         ];
-        this.init();
-    }
-
-    /**
-     * 启用实体监听，强制切换，以后会移动到main.js中编排。
-     * - startGame: 启动游戏（必须先进入准备阶段），切换到 PLAYING 状态
-     * - enterPreparePhase: 进入准备阶段，广播等待消息
-     * - resetGame: 重置游戏状态
-     * - gameWon: 触发游戏胜利
-     * - gameLost: 触发游戏失败
-     */
-    init() {
-        //游戏开始
-        Instance.OnScriptInput("startGame", () => {
-            this.startGame();
-        });
-        //进入准备阶段
-        Instance.OnScriptInput("enterPreparePhase", () => {
-            this.enterPreparePhase();
-        });
-        //重置游戏
-        Instance.OnScriptInput("resetGame", () => {
-            this.resetGame();
-        });
-        //强制胜利
-        Instance.OnScriptInput("gameWon", () => {
-            this.gameWon();
-        });
-        //强制失败
-        Instance.OnScriptInput("gameLost", () => {
-            this.gameLost();
-        });
     }
 
     // ═══════════════════════════════════════════════

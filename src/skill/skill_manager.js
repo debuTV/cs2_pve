@@ -2,6 +2,8 @@ import { Player } from "../player/player/player";
 import { Monster } from "../monster/monster/monster";
 import { SkillFactory } from "./skill_factory";
 import { SkillTemplate } from "./skill_template";
+import { eventBus } from "../eventBus/event_bus";
+import { event } from "../util/definition";
 /**
  * 技能管理器。
  */
@@ -13,8 +15,44 @@ export class SkillManager {
          * @type {Map<number, SkillTemplate>}
          */
         this.SkillMap = new Map();
-        this.id=0;
+        this.id = 0;
+        /** @type {Array<() => boolean>} */
+        this._unsubscribers = [
+            eventBus.on(event.Skill.In.SkillAddRequest, (/** @type {import("./skill_const").SkillAddRequest} */ payload) => {
+                payload.result = this.addSkill(payload.target, payload.typeId, payload.params);
+            }),
+            eventBus.on(event.Skill.In.SkillRemoveRequest, (/** @type {import("./skill_const").SkillRemoveRequest} */ payload) => {
+                payload.result = this.deleteSkill(payload.skillId, payload.target ?? null);
+            }),
+            eventBus.on(event.Skill.In.SkillUseRequest, (/** @type {import("./skill_const").SkillUseRequest} */ payload) => {
+                payload.result = this.useSkill(payload);
+            }),
+            eventBus.on(event.Skill.In.SkillEmitRequest, (/** @type {import("./skill_const").SkillEmitRequest} */ payload) => {
+                payload.result = this.emitEvent(payload.skillId, payload.eventName, payload.params, payload.target ?? null);
+            })
+        ];
     }
+
+    destroy()
+    {
+        for (const unsubscribe of this._unsubscribers) {
+            unsubscribe();
+        }
+        this._unsubscribers.length = 0;
+        this.clearAll();
+    }
+
+    /**
+     * @param {SkillTemplate} skill
+     * @param {Player|Monster|null} target
+     * @returns {boolean}
+     */
+    _matchTarget(skill, target)
+    {
+        if (target == null) return true;
+        return skill.player === target || skill.monster === target;
+    }
+
     /**
      * @param {Player|Monster} target
      * @param {string} typeid 技能类型标识（如 "corestats"、"pounce"）
@@ -23,10 +61,10 @@ export class SkillManager {
      */
     addSkill(target,typeid,params)
     {
-        const skill=SkillFactory.create(target instanceof Player ? target : null, target instanceof Monster ? target : null, typeid,this.id++,params);
+        const skill = SkillFactory.create(target instanceof Player ? target : null, target instanceof Monster ? target : null, typeid, this.id++, params);
         if(skill)
         {
-            this.SkillMap.set(skill.id,skill);
+            this.SkillMap.set(skill.id, skill);
             skill.onSkillAdd();
             return skill.id;
         }
@@ -35,14 +73,29 @@ export class SkillManager {
 
     /**
      * @param {number} skillId
+     * @param {Player|Monster|null} [target]
      * @returns {boolean}
      */
-    deleteSkill(skillId)
+    deleteSkill(skillId, target = null)
     {
-        const skill=this.SkillMap.get(skillId);
-        if(skill===undefined)return false;
+        const skill = this.SkillMap.get(skillId);
+        if (skill === undefined) return false;
+        if (!this._matchTarget(skill, target)) return false;
         skill.onSkillDelete();
         this.SkillMap.delete(skillId);
+        return true;
+    }
+
+    /**
+     * @param {import("./skill_const").SkillUseRequest} skillUseRequest
+     * @returns {boolean}
+     */
+    useSkill(skillUseRequest)
+    {
+        const skill = this.SkillMap.get(skillUseRequest.skillId);
+        if (skill === undefined) return false;
+        if (!this._matchTarget(skill, skillUseRequest.target)) return false;
+        skill.trigger();
         return true;
     }
 
@@ -71,11 +124,15 @@ export class SkillManager {
      * @param {number} skillId
      * @param {string} event 
      * @param {import("./skill_const").EmitEventPayload} payload
+     * @param {Player|Monster|null} [target]
+     * @returns {boolean}
      */
-    emitEvent(skillId,event,payload)
+    emitEvent(skillId,event,payload,target = null)
     {
-        const skill=this.SkillMap.get(skillId);
-        if(skill===undefined)return payload;
-        return skill._emitEvent(event,payload);
+        const skill = this.SkillMap.get(skillId);
+        if (skill === undefined) return false;
+        if (!this._matchTarget(skill, target)) return false;
+        skill._emitEvent(event, payload);
+        return true;
     }
 }

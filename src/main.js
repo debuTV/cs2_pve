@@ -68,6 +68,7 @@ const playerManager = new PlayerManager(adapter);
 const inputManager = new InputManager();
 const shopManager = new ShopManager();
 const hudManager = new HudManager();
+const skillManager = new SkillManager();
 const monsterManager = new MonsterManager();
 const navMesh = new NavMesh();
 navMesh.init();
@@ -76,110 +77,6 @@ movementManager.initPathScheduler((start, end) => navMesh.findPath(start, end));
 const buffManager = new BuffManager();
 const particleManager = new ParticleManager();
 const areaEffectManager = new AreaEffectManager();
-
-/**
- * @param {number} slot
- */
-function emitShopCloseRequest(slot) {
-    /** @type {import("./shop/shop_const").ShopCloseRequest} */
-    const payload = { slot, result: false };
-    eventBus.emit(event.Shop.In.ShopCloseRequest, payload);
-}
-
-/**
- * @param {number} slot
- */
-function emitInputStopRequest(slot) {
-    /** @type {import("./input/input_const").StopRequest} */
-    const payload = { slot, result: false };
-    eventBus.emit(event.Input.In.StopRequest, payload);
-}
-
-/**
- * @param {number} slot
- * @param {number} [channel]
- */
-function emitHideHudRequest(slot, channel) {
-    /** @type {import("./hud/hud_const").HideHudRequest} */
-    const payload = channel === undefined ? { slot, result: false } : { slot, channel, result: false };
-    eventBus.emit(event.Hud.In.HideHudRequest, payload);
-}
-
-/**
- * @param {number} slot
- * @param {import("cs_script/point_script").CSPlayerPawn} pawn
- */
-function emitShopOpenRequest(slot, pawn) {
-    /** @type {import("./shop/shop_const").ShopOpenRequest} */
-    const payload = { slot, pawn, result: false };
-    eventBus.emit(event.Shop.In.ShopOpenRequest, payload);
-}
-
-/**
- * @param {number} waveIndex
- */
-function emitWaveStartRequest(waveIndex) {
-    /** @type {import("./wave/wave_const").WaveStartRequest} */
-    const payload = { waveIndex, result: false };
-    eventBus.emit(event.Wave.In.WaveStartRequest, payload);
-}
-
-/**
- * @param {number} waveIndex
- * @param {boolean} survived
- */
-function emitWaveEndRequest(waveIndex, survived) {
-    /** @type {import("./wave/wave_const").WaveEndRequest} */
-    const payload = { waveIndex, survived, result: false };
-    eventBus.emit(event.Wave.In.WaveEndRequest, payload);
-}
-
-/**
- * @param {string} source
- */
-function emitGameStartRequest(source) {
-    /** @type {import("./game/game_const").StartGameRequest} */
-    const payload = { source };
-    eventBus.emit(event.Game.In.StartGameRequest, payload);
-}
-
-/**
- * @param {string} source
- */
-function emitGameWinRequest(source) {
-    /** @type {import("./game/game_const").GameWinRequest} */
-    const payload = { source };
-    eventBus.emit(event.Game.In.GameWinRequest, payload);
-}
-
-/**
- * @param {string} source
- */
-function emitGameLoseRequest(source) {
-    /** @type {import("./game/game_const").GameLoseRequest} */
-    const payload = { source };
-    eventBus.emit(event.Game.In.GameLoseRequest, payload);
-}
-
-/**
- * @param {import("cs_script/point_script").Entity|null|undefined} entity
- */
-function emitMovementRemoveRequest(entity) {
-    if (!entity) return;
-    /** @type {import("./util/definition").MovementRequest} */
-    const payload = {
-        type: MovementRequestType.Remove,
-        entity,
-        priority: -1,
-    };
-    eventBus.emit(event.Movement.In.RemoveRequest, payload);
-}
-
-function requestCloseAllShops() {
-    for (const player of playerManager.getActivePlayers()) {
-        emitShopCloseRequest(player.slot);
-    }
-}
 
 // ═══════════════════════════════════════════════
 // 3. 跨模块回调绑定（全部集中在此）
@@ -200,9 +97,11 @@ eventBus.on(event.Wave.Out.OnWaveEnd, (/** @type {import("./wave/wave_const").On
 
     // 推进下一波或胜利
     if (waveManager.hasNextWave()) {
-        emitWaveStartRequest(waveNumber + 1);
+        /** @type {import("./wave/wave_const").WaveStartRequest} */
+        const payload = { waveIndex: waveNumber + 1, result: false };
+        eventBus.emit(event.Wave.In.WaveStartRequest, payload);
     } else {
-        emitGameWinRequest("wave-end");
+        eventBus.emit(event.Game.In.GameWinRequest,{});
     }
 });
 
@@ -224,23 +123,26 @@ eventBus.on(event.Game.Out.OnEnterPreparePhase, (payload) => {
 eventBus.on(event.Game.Out.OnStartGame, (payload) => {
     void payload;
     playerManager.enterGameStart();
-    emitWaveStartRequest(1);
+    /** @type {import("./wave/wave_const").WaveStartRequest} */
+    const waveStartPayload = { waveIndex: 1, result: false };
+    eventBus.emit(event.Wave.In.WaveStartRequest, waveStartPayload);
 });
 
 eventBus.on(event.Game.Out.OnGameLost, (payload) => {
     void payload;
-    requestCloseAllShops();
+    shopManager.closeAll();
 });
 
 eventBus.on(event.Game.Out.OnGameWin, (payload) => {
     void payload;
-    requestCloseAllShops();
+    shopManager.closeAll();
 });
 
 eventBus.on(event.Game.Out.OnResetGame, (payload) => {
     void payload;
-    requestCloseAllShops();
+    shopManager.closeAll();
     waveManager.resetGame();
+    skillManager.clearAll();
     monsterManager.resetAllGameStatus();
     movementManager.cleanup();
     areaEffectManager.cleanup();
@@ -250,50 +152,60 @@ eventBus.on(event.Game.Out.OnResetGame, (payload) => {
     Instance.ServerCommand("mp_restartgame 5");
 });
 
-/**
- * 玩家 Buff 的最终创建统一留在 main。
- * player 模块只负责抛出请求与运行时事件，真正的创建时机由 main 统一决定。
- * @param {number} playerSlot
- * @param {string} buffTypeId
- * @param {Record<string, any>} [params]
- */
-function grantPlayerBuff(playerSlot, buffTypeId, params) {
-    if (!buffTypeId) return null;
-
-    return playerManager.applyBuff(playerSlot, buffTypeId, params ?? {});
-}
-
 // ——— 3.2 玩家 / 怪物 → 游戏 / Buff ———
 
-monsterManager.events.setOnMonsterDeath((monster) => {
-    emitMovementRemoveRequest(monster.model);
+eventBus.on(event.Monster.Out.OnMonsterDeath, (/** @type {import("./monster/monster_const").OnMonsterDeath} */ payload) => {
+    if (!payload.monster.model) return;
+    /** @type {import("./util/definition").MovementRequest} */
+    const removePayload = {
+        type: MovementRequestType.Remove,
+        entity: payload.monster.model,
+        priority: -1,
+    };
+    eventBus.emit(event.Movement.In.RemoveRequest, removePayload);
 });
-monsterManager.events.setOnAllMonstersDead(() => {
-    emitWaveEndRequest(waveManager.currentWave, true);
+eventBus.on(event.Monster.Out.OnAllMonstersDead, () => {
+    eventBus.emit(event.Wave.In.WaveEndRequest, {result: false});
 });
 eventBus.on(event.Player.Out.OnPlayerJoin, (payload) => {
     void payload;
     gameManager.onPlayerJoin();
 });
 eventBus.on(event.Player.Out.OnPlayerLeave, (payload) => {
-    emitShopCloseRequest(payload.slot);
-    emitInputStopRequest(payload.slot);
-    emitHideHudRequest(payload.slot);
+    /** @type {import("./shop/shop_const").ShopCloseRequest} */
+    const shopClosePayload = { slot: payload.slot, result: false };
+    eventBus.emit(event.Shop.In.ShopCloseRequest, shopClosePayload);
+
+    /** @type {import("./input/input_const").StopRequest} */
+    const inputStopPayload = { slot: payload.slot, result: false };
+    eventBus.emit(event.Input.In.StopRequest, inputStopPayload);
+
+    /** @type {import("./hud/hud_const").HideHudRequest} */
+    const hideHudPayload = { slot: payload.slot, result: false };
+    eventBus.emit(event.Hud.In.HideHudRequest, hideHudPayload);
 
     const wasPlaying = gameManager.onPlayerLeave(payload.slot);
     if (wasPlaying && !playerManager.hasAlivePlayers()) {
-        emitGameLoseRequest("player-leave");
+        eventBus.emit(event.Game.In.GameLoseRequest, {});
     }
 });
 
 eventBus.on(event.Player.Out.OnPlayerDeath, (payload) => {
-    emitShopCloseRequest(payload.slot);
-    emitInputStopRequest(payload.slot);
-    emitHideHudRequest(payload.slot);
+    /** @type {import("./shop/shop_const").ShopCloseRequest} */
+    const shopClosePayload = { slot: payload.slot, result: false };
+    eventBus.emit(event.Shop.In.ShopCloseRequest, shopClosePayload);
+
+    /** @type {import("./input/input_const").StopRequest} */
+    const inputStopPayload = { slot: payload.slot, result: false };
+    eventBus.emit(event.Input.In.StopRequest, inputStopPayload);
+
+    /** @type {import("./hud/hud_const").HideHudRequest} */
+    const hideHudPayload = { slot: payload.slot, result: false };
+    eventBus.emit(event.Hud.In.HideHudRequest, hideHudPayload);
 
     const wasPlaying = gameManager.onPlayerDeath();
     if (wasPlaying && !playerManager.hasAlivePlayers()) {
-        emitGameLoseRequest("player-death");
+        eventBus.emit(event.Game.In.GameLoseRequest, {});
     }
 });
 
@@ -305,7 +217,7 @@ eventBus.on(event.Player.Out.OnPlayerRespawn, (payload) => {
 // ——— 3.3 全员准备 → 开始游戏 → 开始波次 ———
 
 eventBus.on(event.Player.Out.OnAllPlayersReady, () => {
-    emitGameStartRequest("all-players-ready");
+    eventBus.emit(event.Game.In.StartGameRequest, {});
 });
 
 // ——— 3.5 输入 → 商店 ———
@@ -313,6 +225,69 @@ eventBus.on(event.Player.Out.OnAllPlayersReady, () => {
 // ═══════════════════════════════════════════════
 // 4. 引擎事件注册
 // ═══════════════════════════════════════════════
+Instance.OnScriptInput("startGame", () => {
+    eventBus.emit(event.Game.In.StartGameRequest, {});
+});
+
+Instance.OnScriptInput("enterPreparePhase", () => {
+    eventBus.emit(event.Game.In.EnterPreparePhaseRequest, { });
+});
+
+Instance.OnScriptInput("resetGame", () => {
+    eventBus.emit(event.Game.In.ResetGameRequest, { });
+});
+
+Instance.OnScriptInput("gameWon", () => {
+    eventBus.emit(event.Game.In.GameWinRequest, {});
+});
+
+Instance.OnScriptInput("gameLost", () => {
+    eventBus.emit(event.Game.In.GameLoseRequest, {});
+});
+
+Instance.OnScriptInput("endWave", () => {
+    eventBus.emit(event.Wave.In.WaveEndRequest, {result: false});
+});
+
+Instance.OnScriptInput("startWave", (scriptEvent) => {
+    const entityName = scriptEvent.caller?.GetEntityName?.();
+    if (!entityName) return;
+
+    const parts = entityName.split("_");
+    const waveNumber = parseInt(parts[parts.length - 1], 10);
+    if (!isNaN(waveNumber)) {
+        /** @type {import("./wave/wave_const").WaveStartRequest} */
+        const payload = { waveIndex: waveNumber, result: false };
+        eventBus.emit(event.Wave.In.WaveStartRequest, payload);
+    }
+});
+
+Instance.OnScriptInput("ready", (scriptEvent) => {
+    const pawn = /** @type {import("cs_script/point_script").CSPlayerPawn|undefined} */ (scriptEvent.activator);
+    playerManager.toggleReadyByPawn(pawn);
+});
+
+Instance.OnScriptInput("openshop", (scriptEvent) => {
+    const controller = /** @type {import("cs_script/point_script").CSPlayerController|undefined} */ (scriptEvent.activator);
+    const slot = controller?.GetPlayerSlot?.();
+    const pawn = controller?.GetPlayerPawn?.();
+    if (typeof slot !== "number" || !pawn) return;
+
+    /** @type {import("./shop/shop_const").ShopOpenRequest} */
+    const payload = { slot, pawn, result: false };
+    eventBus.emit(event.Shop.In.ShopOpenRequest, payload);
+});
+
+Instance.OnScriptInput("closeshop", (scriptEvent) => {
+    const controller = /** @type {import("cs_script/point_script").CSPlayerController|undefined} */ (scriptEvent.activator);
+    const slot = controller?.GetPlayerSlot?.();
+    if (typeof slot !== "number") return;
+
+    /** @type {import("./shop/shop_const").ShopCloseRequest} */
+    const payload = { slot, result: false };
+    eventBus.emit(event.Shop.In.ShopCloseRequest, payload);
+});
+
 Instance.OnPlayerConnect((event) => {
     playerManager.handlePlayerConnect(event.player);
 });
@@ -341,10 +316,10 @@ Instance.OnPlayerDamage((event) => {
     playerManager.handlePlayerDamage(event);
 });
 
-Instance.OnPlayerChat((event) => {
-    playerManager.handlePlayerChat(event);
-    const controller = event.player;
-    const text = event.text;
+Instance.OnPlayerChat((chatEvent) => {
+    playerManager.handlePlayerChat(chatEvent);
+    const controller = chatEvent.player;
+    const text = chatEvent.text;
     if (!controller) return;
 
     const parts = text.trim().toLowerCase().split(/\s+/);
@@ -354,7 +329,9 @@ Instance.OnPlayerChat((event) => {
     if (command === "shop" || command === "!shop") {
         const pawn = controller.GetPlayerPawn();
         if (pawn) {
-            emitShopOpenRequest(controller.GetPlayerSlot(), pawn);
+            /** @type {import("./shop/shop_const").ShopOpenRequest} */
+            const payload = { slot: controller.GetPlayerSlot(), pawn, result: false };
+            eventBus.emit(event.Shop.In.ShopOpenRequest, payload);
         }
     }
     if (command === "debug" || command === "!debug") {
@@ -388,6 +365,7 @@ Instance.SetThink(() => {
     playerManager.tick();
     waveManager.tick();
     monsterManager.tick(currentMonsterEntities, alivePawns);
+    skillManager.tick();
     const activeMonsters = monsterManager.getActiveMonsters();
     const monsterEntities = activeMonsters
         .map((monster) => monster.model)

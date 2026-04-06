@@ -45,3 +45,34 @@ export const DEFAULT_WORLD_GRAVITY = 800;
  * 当前仅作为 JSDoc 类型占位，供 skill_manager / skill_template 引用。
  * @typedef {Record<string, any>} EmitEventPayload
  */
+
+/**
+ * @typedef {Object} SkillAddRequest
+ * @property {import("../player/player/player").Player|import("../monster/monster/monster").Monster} target
+ * @property {string} typeId
+ * @property {Record<string, any>} params
+ * @property {number|null} result
+ */
+
+/**
+ * @typedef {Object} SkillRemoveRequest
+ * @property {number} skillId
+ * @property {import("../player/player/player").Player|import("../monster/monster/monster").Monster|null} [target]
+ * @property {boolean} result
+ */
+
+/**
+ * @typedef {Object} SkillUseRequest
+ * @property {number} skillId
+ * @property {import("../player/player/player").Player|import("../monster/monster/monster").Monster} target
+ * @property {boolean} result
+ */
+
+/**
+ * @typedef {Object} SkillEmitRequest
+ * @property {number} skillId
+ * @property {string} eventName
+ * @property {EmitEventPayload} params
+ * @property {import("../player/player/player").Player|import("../monster/monster/monster").Monster|null} [target]
+ * @property {boolean} result
+ */

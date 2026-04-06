@@ -99,6 +99,58 @@ export const MonsterBuffEvents = {
 };
 
 /**
+ * @typedef {object} OnMonsterSpawn
+ * @property {import("./monster/monster").Monster} monster
+ */
+/**
+ * @typedef {object} OnMonsterDeath
+ * @property {import("./monster/monster").Monster} monster
+ * @property {import("cs_script/point_script").Entity|null|undefined} killer
+ * @property {number} reward
+ */
+/**
+ * @typedef {object} OnMonsterAttack
+ * @property {import("./monster/monster").Monster} monster
+ * @property {number} damage
+ * @property {import("cs_script/point_script").CSPlayerPawn} target
+ */
+/**
+ * @typedef {object} MonsterBeforeTakeDamageRequest
+ * @property {import("./monster/monster").Monster} monster
+ * @property {number} amount
+ * @property {import("cs_script/point_script").CSPlayerPawn|null} attacker
+ * @property {number|void} result
+ */
+/**
+ * @typedef {object} MonsterSpawnRequest
+ * @property {import("./monster/monster").Monster} monster
+ * @property {{typeName?: string, radiusMin?: number, radiusMax?: number, tries?: number}} options
+ * @property {boolean} result
+ */
+/**
+ * @typedef {object} MonsterSkillAddRequest
+ * @property {import("./monster/monster").Monster} monster
+ * @property {string} typeId
+ * @property {Record<string, any>} params
+ * @property {number|null} result
+ */
+/**
+ * @typedef {object} MonsterSkillUseRequest
+ * @property {import("./monster/monster").Monster} monster
+ * @property {number} skillId
+ * @property {Record<string, any>} params
+ * @property {boolean} result
+ */
+/**
+ * @typedef {object} MonsterSkillEmitRequest
+ * @property {import("./monster/monster").Monster} monster
+ * @property {number} skillId
+ * @property {string} eventName
+ * @property {Record<string, any>} params
+ * @property {boolean} result
+ */
+
+/**
  * 怪物配置
  * @type {{ [key: string]: import("../util/definition").monsterTypes }} 
  */

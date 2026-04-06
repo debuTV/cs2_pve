@@ -1,7 +1,7 @@
 /**
  * @module 商店系统/商店管理器
  */
-import { CSPlayerController, Instance } from "cs_script/point_script";
+import { Instance } from "cs_script/point_script";
 import { eventBus } from "../eventBus/event_bus";
 import { event } from "../util/definition";
 import { ShopSession } from "./shop_session";
@@ -46,26 +46,6 @@ export class ShopManager {
                 this.handleRawKey(payload.slot, payload.key);
             })
         ];
-        this.init();
-    }
-    init()
-    {
-        Instance.OnScriptInput("openshop", (event) => {
-            const controller = event.activator;
-            if (controller && controller instanceof CSPlayerController) {
-                const slot = controller.GetPlayerSlot();
-                const pawn = controller.GetPlayerPawn();
-                if (!pawn) return;
-                this.openShop({ slot, pawn, result: false });
-            }
-        });
-        Instance.OnScriptInput("closeshop", (event) => {
-            const controller = event.activator;
-            if (controller && controller instanceof CSPlayerController) {
-                const slot = controller.GetPlayerSlot();
-                this.closeShop({ slot, result: false });
-            }
-        });
     }
 
     destroy()

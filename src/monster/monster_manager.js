@@ -2,6 +2,8 @@
  * @module 怪物系统/怪物管理器
  */
 import { CSPlayerPawn, Entity, Instance} from "cs_script/point_script";
+import { eventBus } from "../eventBus/event_bus";
+import { event } from "../util/definition";
 import { Monster } from "./monster/monster";
 import { spawnPointsDistance,targetTeam,MonsterType } from "./monster_const";
 import { vec } from "../util/vector";
@@ -22,9 +24,6 @@ export class MonsterManager {
          * @type {number} */
         this.totalKills = 0;
 
-        /** 管理器级事件集合。向上层暴露生成/死亡/全灭/攻击/技能事件。 */
-        this.events = new MonsterManagerEvents();
-
         /**
          * 当前波次可用的生成点实体列表。由 `spawnWave` 按配置名称查找并填充，
          * 每次新波次开始时清空重建。
@@ -42,6 +41,15 @@ export class MonsterManager {
          * @type {import("../util/definition").waveConfig | null}
          */
         this.spawnconfig = null;
+        /** @type {Array<() => boolean>} */
+        this._unsubscribers = [
+            eventBus.on(event.Monster.Out.OnMonsterDeath, (/** @type {import("./monster_const").OnMonsterDeath} */ payload) => {
+                this.handleMonsterDeath(payload.monster, payload.killer);
+            }),
+            eventBus.on(event.Monster.In.SpawnRequest, (/** @type {import("./monster_const").MonsterSpawnRequest} */ payload) => {
+                payload.result = this.spawnByother(payload.monster, payload.options);
+            })
+        ];
     }
     /**
      * @param {Monster} monsterInstance 死亡怪物实例
@@ -49,12 +57,13 @@ export class MonsterManager {
      */
     handleMonsterDeath(monsterInstance, killer) {
         const monsterId = monsterInstance.id;
-        const reward = monsterInstance.baseReward;
-        this.activeMonsters--;
+        if (!this.monsters.has(monsterId)) return;
+        this.activeMonsters = Math.max(0, this.activeMonsters - 1);
         this.totalKills++;
-        this.events.OnMonsterDeath?.(monsterInstance, killer, reward);
         this.monsters.delete(monsterId);
-        if(this.spawnconfig && this.activeMonsters==0 && this.spawnmonstercount>=this.spawnconfig.totalMonsters)this.events.OnAllMonstersDead?.();
+        if(this.spawnconfig && this.activeMonsters==0 && this.spawnmonstercount>=this.spawnconfig.totalMonsters) {
+            eventBus.emit(event.Monster.Out.OnAllMonstersDead, {});
+        }
     }
     /**
      * 重置游戏
@@ -108,28 +117,6 @@ export class MonsterManager {
             if (this.spawnmonstercount >= this.spawnconfig.totalMonsters) return this.stopWave();
         }
     }
-    /**
-     * 为新生成的怪物绑定事件回调。绑定死亡/攻击/技能事件，
-     * @param {Monster} monster 新生成的怪物实例
-     */
-    _bindMonsterEvents(monster)
-    {
-        monster.events.setOnDie((monsterInstance, killer) => {
-            this.handleMonsterDeath(monsterInstance, killer);
-        });
-        monster.events.setOnAttackTrue((damage, target) => {
-            this.events.OnAttack?.(damage, target);
-        });
-        monster.events.setOnBeforeTakeDamage((monsterInstance, amount, attacker) => {
-            return this.events.OnBeforeTakeDamage?.(monsterInstance, amount, attacker);
-        });
-        monster.events.setOnAreaEffectRequest(()=>{});
-        monster.events.setSkillEvent((typeId, params)=>this.events.OnSkillAddRequest?.(monster,typeId,params)??null,
-            (skillId,params)=>this.events.OnSkillUseRequest?.(monster,skillId,params)??false,
-            (skillId,event,params)=>this.events.OnSkillEmitEvent?.(monster,skillId,event,params)??false
-        );
-    }
-
     /**
      * @param {number} monsterId
      * @param {string} typeId
@@ -314,7 +301,7 @@ export class MonsterManager {
     /**
      * 创建一只怪物并完成全部注册流程。
      *
-     * 依次执行：分配全局递增 ID → 工厂创建实例 → 绑定管理器回调 →
+    * 依次执行：分配全局递增 ID → 工厂创建实例 →
      * 注册到 monsters 映射表 → 发布生成事件。
      *
      * @param {import("../util/definition").monsterTypes} typeConfig 怪物类型配置
@@ -325,9 +312,10 @@ export class MonsterManager {
         const monsterId = this.nextMonsterId++;
         const monster = new Monster(monsterId, position, typeConfig);
         if(!monster)return monster;
-        this._bindMonsterEvents(monster);
         this.monsters.set(monsterId, monster);
-        this.events.OnMonsterSpawn?.(monster);
+        /** @type {import("./monster_const").OnMonsterSpawn} */
+        const payload = { monster };
+        eventBus.emit(event.Monster.Out.OnMonsterSpawn, payload);
         this.activeMonsters++;
         monster.init();
         return monster;
@@ -355,73 +343,4 @@ export class MonsterManager {
         const typeIndex = monsterId % waveConfig.monsterTypes.length;
         return waveConfig.monsterTypes[typeIndex];
     }
-}
-/**
- * MonsterManager 级事件集合。
- */
-export class MonsterManagerEvents {
-    constructor() {
-        /** @type {((monster: Monster) => void) | null} */
-        this.OnMonsterSpawn = null;
-        /** @type {((monster: Monster, killer: Entity|null|undefined, reward: number) => void) | null} */
-        this.OnMonsterDeath = null;
-        /** @type {(() => void) | null} */
-        this.OnAllMonstersDead = null;
-        /** @type {((damage: number, target: CSPlayerPawn) => void) | null} */
-        this.OnAttack = null;
-        /** @type {((monster: Monster, amount: number, attacker: CSPlayerPawn | null) => number | void) | null} */
-        this.OnBeforeTakeDamage = null;
-        /** @type {((req: any) => void) | null} */
-        this.OnMovementRequest = null;
-
-        //monster buff事件回调
-        this.OnBuffAddRequest = null;
-        this.OnBuffRemoveRequest = null;
-        this.OnBuffRefreshRequest = null;
-        this.OnBuffEmitEvent = null;
-        //monster skill事件回调
-        this.OnSkillAddRequest = null;
-        this.OnSkillUseRequest = null;
-        this.OnSkillEmitEvent = null;
-    }
-    /** @param {(monster: Monster) => void} callback */
-    setOnMonsterSpawn(callback) {
-        this.OnMonsterSpawn = callback;
-    }
-    /** @param {(monster: Monster, killer: Entity|null|undefined, reward: number) => void} callback */
-    setOnMonsterDeath(callback) {
-        this.OnMonsterDeath = callback;
-    }
-    /** @param {() => void} callback */
-    setOnAllMonstersDead(callback) {
-        this.OnAllMonstersDead = callback;
-    }
-    /** @param {(damage: number, target: CSPlayerPawn) => void} callback */
-    setOnAttack(callback) {
-        this.OnAttack = callback;
-    }
-    /** @param {(monster: Monster, amount: number, attacker: CSPlayerPawn | null) => number | void} callback */
-    setOnBeforeTakeDamage(callback) {
-        this.OnBeforeTakeDamage = callback;
-    }
-    /** @param {(req: any) => void} callback */
-    setOnMovementRequest(callback) {
-        this.OnMovementRequest = callback;
-    }
-
-    /** 设置怪物 Buff 添加请求回调。 @param {(monster: Monster, typeId: string, params: Record<string, any>) => number|null} callback*/
-    setOnMonsterBuffAddRequest(callback) { this.OnBuffAddRequest = callback; }
-    /** 设置怪物 Buff 删除请求回调。 @param {(monster: Monster, buffid: number) => boolean} callback*/
-    setOnMonsterBuffDeleteRequest(callback) { this.OnBuffRemoveRequest = callback; }
-    /** 设置怪物 Buff 刷新请求回调。 @param {(monster: Monster, buffid: number, params: Record<string, any>) => boolean} callback*/
-    setOnMonsterBuffRefreshRequest(callback) { this.OnBuffRefreshRequest = callback; }
-    /** 设置怪物 Buff 发射事件回调。 @param {(monster: Monster, buffid: number, event: string, params: any) => boolean} callback*/
-    setOnMonsterBuffEmitEvent(callback) { this.OnBuffEmitEvent = callback; }
-
-    /** 设置怪物 Skill 添加请求回调 @param {(monster: Monster, typeId: string, params: Record<string, any>) => number} callback*/
-    setOnMonsterSkillAddRequest(callback) { this.OnSkillAddRequest = callback; }
-    /** 设置怪物 Skill 使用请求回调 @param {(monster: Monster, skillId: number, params: Record<string, any>) => boolean} callback*/
-    setOnMonsterSkillUseRequest(callback) { this.OnSkillUseRequest = callback; }
-    /** 设置怪物 Skill 发射事件回调 @param {(monster: Monster, skillId: number,event:string, params: Record<string, any>) => boolean} callback*/
-    setOnMonsterSkillEmitEvent(callback) { this.OnSkillEmitEvent = callback; }
 }

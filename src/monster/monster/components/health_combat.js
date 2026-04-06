@@ -1,29 +1,44 @@
 /**
  * @module 怪物系统/怪物组件/生命与战斗
  */
-import { Instance } from "cs_script/point_script";
-import { MonsterBuffEvents, MonsterState } from "../monster_state";
+import { BaseModelEntity, CSPlayerPawn, Instance } from "cs_script/point_script";
+import { MonsterBuffEvents, MonsterState } from "../../monster_const";
 
 export class MonsterHealthCombat {
+    /**
+     * @param {import("../monster").Monster} monster
+     */
     constructor(monster) {
         this.monster = monster;
         /** @type {((amount: number) => number)[]} */
         this._damageModifiers = [];
     }
 
+    /**
+     * @param {(amount: number) => number} modifier
+     */
     addDamageModifier(modifier) {
         this._damageModifiers.push(modifier);
     }
 
+    /**
+     * @param {(amount: number) => number} modifier
+     */
     removeDamageModifier(modifier) {
         const idx = this._damageModifiers.indexOf(modifier);
         if (idx !== -1) this._damageModifiers.splice(idx, 1);
     }
 
+    /**
+     * @param {number} amount
+     * @param {import("cs_script/point_script").CSPlayerPawn | null} attacker
+     * @param {{ source?: import("cs_script/point_script").Entity | null, reason?: string } | null} [meta]
+     * @returns {boolean}
+     */
     takeDamage(amount, attacker, meta = null) {
         if (this.monster.state === MonsterState.DEAD) return true;
 
-        const modifiedAmount = this.monster.events.OnBeforeTakeDamage?.(this.monster, amount, attacker);
+        const modifiedAmount = this.monster.requestBeforeTakeDamage(amount, attacker);
         if (typeof modifiedAmount === "number") {
             amount = modifiedAmount;
         }
@@ -66,46 +81,56 @@ export class MonsterHealthCombat {
         return false;
     }
 
+    /**
+     * @param {import("cs_script/point_script").Entity | null | undefined} killer
+     */
     die(killer) {
         if (this.monster.state === MonsterState.DEAD) return;
 
-        Instance.EntFireAtTarget({
-            target: this.monster.breakable,
-            input: "fireuser1",
-            activator: killer ?? this.monster.target ?? undefined,
-        });
+        const breakable = this.monster.breakable;
+        if (breakable?.IsValid()) {
+            Instance.EntFireAtTarget({
+                target: breakable,
+                input: "fireuser1",
+                activator: killer ?? this.monster.target ?? undefined,
+            });
+        }
 
         const prevState = this.monster.state;
         this.monster.state = MonsterState.DEAD;
         this.monster.buffManager.onStateChange(prevState, MonsterState.DEAD);
         this.monster.buffManager.clearAll();
-        this.monster.model?.Unglow?.();
+        if (this.monster.model instanceof BaseModelEntity) {
+            this.monster.model.Unglow();
+        }
         this.monster.emitEvent({ type: MonsterBuffEvents.Die });
-        this.monster.killer = killer;
-        this.monster.events.OnDie?.(this.monster, killer);
-        this.monster.animator.enter(MonsterState.DEAD);
+        this.monster.killer = killer instanceof CSPlayerPawn ? killer : null;
+        this.monster.emitDeathEvent(killer);
+        this.monster.animation.enter(MonsterState.DEAD);
         Instance.Msg(`鎬墿 #${this.monster.id} 姝讳骸`);
     }
 
     enterAttack() {
-        if (!this.monster.target) return;
+        const model = this.monster.model;
+        const target = this.monster.target;
+        if (!model?.IsValid() || !target) return;
 
-        this.monster.animationOccupation.setOccupation("attack");
+        this.monster.animation.setOccupation("attack");
         this.monster.movementPath.onOccupationChanged();
         this.monster.attackCooldown = this.monster.atc;
 
-        const origin = this.monster.model.GetAbsOrigin();
-        const target = this.monster.target.GetAbsOrigin();
-        const distsq = this.monster.distanceTosq(this.monster.target);
+        const origin = model.GetAbsOrigin();
+        const targetPos = target.GetAbsOrigin();
+        const distsq = this.monster.distanceTosq(target);
         if (distsq > this.monster.attackdist * this.monster.attackdist) {
             this.monster.emitEvent({ type: MonsterBuffEvents.AttackFalse });
             return;
         }
 
         this.monster.emitEvent({ type: MonsterBuffEvents.AttackTrue });
-        this.monster.events.OnAttackTrue?.(this.monster.damage, this.monster.target);
+        this.monster.emitAttackEvent(this.monster.damage, target);
 
-        const l = 300 / Math.hypot(target.x - origin.x, target.y - origin.y);
+        const l = 300 / Math.hypot(targetPos.x - origin.x, targetPos.y - origin.y);
         void l;
     }
 }

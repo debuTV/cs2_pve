@@ -29,7 +29,7 @@ export class DoubleAttackSkill extends SkillTemplate {
         if (!this.events.includes(event.type)) return false;
         if (!this._cooldownReady()) return false;
         if (this.monster && !this.monster.target) return false;
-        if (this.player && !this.player.target)return false;
+        if (!this.monster)return false;
         if (this.animation === null) {
             this.trigger();
             return false;

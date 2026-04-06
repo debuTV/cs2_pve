@@ -33,8 +33,8 @@ import { PlayerState } from "./player_const";
  * - 通过 eventBus 发出 Player.Out 生命周期事件，供其他模块编排。
  * - 提供查询方法：`getAllPlayers`、`getAlivePlayers`、`areAllPlayersReady` 等。
  *
- * 使用方式：先构造 `new PlayerManager()`，构造期间会注册模块内脚本输入监听；
- * 之后由 main.js 调用 `refresh()` 完成已有玩家同步，
+ * 使用方式：先构造 `new PlayerManager()`；
+ * 之后由 main.js 统一注册玩家相关脚本输入与引擎监听，再调用 `refresh()` 完成已有玩家同步，
  * 并在主循环中每帧调用 `tick()` 驱动所有玩家的持续逻辑。
  *
  * @navigationTitle 玩家管理器
@@ -125,25 +125,6 @@ export class PlayerManager {
                 payload.result = this.dispatchRewardRequest(targetSlot, rewards);
             })
         ];
-        this.init();
-    }
-    // ——— 初始化 / 脚本输入监听 ———
-    /**
-     * 将脚本加载前已存在的玩家同步进管理器。注册实体输入监听。
-     *  - ready: 玩家准备状态变化，参数为玩家控制器。
-     */
-    init() {
-        Instance.OnScriptInput("ready", (e) => {
-            const pawn = e.activator;
-            if (pawn && pawn instanceof CSPlayerPawn) {
-                const controller = pawn.GetPlayerController();
-                if (!controller) return;
-                const slot = controller.GetPlayerSlot();
-                const player = this.players.get(slot);
-                if (!player) return;
-                this._setPlayerReady(player, !player.isReady);
-            }
-        });
     }
     /**
      * 所有类初始化完成后调用
@@ -340,6 +321,22 @@ export class PlayerManager {
         if (!player) return;
 
         player.syncDamageFromEngine(event.damage, event.attacker, event.inflictor);
+    }
+
+    /**
+     * 由 main.js 转发 ready 脚本输入，切换玩家准备状态。
+     * @param {CSPlayerPawn|undefined|null} pawn
+     * @returns {boolean}
+     */
+    toggleReadyByPawn(pawn) {
+        if (!(pawn instanceof CSPlayerPawn)) return false;
+        const controller = pawn.GetPlayerController();
+        if (!controller) return false;
+
+        const player = this.players.get(controller.GetPlayerSlot());
+        if (!player) return false;
+
+        return this._setPlayerReady(player, !player.isReady);
     }
 
     /**

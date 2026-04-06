@@ -63,14 +63,13 @@ export class PounceSkill extends SkillTemplate {
         const monster = this.monster;
         if (!monster) return;
 
+        const model = monster.model;
         const target = monster.target;
-        if (!target) return;
+        if (!model?.IsValid() || !target) return;
 
-        this.running = true;
-        monster.animationOccupation.setOccupation("pounce");
-
-        const start = monster.model.GetAbsOrigin();
+        const start = model.GetAbsOrigin();
         const targetPos = target.GetAbsOrigin();
+
         const duration = this._duration > 0 ? this._duration : 1;
         const velocity = {
             x: (targetPos.x - start.x) / duration,
@@ -78,9 +77,12 @@ export class PounceSkill extends SkillTemplate {
             z: (targetPos.z - start.z + 0.5 * DEFAULT_WORLD_GRAVITY * duration * duration) / duration,
         };
 
-        monster.submitMovementEvent({
+        monster.animation.setOccupation("pounce");
+        this.running = true;
+
+        const submitted = monster.submitMovementEvent({
             type: MovementRequestType.Move,
-            entity: monster.model,
+            entity: model,
             priority: MovementPriority.Skill,
             targetPosition: targetPos,
             usePathRefresh: false,
@@ -88,6 +90,12 @@ export class PounceSkill extends SkillTemplate {
             Mode: "air",
             Velocity: velocity,
         });
+
+        if (!submitted) {
+            this.running = false;
+            monster.onOccupationEnd("pounce");
+            return;
+        }
 
         this._markTriggered();
     }

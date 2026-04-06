@@ -99,6 +99,7 @@ export const MovementPriority = {
     StateChange: 1,
     Chase:       2,
 };
+
 export const event={
     AreaEffects:{
         In:{
@@ -162,7 +163,16 @@ export const event={
         }
     },
     Monster:{
-
+        In:{
+            SpawnRequest:"Monster_OnSpawnRequest",    //请求由怪物施法者触发产卵，payload 使用 MonsterSpawnRequest
+            BeforeTakeDamageRequest:"Monster_OnBeforeTakeDamageRequest",    //请求怪物受伤前修正伤害，payload 使用 MonsterBeforeTakeDamageRequest
+        },
+        Out:{
+            OnMonsterSpawn:"Monster_OnMonsterSpawn",    //怪物创建并注册后，payload 使用 OnMonsterSpawn
+            OnMonsterDeath:"Monster_OnMonsterDeath",    //怪物死亡后，payload 使用 OnMonsterDeath
+            OnAllMonstersDead:"Monster_OnAllMonstersDead",    //当前波次全部怪物死亡后
+            OnAttack:"Monster_OnAttack",    //怪物普攻命中后，payload 使用 OnMonsterAttack
+        }
     },
     Movement:{
         In:{
@@ -212,7 +222,14 @@ export const event={
         }
     },
     Skill:{
-
+        In:{
+            SkillAddRequest:"Skill_OnSkillAddRequest",    //请求为目标添加技能，payload 使用 SkillAddRequest
+            SkillRemoveRequest:"Skill_OnSkillRemoveRequest",    //请求移除技能，payload 使用 SkillRemoveRequest
+            SkillUseRequest:"Skill_OnSkillUseRequest",    //请求直接触发技能，payload 使用 SkillUseRequest
+            SkillEmitRequest:"Skill_OnSkillEmitRequest",    //请求向技能转发运行时事件，payload 使用 SkillEmitRequest
+        },
+        Out:{
+        }
     },
     Wave:{
         In:{

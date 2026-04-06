@@ -2,7 +2,6 @@
  * @module 波次系统/波次管理器
  */
 
-import { Instance } from "cs_script/point_script";
 import { eventBus } from "../eventBus/event_bus";
 import { event } from "../util/definition";
 import { WaveState,wavesConfig } from "./wave_const";
@@ -54,28 +53,6 @@ export class WaveManager {
          * @type {{ startTime: number, duration: number, broadcastIndex: number, messages: { message: string, delay: number }[] }}
          */
         this._prepareContext = this._createPrepareContext();
-        this.init();
-    }
-    /**
-     * 启用实体监听
-     * - endWave: 强制结束当前波次
-     * - startWave: 开始指定波次，参数格式 "startWave_1"
-     */
-    init() {
-        //强制结束当前波次
-        Instance.OnScriptInput("endWave", () => {
-            this.completeWave();
-        });
-        //开启波次
-        Instance.OnScriptInput("startWave", (e) => {
-            if (!e.caller) return;
-            const parts = e.caller.GetEntityName().split('_');
-            //脚本输入 startWave 的 parseInt 可能返回 NaN，需要验证
-            const waveNumber = parseInt(parts[parts.length - 1], 10);
-            if (!isNaN(waveNumber)) {
-                this.startWave({ waveIndex: waveNumber, result: false });
-            }
-        });
     }
 
     /**

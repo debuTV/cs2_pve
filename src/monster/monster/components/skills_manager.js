@@ -1,11 +1,16 @@
-import { SkillFactory } from "../skill_factory";
+import { SkillFactory } from "../../../skill/skill_factory";
+
+/** @typedef {import("../../../skill/skill_template").SkillTemplate & { animation?: string | null }} MonsterSkill */
 
 class SkillRequestQueue {
     constructor() {
-        /** @type {import("../skill_manager").SkillTemplate[]} */
+        /** @type {MonsterSkill[]} */
         this._items = [];
     }
 
+    /**
+     * @param {MonsterSkill} skill
+     */
     push(skill) {
         if (this._items.includes(skill)) return;
         this._items.push(skill);
@@ -16,6 +21,9 @@ class SkillRequestQueue {
         return this._items.length > 0;
     }
 
+    /**
+     * @returns {MonsterSkill | undefined}
+     */
     pop() {
         return this._items.shift();
     }
@@ -26,11 +34,17 @@ class SkillRequestQueue {
 }
 
 export class MonsterSkillsManager {
+    /**
+     * @param {import("../monster").Monster} monster
+     */
     constructor(monster) {
         this.monster = monster;
         this._queue = new SkillRequestQueue();
     }
 
+    /**
+     * @param {import("../../../util/definition").skill_pool[] | undefined} skillPool
+     */
     initSkills(skillPool) {
         if (!skillPool) return;
 
@@ -42,15 +56,21 @@ export class MonsterSkillsManager {
         }
     }
 
+    /**
+     * @param {MonsterSkill} skill
+     */
     addSkill(skill) {
         skill.id = this.monster.skills.length;
         this.monster.skills.push(skill);
     }
 
+    /**
+     * @param {import("../../../skill/skill_const").EmitEventPayload & { type: string }} event
+     */
     emitEvent(event) {
         for (const skill of this.monster.skills) {
             if (!skill.canTrigger(event)) continue;
-            skill.request();
+            skill._request();
         }
     }
 
@@ -61,6 +81,9 @@ export class MonsterSkillsManager {
         }
     }
 
+    /**
+     * @param {MonsterSkill} skill
+     */
     requestSkill(skill) {
         if (this.monster.movementStateSnapshot.mode === "ladder") {
             this._queue.clear();
@@ -86,7 +109,7 @@ export class MonsterSkillsManager {
         const skill = this._queue.pop();
         if (!skill) return;
 
-        if (skill.animation) this.monster.animator.play(skill.animation);
+        if (skill.animation) this.monster.animation.play(skill.animation);
         skill.trigger();
     }
 }

@@ -1,8 +1,8 @@
 /**
  * @module 怪物系统/怪物组件/动画占用
  */
-import { MonsterBuffEvents, MonsterState } from "../monster_state";
-import { monstercorpse } from "../../monster_const";
+import { Entity, Instance } from "cs_script/point_script";
+import { MonsterBuffEvents, MonsterState, monstercorpse } from "../../monster_const";
 
 /**
  * 怪物动画控制器。
@@ -18,8 +18,8 @@ export class MonsterAnimator {
     /**
      * 创建怪物动画控制器。
      * @param {import("../monster").Monster} monster 所属怪物实例
-     * @param {Entity} model Source 2 怪物模型实体
-     * @param {import("../../util/definition").animations} animConfig 动画配置表（idle/walk/attack/skill/dead 动画名数组）
+     * @param {Entity | null} model Source 2 怪物模型实体
+     * @param {import("../../../util/definition").animations} animConfig 动画配置表（idle/walk/attack/skill/dead 动画名数组）
      */
     constructor(monster,model,animConfig) {
         /** 所属怪物实例。 */
@@ -28,7 +28,7 @@ export class MonsterAnimator {
         this.model = model;
         /**
          * 动画配置表。每个键对应一组可随机播放的动画名。
-         * @type {import("../../util/definition").animations}
+         * @type {import("../../../util/definition").animations}
          */
         this.animConfig = animConfig;
         /** 是否处于动作占用期。播放动画时置 true，`OnAnimationDone` 事件触发后置 false。 */
@@ -37,8 +37,18 @@ export class MonsterAnimator {
         this.currentstats=-1;
         /** 动作结束回调。仅当 type 与当前占用一致时才清除。 */
         this.onStateFinish = null;
-        Instance.ConnectOutput(this.model,"OnAnimationDone",(e)=>{
-            //动画播放完了
+        /** @type {Entity | null} */
+        this._boundModel = null;
+
+        this._bindModelOutput();
+    }
+
+    _bindModelOutput() {
+        this.model = this.monster.model ?? this.model;
+        if (!this.model || this._boundModel === this.model) return;
+
+        this._boundModel = this.model;
+        Instance.ConnectOutput(this.model,"OnAnimationDone",()=>{
             this.locked = false;
             this.onStateFinish?.(this.currentstats);
         });
@@ -57,8 +67,9 @@ export class MonsterAnimator {
      * @param {import("../../../util/definition").animations} animations 动画配置表
      */
     init(animations) {
-        this.monster.animator = new MonsterAnimator(this.monster.model, animations);
-        this.monster.animator.setonStateFinish((/** @type {number} */ state) => {
+        this.animConfig = animations;
+        this._bindModelOutput();
+        this.setonStateFinish((/** @type {number} */ state) => {
             if (state == MonsterState.ATTACK) this.monster.onOccupationEnd("attack");
             else if (state == MonsterState.SKILL) this.monster.onOccupationEnd("skill");
             else if (state == MonsterState.DEAD) {
@@ -164,11 +175,13 @@ export class MonsterAnimator {
      * @param {string} type 动画类型键（"idle"|"walk"|"attack"|"skill"|"dead"）
      */
     play(type) {
+        this._bindModelOutput();
         const list = this.animConfig[type];
-        if (!list || list.length === 0) return null;
+        if (!this.model || !list || list.length === 0) return null;
         const anim = list[Math.floor(Math.random() * list.length)];
         if (!anim) return;
         Instance.EntFireAtTarget({target:this.model,input:"SetAnimation",value:anim});
         this.locked=true;
+        return anim;
     }
 }

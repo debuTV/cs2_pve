@@ -131,7 +131,7 @@ export class SkillTemplate
      * 仅由 isActive()=true 的技能在 canTrigger 返回 true 后被 emitEvent 调用。
      */
     _request(){
-        if(this.player)this.player.requestSkill(this);
+        //if(this.player)this.player.requestSkill(this);
         if(this.monster)this.monster.requestSkill(this);
     }
     /**
