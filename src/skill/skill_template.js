@@ -6,10 +6,10 @@ import { Monster } from "../monster/monster/monster";
 import { Player } from "../player/player/player";
 /*
 技能分类规则（唯一权威）：
-  有 animation 字段（非 null/undefined）= 主动技能：canTrigger 通过后进入请求队列，
+  有 animation 字段（非 null/undefined）= 主动技能：canTrigger 通过后占用当前待执行槽，
     Monster 进入 SKILL 状态，skills_manager 先播放 animation 动作，再调用 trigger()。
   无 animation 字段（null）           = 被动技能：在 canTrigger 内直接执行业务并返回 false，
-    不进入请求队列，不触发状态切换。
+    不占用待执行槽，不触发状态切换。
 
 冷却语义：
   cooldown > 0  → 间隔触发（秒）
@@ -19,7 +19,7 @@ import { Player } from "../player/player/player";
 
 实例 id 语义：
   skill.id  = 运行时实例 id，由 MonsterSkillsManager.addSkill 按添加顺序分配（0,1,2,...）。
-             同一怪物上 id 越小，优先级越高（主动技能请求队列的排序依据）。
+             同一怪物上 id 越小，优先级越高；同一轮事件结算时，先遇到可触发的技能会直接截断后续主动技能。
   skill.typeId = 技能类型标识，对应 SkillFactory 注册键（如 "corestats"），子类在构造函数里设置。
              同一怪物可同时拥有多个相同 typeId 的技能实例，各实例独立运行互不干扰。
 
@@ -64,7 +64,7 @@ MonsterEvents.ModelRemove  → "OnModelRemove"
  * 技能基类。所有具体技能继承此类，并在子类中按宿主类型重写专用入口。
  *
  * 技能分为两大类：
- * - **主动技能**（`animation` 非 null）— `canTrigger` 返回 true 后入队，
+ * - **主动技能**（`animation` 非 null）— `canTrigger` 返回 true 后占用当前待执行槽，
  *   Monster 进入 SKILL 状态，播放动作后调用 `trigger()`。
  * - **被动技能**（`animation` 为 null）— 在 `canTrigger` 内直接执行并返回 false。
  *
@@ -117,8 +117,8 @@ export class SkillTemplate
     }
     /**
      * 这个事件能否执行。
-     * - 有 animation（isActive=true）：做条件判断通过后返回 true，由 emitEvent 调用 request 入队。
-     * - 无 animation（isActive=false）：在此处直接执行业务逻辑并返回 false，不入队不切换状态。
+    * - 有 animation（isActive=true）：做条件判断通过后返回 true，由 emitEvent 调用 request 锁定当前待执行技能。
+    * - 无 animation（isActive=false）：在此处直接执行业务逻辑并返回 false，不占用待执行槽也不切换状态。
      * @param {any} event
      */
     canTrigger(event) {

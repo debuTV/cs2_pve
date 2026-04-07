@@ -10,7 +10,7 @@ import { MonsterBuffEvents, MonsterState } from "../../monster_const";
  * 每帧评估当前意图并解析为 MonsterState 转换：
  * 1. `updateTarget` — 选择最近玩家作为目标。
  * 2. `evaluateIntent` — 根据距离和冷却判断意图（Idle/Chase/Attack/Skill）。
- * 3. `resolveState` — 将意图转化为实际状态，考虑占用锁和技能队列。
+ * 3. `resolveState` — 将意图转化为实际状态，考虑占用锁和当前待执行技能。
  *
  * @navigationTitle 怪物 AI 决策
  */

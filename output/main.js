@@ -1303,11 +1303,11 @@ class MonsterHealthCombat {
             source: meta?.source ?? null,
             reason: meta?.reason,
         };
-        this.monster.buffManager.onBeforeDamageTaken(ctx);
+        this.monster.emitBuffEvent(MonsterBuffEvents.BeforeTakeDamage, ctx);
         amount = ctx.damage;
 
         if (amount <= 0) {
-            this.monster.buffManager.onAfterDamageTaken({ ...ctx, damage: 0 });
+            this.monster.emitBuffEvent(MonsterBuffEvents.TakeDamage, { ...ctx, damage: 0 });
             this.monster.emitEvent({ type: MonsterBuffEvents.TakeDamage, value: 0, health: this.monster.health });
             return false;
         }
@@ -1316,7 +1316,7 @@ class MonsterHealthCombat {
         for (const mod of this._damageModifiers) {
             finalAmount = mod(finalAmount);
             if (finalAmount <= 0) {
-                this.monster.buffManager.onAfterDamageTaken({ ...ctx, damage: 0 });
+                this.monster.emitBuffEvent(MonsterBuffEvents.TakeDamage, { ...ctx, damage: 0 });
                 this.monster.emitEvent({ type: MonsterBuffEvents.TakeDamage, value: 0, health: this.monster.health });
                 return false;
             }
@@ -1324,7 +1324,7 @@ class MonsterHealthCombat {
 
         const previousHealth = this.monster.health;
         this.monster.health = Math.max(0, Math.min(this.monster.health - finalAmount, this.monster.maxhealth));
-        this.monster.buffManager.onAfterDamageTaken({ ...ctx, damage: finalAmount });
+        this.monster.emitBuffEvent(MonsterBuffEvents.TakeDamage, { ...ctx, damage: finalAmount });
         this.monster.emitEvent({ type: MonsterBuffEvents.TakeDamage, value: finalAmount, health: this.monster.health });
         Instance.Msg(`鎬墿 #${this.monster.id} 鍙楀埌 ${finalAmount} 鐐逛激瀹?(鍘熷:${amount}) (${previousHealth} -> ${this.monster.health})`);
 
@@ -1341,43 +1341,50 @@ class MonsterHealthCombat {
     die(killer) {
         if (this.monster.state === MonsterState.DEAD) return;
 
-        Instance.EntFireAtTarget({
-            target: this.monster.breakable,
-            input: "fireuser1",
-            activator: killer ?? this.monster.target ?? undefined,
-        });
+        const breakable = this.monster.breakable;
+        if (breakable?.IsValid()) {
+            Instance.EntFireAtTarget({
+                target: breakable,
+                input: "fireuser1",
+                activator: killer ?? this.monster.target ?? undefined,
+            });
+        }
 
         const prevState = this.monster.state;
         this.monster.state = MonsterState.DEAD;
-        this.monster.buffManager.onStateChange(prevState, MonsterState.DEAD);
-        this.monster.buffManager.clearAll();
-        this.monster.model?.Unglow?.();
+        this.monster.emitBuffEvent("OnStateChange", { oldState: prevState, nextState: MonsterState.DEAD });
+        this.monster.clearBuffs();
+        if (this.monster.model instanceof BaseModelEntity) {
+            this.monster.model.Unglow();
+        }
         this.monster.emitEvent({ type: MonsterBuffEvents.Die });
-        this.monster.killer = killer;
+        this.monster.killer = killer instanceof CSPlayerPawn ? killer : null;
         this.monster.emitDeathEvent(killer);
         this.monster.animation.enter(MonsterState.DEAD);
         Instance.Msg(`鎬墿 #${this.monster.id} 姝讳骸`);
     }
 
     enterAttack() {
-        if (!this.monster.target) return;
+        const model = this.monster.model;
+        const target = this.monster.target;
+        if (!model?.IsValid() || !target) return;
 
         this.monster.animation.setOccupation("attack");
         this.monster.movementPath.onOccupationChanged();
         this.monster.attackCooldown = this.monster.atc;
 
-        const origin = this.monster.model.GetAbsOrigin();
-        const target = this.monster.target.GetAbsOrigin();
-        const distsq = this.monster.distanceTosq(this.monster.target);
+        const origin = model.GetAbsOrigin();
+        const targetPos = target.GetAbsOrigin();
+        const distsq = this.monster.distanceTosq(target);
         if (distsq > this.monster.attackdist * this.monster.attackdist) {
             this.monster.emitEvent({ type: MonsterBuffEvents.AttackFalse });
             return;
         }
 
         this.monster.emitEvent({ type: MonsterBuffEvents.AttackTrue });
-        this.monster.emitAttackEvent(this.monster.damage, this.monster.target);
+        this.monster.emitAttackEvent(this.monster.damage, target);
 
-        300 / Math.hypot(target.x - origin.x, target.y - origin.y);
+        300 / Math.hypot(targetPos.x - origin.x, targetPos.y - origin.y);
     }
 }
 
@@ -1392,7 +1399,7 @@ class MonsterHealthCombat {
  * 每帧评估当前意图并解析为 MonsterState 转换：
  * 1. `updateTarget` — 选择最近玩家作为目标。
  * 2. `evaluateIntent` — 根据距离和冷却判断意图（Idle/Chase/Attack/Skill）。
- * 3. `resolveState` — 将意图转化为实际状态，考虑占用锁和技能队列。
+ * 3. `resolveState` — 将意图转化为实际状态，考虑占用锁和当前待执行技能。
  *
  * @navigationTitle 怪物 AI 决策
  */
@@ -1488,7 +1495,9 @@ const SkillEvents = {
     Spawn: "OnSpawn",
     Die: "OnDie",
     AttackTrue: "OnAttackTrue",
-    Tick: "OnTick"};
+    Tick: "OnTick",
+    Input: "OnInput",
+};
 
 /** 与技能位移交互兼容的移动请求类型。 */
 const MovementRequestType = {
@@ -1543,10 +1552,10 @@ const DEFAULT_WORLD_GRAVITY = 800;
  */
 /*
 技能分类规则（唯一权威）：
-  有 animation 字段（非 null/undefined）= 主动技能：canTrigger 通过后进入请求队列，
+  有 animation 字段（非 null/undefined）= 主动技能：canTrigger 通过后占用当前待执行槽，
     Monster 进入 SKILL 状态，skills_manager 先播放 animation 动作，再调用 trigger()。
   无 animation 字段（null）           = 被动技能：在 canTrigger 内直接执行业务并返回 false，
-    不进入请求队列，不触发状态切换。
+    不占用待执行槽，不触发状态切换。
 
 冷却语义：
   cooldown > 0  → 间隔触发（秒）
@@ -1556,7 +1565,7 @@ const DEFAULT_WORLD_GRAVITY = 800;
 
 实例 id 语义：
   skill.id  = 运行时实例 id，由 MonsterSkillsManager.addSkill 按添加顺序分配（0,1,2,...）。
-             同一怪物上 id 越小，优先级越高（主动技能请求队列的排序依据）。
+             同一怪物上 id 越小，优先级越高；同一轮事件结算时，先遇到可触发的技能会直接截断后续主动技能。
   skill.typeId = 技能类型标识，对应 SkillFactory 注册键（如 "corestats"），子类在构造函数里设置。
              同一怪物可同时拥有多个相同 typeId 的技能实例，各实例独立运行互不干扰。
 
@@ -1601,7 +1610,7 @@ MonsterEvents.ModelRemove  → "OnModelRemove"
  * 技能基类。所有具体技能继承此类，并在子类中按宿主类型重写专用入口。
  *
  * 技能分为两大类：
- * - **主动技能**（`animation` 非 null）— `canTrigger` 返回 true 后入队，
+ * - **主动技能**（`animation` 非 null）— `canTrigger` 返回 true 后占用当前待执行槽，
  *   Monster 进入 SKILL 状态，播放动作后调用 `trigger()`。
  * - **被动技能**（`animation` 为 null）— 在 `canTrigger` 内直接执行并返回 false。
  *
@@ -1654,8 +1663,8 @@ class SkillTemplate
     }
     /**
      * 这个事件能否执行。
-     * - 有 animation（isActive=true）：做条件判断通过后返回 true，由 emitEvent 调用 request 入队。
-     * - 无 animation（isActive=false）：在此处直接执行业务逻辑并返回 false，不入队不切换状态。
+    * - 有 animation（isActive=true）：做条件判断通过后返回 true，由 emitEvent 调用 request 锁定当前待执行技能。
+    * - 无 animation（isActive=false）：在此处直接执行业务逻辑并返回 false，不占用待执行槽也不切换状态。
      * @param {any} event
      */
     canTrigger(event) {
@@ -1668,7 +1677,7 @@ class SkillTemplate
      * 仅由 isActive()=true 的技能在 canTrigger 返回 true 后被 emitEvent 调用。
      */
     _request(){
-        if(this.player)this.player.requestSkill(this);
+        //if(this.player)this.player.requestSkill(this);
         if(this.monster)this.monster.requestSkill(this);
     }
     /**
@@ -1838,14 +1847,13 @@ class PounceSkill extends SkillTemplate {
         const monster = this.monster;
         if (!monster) return;
 
+        const model = monster.model;
         const target = monster.target;
-        if (!target) return;
+        if (!model?.IsValid() || !target) return;
 
-        this.running = true;
-        monster.animationOccupation.setOccupation("pounce");
-
-        const start = monster.model.GetAbsOrigin();
+        const start = model.GetAbsOrigin();
         const targetPos = target.GetAbsOrigin();
+
         const duration = this._duration > 0 ? this._duration : 1;
         const velocity = {
             x: (targetPos.x - start.x) / duration,
@@ -1853,9 +1861,12 @@ class PounceSkill extends SkillTemplate {
             z: (targetPos.z - start.z + 0.5 * DEFAULT_WORLD_GRAVITY * duration * duration) / duration,
         };
 
-        monster.submitMovementEvent({
+        monster.animation.setOccupation("pounce");
+        this.running = true;
+
+        const submitted = monster.submitMovementEvent({
             type: MovementRequestType.Move,
-            entity: monster.model,
+            entity: model,
             priority: MovementPriority.Skill,
             targetPosition: targetPos,
             usePathRefresh: false,
@@ -1863,6 +1874,12 @@ class PounceSkill extends SkillTemplate {
             Mode: "air",
             Velocity: velocity,
         });
+
+        if (!submitted) {
+            this.running = false;
+            monster.onOccupationEnd("pounce");
+            return;
+        }
 
         this._markTriggered();
     }
@@ -1943,7 +1960,7 @@ class DoubleAttackSkill extends SkillTemplate {
         if (!this.events.includes(event.type)) return false;
         if (!this._cooldownReady()) return false;
         if (this.monster && !this.monster.target) return false;
-        if (this.player && !this.player.target)return false;
+        if (!this.monster)return false;
         if (this.animation === null) {
             this.trigger();
             return false;
@@ -2581,12 +2598,66 @@ class LaserBeamSkill extends SkillTemplate {
     }
 }
 
+class PlayerPulseSkill extends SkillTemplate {
+    /**
+     * @param {import("../../player/player/player").Player | null} player
+     * @param {import("../../monster/monster/monster").Monster | null} monster
+     * @param {string} typeId
+     * @param {number} id
+     * @param {{
+     *   inputKey?: string;
+     *   cooldown?: number;
+     *   heal?: number;
+     *   armor?: number;
+     *   events?: string[];
+     * }} [params]
+     */
+    constructor(player, monster, typeId, id, params = {}) {
+        super(player, monster, typeId, id, params);
+        this.animation = null;
+        this.events = params.events ?? [SkillEvents.Input];
+        this.inputKey = params.inputKey ?? "InspectWeapon";
+        this.heal = params.heal ?? 0;
+        this.armor = params.armor ?? 0;
+    }
+
+    /**
+     * @param {{ type: string, key?: string }} event
+     * @returns {boolean}
+     */
+    canTrigger(event) {
+        if (!this.player || this.monster) return false;
+        if (!this.events.includes(event.type)) return false;
+        if (event.type === SkillEvents.Input && event.key !== this.inputKey) return false;
+        if (!this._cooldownReady()) return false;
+
+        this.trigger();
+        return false;
+    }
+
+    trigger() {
+        const player = this.player;
+        if (!player || this.monster) return;
+
+        let applied = false;
+        if (this.heal > 0) {
+            applied = player.heal(this.heal) || applied;
+        }
+        if (this.armor > 0) {
+            applied = player.giveArmor(this.armor) || applied;
+        }
+
+        if (!applied) return;
+        this._markTriggered();
+    }
+}
+
 /**
  * @module 怪物系统/技能工厂
  */
 /*
 技能分类规则（唯一权威）：
-  有 animation 参数（非 null）= 有动作：canTrigger 返回 true 后 request 入队，
+  有 animation 参数（非 null）= 有动作：canTrigger 返回 true 后 request 占用当前待执行槽，
     Monster 进入 SKILL 状态，管理器先播放 animation，再调用 trigger()。
   无 animation（null）       = 无动作：canTrigger 内直接执行业务并返回 false。
   cooldown = -1              = 一次性：仅首次触发后永久失效。默认为 -1。
@@ -2642,13 +2713,18 @@ laserbeam   发射激光（默认 OnTick，distance 内判定，trigger 待实�
 spawn       事件触发产卵（默认 OnDie）
   { events?, event?(旧单值兄容), count?, typeName?, cooldown?,
     maxSummons?, radiusMin?, radiusMax?, tries?, animation? }
+
+player_guard    玩家守护脉冲（InspectWeapon 触发，加护甲）
+player_mend     玩家治疗脉冲（InspectWeapon 触发，回血）
+player_vanguard 玩家先锋脉冲（InspectWeapon 触发，回血+护甲）
  */
 /**
  * 技能工厂。根据 typeId 创建对应的技能实例。
  *
  * 当前支持的 typeId：
  * corestats、pounce、initanim、doubleattack、powerattack、
- * poisongas、spawn、shield、speedboost、throwstone、laserbeam。
+ * poisongas、spawn、shield、speedboost、throwstone、laserbeam、
+ * player_guard、player_mend、player_vanguard。
  *
  * 所有技能均支持 `params.events`、`params.animation`、`params.cooldown`。
  * 详细参数见各技能类的 JSDoc。
@@ -2687,6 +2763,12 @@ const SkillFactory = {
         return new ThrowStoneSkill(player, monster,id, params);
             case "laserbeam":
         return new LaserBeamSkill(player, monster,id, params);
+            case "player_guard":
+          return new PlayerPulseSkill(player, monster, "player_guard", id, { inputKey: "InspectWeapon", cooldown: 8, armor: 25, ...params });
+            case "player_mend":
+          return new PlayerPulseSkill(player, monster, "player_mend", id, { inputKey: "InspectWeapon", cooldown: 8, heal: 35, ...params });
+            case "player_vanguard":
+          return new PlayerPulseSkill(player, monster, "player_vanguard", id, { inputKey: "InspectWeapon", cooldown: 10, heal: 20, armor: 15, ...params });
             default:
                 return null;
         } 
@@ -2695,44 +2777,14 @@ const SkillFactory = {
 
 /** @typedef {import("../../../skill/skill_template").SkillTemplate & { animation?: string | null }} MonsterSkill */
 
-class SkillRequestQueue {
-    constructor() {
-        /** @type {MonsterSkill[]} */
-        this._items = [];
-    }
-
-    /**
-     * @param {MonsterSkill} skill
-     */
-    push(skill) {
-        if (this._items.includes(skill)) return;
-        this._items.push(skill);
-        this._items.sort((a, b) => a.id - b.id);
-    }
-
-    has() {
-        return this._items.length > 0;
-    }
-
-    /**
-     * @returns {MonsterSkill | undefined}
-     */
-    pop() {
-        return this._items.shift();
-    }
-
-    clear() {
-        this._items.length = 0;
-    }
-}
-
 class MonsterSkillsManager {
     /**
      * @param {import("../monster").Monster} monster
      */
     constructor(monster) {
         this.monster = monster;
-        this._queue = new SkillRequestQueue();
+        /** @type {MonsterSkill | null} */
+        this._requestedSkill = null;
     }
 
     /**
@@ -2764,6 +2816,7 @@ class MonsterSkillsManager {
         for (const skill of this.monster.skills) {
             if (!skill.canTrigger(event)) continue;
             skill._request();
+            break;
         }
     }
 
@@ -2779,27 +2832,30 @@ class MonsterSkillsManager {
      */
     requestSkill(skill) {
         if (this.monster.movementStateSnapshot.mode === "ladder") {
-            this._queue.clear();
-            return;
+            this._requestedSkill = null;
+            return false;
         }
-        this._queue.push(skill);
+        if (this._requestedSkill) return false;
+        this._requestedSkill = skill;
+        return true;
     }
 
     hasRequestedSkill() {
         if (this.monster.movementStateSnapshot.mode === "ladder") {
-            this._queue.clear();
+            this._requestedSkill = null;
             return false;
         }
-        return this._queue.has();
+        return this._requestedSkill !== null;
     }
 
     triggerRequestedSkill() {
         if (this.monster.movementStateSnapshot.mode === "ladder") {
-            this._queue.clear();
+            this._requestedSkill = null;
             return;
         }
 
-        const skill = this._queue.pop();
+        const skill = this._requestedSkill;
+        this._requestedSkill = null;
         if (!skill) return;
 
         if (skill.animation) this.monster.animation.play(skill.animation);
@@ -2857,7 +2913,7 @@ class MonsterMovementPathAdapter {
      * 激活追击。进入 CHASE / ATTACK 等需要持续移动的状态时调用。
      */
     activate() {
-        if (!this.monster.target) return;
+        if (!this._getMovementEntity() || !this.monster.target) return;
         this._active = true;
         this._submitChase();
     }
@@ -2867,10 +2923,12 @@ class MonsterMovementPathAdapter {
      */
     deactivate() {
         if (!this._active) return;
+        const entity = this._getMovementEntity();
         this._active = false;
+        if (!entity) return;
         this.monster.submitMovementEvent({
             type: MovementRequestType$1.Stop,
-            entity: this.monster.model,
+            entity,
             priority: MovementPriority$1.StateChange,
             clearPath: false,
         });
@@ -2900,15 +2958,26 @@ class MonsterMovementPathAdapter {
 
     /** 内部：提交一次 Chase Move 请求。 */
     _submitChase() {
+        const entity = this._getMovementEntity();
+        const target = this.monster.target;
+        if (!entity || !target) return;
+
         this.monster.submitMovementEvent({
             type: MovementRequestType$1.Move,
-            entity: this.monster.model,
+            entity,
             priority: MovementPriority$1.Chase,
-            targetEntity: this.monster.target??undefined,
+            targetEntity: target,
             usePathRefresh: !this.monster.isOccupied(),
             useNPCSeparation: true,
             Mode: this._defaultMode,
         });
+    }
+
+    /** @returns {import("cs_script/point_script").Entity | null} */
+    _getMovementEntity() {
+        const entity = this.monster.model;
+        if (!entity?.IsValid()) return null;
+        return entity;
     }
 
     /** 获取注册用的默认模式。 */
@@ -3100,213 +3169,6 @@ class MonsterAnimator {
         Instance.EntFireAtTarget({target:this.model,input:"SetAnimation",value:anim});
         this.locked=true;
         return anim;
-    }
-}
-
-/**
- * @typedef {object} MonsterBuffRuntime
- * @property {number} buffId
- * @property {string} typeId
- * @property {Record<string, any>} params
- * @property {string | null} groupKey
- * @property {Record<string, any> | null} source
- * @property {Record<string, any> | null} context
- */
-
-
-class MonsterBuffManager {
-    /** @param {import("../monster").Monster} monster */
-    constructor(monster) {
-        this.monster = monster;
-        /**
-         * key 为 buff 类型。
-         * value 为 buff id。
-         * @type {Map<string, number>}
-         */
-        this.buffMap = new Map();
-        /** @type {Map<string, MonsterBuffRuntime>} */
-        this.buffStateMap = new Map();
-        /** @type {Array<() => boolean>} */
-        this._unsubscribers = [
-            eventBus.on(event.Buff.Out.OnBuffRemoved, (/** @type {import("../../../buff/buff_const").OnBuffRemoved} */ payload) => {
-                this._removeRuntimeByBuffId(payload.buffId);
-            }),
-        ];
-    }
-
-    /**
-     * 添加 Buff。成功添加返回 true，已存在同类型 Buff 或添加失败返回 false。
-     * @param {string} typeId
-     * @param {Record<string, any>} params
-     * @param {Record<string, any> | null} [source]
-     * @param {Record<string, any> | null} [context]
-     */
-    addBuff(typeId, params = {}, source = null, context = null) {
-        if(this.buffMap.has(typeId))return false;
-        const normalizedParams = { ...(params ?? {}) };
-        /** @type {import("../../../buff/buff_const").BuffAddRequest} */
-        const addRequest = {
-            configid: typeId,
-            target: this.monster,
-            targetType: "monster",
-            result: -1,
-        };
-        eventBus.emit(event.Buff.In.BuffAddRequest, addRequest);
-        if(addRequest.result <= 0)return false;
-        this.buffMap.set(typeId, addRequest.result);
-        this.buffStateMap.set(typeId, {
-            buffId: addRequest.result,
-            typeId,
-            params: normalizedParams,
-            groupKey: typeof normalizedParams.groupKey === "string" ? normalizedParams.groupKey : null,
-            source,
-            context,
-        });
-        return true;
-    }
-
-    /**
-     * 刷新 Buff。成功刷新返回 true，未找到对应类型 Buff 自动添加，刷新失败返回 false。
-     * @param {string} typeId
-     * @param {Record<string, any>} params
-     */
-    refreshBuff(typeId, params) {
-        const id=this.buffMap.get(typeId);
-        if(id == null)return this.addBuff(typeId, params);
-        /** @type {import("../../../buff/buff_const").BuffRefreshRequest} */
-        const refreshRequest = {
-            buffId: id,
-            result: false,
-        };
-        eventBus.emit(event.Buff.In.BuffRefreshRequest, refreshRequest);
-        if(!refreshRequest.result)return false;
-        const runtime = this.buffStateMap.get(typeId);
-        if (runtime) {
-            runtime.params = { ...(params ?? runtime.params) };
-            runtime.groupKey = typeof runtime.params.groupKey === "string" ? runtime.params.groupKey : null;
-        }
-        return true;
-    }
-
-    /**
-     * @returns {MonsterBuffRuntime[]}
-     */
-    getAllBuffs() {
-        return Array.from(this.buffStateMap.values());
-    }
-
-    /**
-     * @param {string} typeId
-     * @returns {boolean}
-     */
-    hasBuff(typeId) {
-        return this.buffMap.has(typeId);
-    }
-
-    recomputeModifiers() {
-        this.emitEvent("OnRecompute", { recompute: true });
-    }
-
-    /**
-     * @param {number} dt
-     * @param {import("cs_script/point_script").Entity[]} [allmpos]
-     */
-    tick(dt, allmpos = []) {
-        this.emitEvent(MonsterBuffEvents.Tick, { dt, allmpos });
-    }
-
-    /**
-     * @param {{ damage: number, attacker: import("cs_script/point_script").CSPlayerPawn | null, source: any, reason?: string }} ctx
-     */
-    onBeforeDamageTaken(ctx) {
-        this.emitEvent(MonsterBuffEvents.BeforeTakeDamage, ctx);
-    }
-
-    /**
-     * @param {{ damage: number, attacker: import("cs_script/point_script").CSPlayerPawn | null, source: any, reason?: string }} ctx
-     */
-    onAfterDamageTaken(ctx) {
-        this.emitEvent(MonsterBuffEvents.TakeDamage, ctx);
-    }
-
-    /**
-     * @param {number} prevState
-     * @param {number} nextState
-     */
-    onStateChange(prevState, nextState) {
-        this.emitEvent("OnStateChange", { oldState: prevState, nextState });
-    }
-
-    /**
-     * @param {string | ((buff: MonsterBuffRuntime) => boolean)} typeIdOrFilter
-     * @returns {boolean}
-     */
-    removeBuff(typeIdOrFilter) {
-        if (typeof typeIdOrFilter === "string") {
-            return this._removeBuffByTypeId(typeIdOrFilter);
-        }
-
-        let removed = false;
-        for (const buff of this.getAllBuffs()) {
-            if (!typeIdOrFilter(buff)) continue;
-            removed = this._removeBuffByTypeId(buff.typeId) || removed;
-        }
-        return removed;
-    }
-
-    clearAll() {
-        for(const [typeId] of this.buffMap.entries()){
-            this._removeBuffByTypeId(typeId);
-        }
-    }
-    /**
-     * @param {string} eventName
-     * @param {any} params 
-     */
-    emitEvent(eventName,params) {
-        for(const [, id] of this.buffMap.entries()){
-            /** @type {import("../../../buff/buff_const").BuffEmitRequest} */
-            const emitRequest = {
-                buffId: id,
-                eventName,
-                params,
-                result: { result: false },
-            };
-            eventBus.emit(event.Buff.In.BuffEmitRequest, emitRequest);
-        }
-    }
-
-    /**
-     * @param {string} typeId
-     * @returns {boolean}
-     */
-    _removeBuffByTypeId(typeId) {
-        const id = this.buffMap.get(typeId);
-        if (id == null) return false;
-
-        /** @type {import("../../../buff/buff_const").BuffRemoveRequest} */
-        const removeRequest = {
-            buffId: id,
-            result: false,
-        };
-        eventBus.emit(event.Buff.In.BuffRemoveRequest, removeRequest);
-        if(!removeRequest.result)return false;
-
-        this.buffMap.delete(typeId);
-        this.buffStateMap.delete(typeId);
-        return true;
-    }
-
-    /**
-     * @param {number} buffId
-     */
-    _removeRuntimeByBuffId(buffId) {
-        for (const [typeId, id] of this.buffMap.entries()) {
-            if (id !== buffId) continue;
-            this.buffMap.delete(typeId);
-            this.buffStateMap.delete(typeId);
-            break;
-        }
     }
 }
 
@@ -3570,10 +3432,23 @@ class Monster {
 
         this.entityBridge = new MonsterEntityBridge(this);
         this.healthCombat = new MonsterHealthCombat(this);
-        this.buffManager = new MonsterBuffManager(this);
         this.brainState = new MonsterBrainState(this);
         this.skillsManager = new MonsterSkillsManager(this);
         this.movementPath = new MonsterMovementPathAdapter(this);
+        /**
+         * key 为 buff 类型。
+         * value 为 buff id。
+         * @type {Map<string, number>}
+         */
+        this.buffMap = new Map();
+        /** @type {Map<string, MonsterBuffRuntime>} */
+        this.buffStateMap = new Map();
+        /** @type {Array<() => boolean>} */
+        this._buffUnsubscribers = [
+            eventBus.on(event.Buff.Out.OnBuffRemoved, (/** @type {import("../../buff/buff_const").OnBuffRemoved} */ payload) => {
+                this._removeRuntimeByBuffId(payload.buffId);
+            }),
+        ];
 
         this.initEntities(position, typeConfig);
         this.animation = new MonsterAnimator(this, this.model, typeConfig.animations);
@@ -3595,7 +3470,7 @@ class Monster {
         this.initSkills(typeConfig.skill_pool);
         this.movementPath.init(typeConfig);
         this.animation.init(typeConfig.animations);
-        this.buffManager.recomputeModifiers();
+        this.emitBuffEvent("OnRecompute", { recompute: true });
     }
 
     init() {
@@ -3642,7 +3517,53 @@ class Monster {
      * @returns {boolean}
      */
     addBuff(typeId, params = {}, source = null, context = null) {
-        return this.buffManager.addBuff(typeId, params, source, context);
+        if (this.buffMap.has(typeId)) return false;
+        const normalizedParams = { ...(params ?? {}) };
+        /** @type {import("../../buff/buff_const").BuffAddRequest} */
+        const addRequest = {
+            configid: typeId,
+            target: this,
+            targetType: "monster",
+            result: -1,
+        };
+        eventBus.emit(event.Buff.In.BuffAddRequest, addRequest);
+        if (addRequest.result <= 0) return false;
+
+        this.buffMap.set(typeId, addRequest.result);
+        this.buffStateMap.set(typeId, {
+            buffId: addRequest.result,
+            typeId,
+            params: normalizedParams,
+            groupKey: typeof normalizedParams.groupKey === "string" ? normalizedParams.groupKey : null,
+            source,
+            context,
+        });
+        return true;
+    }
+
+    /**
+     * @param {string} typeId
+     * @param {Record<string, any>} [params]
+     * @returns {boolean}
+     */
+    refreshBuff(typeId, params = {}) {
+        const id = this.buffMap.get(typeId);
+        if (id == null) return this.addBuff(typeId, params);
+
+        /** @type {import("../../buff/buff_const").BuffRefreshRequest} */
+        const refreshRequest = {
+            buffId: id,
+            result: false,
+        };
+        eventBus.emit(event.Buff.In.BuffRefreshRequest, refreshRequest);
+        if (!refreshRequest.result) return false;
+
+        const runtime = this.buffStateMap.get(typeId);
+        if (runtime) {
+            runtime.params = { ...(params ?? runtime.params) };
+            runtime.groupKey = typeof runtime.params.groupKey === "string" ? runtime.params.groupKey : null;
+        }
+        return true;
     }
 
     /**
@@ -3650,7 +3571,16 @@ class Monster {
      * @returns {boolean}
      */
     removeBuff(typeIdOrFilter) {
-        return this.buffManager.removeBuff(typeIdOrFilter);
+        if (typeof typeIdOrFilter === "string") {
+            return this._removeBuffByTypeId(typeIdOrFilter);
+        }
+
+        let removed = false;
+        for (const buff of this.getAllBuffs()) {
+            if (!typeIdOrFilter(buff)) continue;
+            removed = this._removeBuffByTypeId(buff.typeId) || removed;
+        }
+        return removed;
     }
 
     /**
@@ -3658,14 +3588,70 @@ class Monster {
      * @returns {boolean}
      */
     hasBuff(typeId) {
-        return this.buffManager.hasBuff(typeId);
+        return this.buffMap.has(typeId);
     }
 
     /**
      * @returns {MonsterBuffRuntime[]}
      */
     getAllBuffs() {
-        return this.buffManager.getAllBuffs();
+        return Array.from(this.buffStateMap.values());
+    }
+
+    clearBuffs() {
+        for (const [typeId] of this.buffMap.entries()) {
+            this._removeBuffByTypeId(typeId);
+        }
+    }
+
+    /**
+     * @param {string} eventName
+     * @param {any} params
+     */
+    emitBuffEvent(eventName, params) {
+        for (const id of this.buffMap.values()) {
+            /** @type {import("../../buff/buff_const").BuffEmitRequest} */
+            const emitRequest = {
+                buffId: id,
+                eventName,
+                params,
+                result: { result: false },
+            };
+            eventBus.emit(event.Buff.In.BuffEmitRequest, emitRequest);
+        }
+    }
+
+    /**
+     * @param {string} typeId
+     * @returns {boolean}
+     */
+    _removeBuffByTypeId(typeId) {
+        const id = this.buffMap.get(typeId);
+        if (id == null) return false;
+
+        /** @type {import("../../buff/buff_const").BuffRemoveRequest} */
+        const removeRequest = {
+            buffId: id,
+            result: false,
+        };
+        eventBus.emit(event.Buff.In.BuffRemoveRequest, removeRequest);
+        if (!removeRequest.result) return false;
+
+        this.buffMap.delete(typeId);
+        this.buffStateMap.delete(typeId);
+        return true;
+    }
+
+    /**
+     * @param {number} buffId
+     */
+    _removeRuntimeByBuffId(buffId) {
+        for (const [typeId, id] of this.buffMap.entries()) {
+            if (id !== buffId) continue;
+            this.buffMap.delete(typeId);
+            this.buffStateMap.delete(typeId);
+            break;
+        }
     }
 
     /**
@@ -3743,7 +3729,7 @@ class Monster {
         }
 
         if (dt > 0) {
-            this.buffManager.tick(dt, allmpos);
+            this.emitBuffEvent(MonsterBuffEvents.Tick, { dt, allmpos });
         }
         if (this.state === MonsterState.DEAD) return;
 
@@ -3818,7 +3804,7 @@ class Monster {
 
         const prevState = this.state;
         this.state = nextState;
-        this.buffManager.onStateChange(prevState, nextState);
+        this.emitBuffEvent("OnStateChange", { oldState: prevState, nextState });
         this.animation.enter(nextState);
 
         if (nextState === MonsterState.CHASE || nextState === MonsterState.ATTACK) {
@@ -3844,6 +3830,7 @@ class Monster {
      * @returns {number}
      */
     distanceTosq(ent) {
+        if(!this.model)return Infinity;
         const a = this.model.GetAbsOrigin();
         const b = ent.GetAbsOrigin();
         return vec$1.lengthsq(a, b);
@@ -4199,6 +4186,70 @@ const PlayerState = {
     DEAD:         5,
     /** 重生中 */
     RESPAWNING:   6};
+
+/**
+ * 玩家职业配置。
+ *
+ * @typedef {object} PlayerProfessionConfig
+ * @property {string} id
+ * @property {string} displayName
+ * @property {string | null} skillTypeId
+ * @property {Record<string, any>} [skillParams]
+ */
+
+/** 默认职业。 */
+const DEFAULT_PLAYER_PROFESSION = "guardian";
+
+/** @type {Record<string, PlayerProfessionConfig>} */
+const PLAYER_PROFESSIONS = {
+    guardian: {
+        id: "guardian",
+        displayName: "守护者",
+        skillTypeId: "player_guard",
+        skillParams: {
+            inputKey: "InspectWeapon",
+            cooldown: 8,
+            armor: 25,
+        },
+    },
+    medic: {
+        id: "medic",
+        displayName: "医疗兵",
+        skillTypeId: "player_mend",
+        skillParams: {
+            inputKey: "InspectWeapon",
+            cooldown: 8,
+            heal: 35,
+        },
+    },
+    vanguard: {
+        id: "vanguard",
+        displayName: "先锋",
+        skillTypeId: "player_vanguard",
+        skillParams: {
+            inputKey: "InspectWeapon",
+            cooldown: 10,
+            heal: 20,
+            armor: 15,
+        },
+    },
+};
+
+/**
+ * @param {string | null | undefined} professionId
+ * @returns {PlayerProfessionConfig | null}
+ */
+function getPlayerProfessionConfig(professionId) {
+    if (!professionId) return null;
+    return PLAYER_PROFESSIONS[professionId] ?? null;
+}
+
+/**
+ * @returns {string[]}
+ */
+function getPlayerProfessionIds() {
+    return Object.keys(PLAYER_PROFESSIONS);
+}
 
 /**
  * 单个等级的配置。
@@ -4887,6 +4938,8 @@ class PlayerHealthCombat {
 
         // 清理临时战斗 buff
         this.player.emitBuffEvent(PlayerBuffEvents.Die, { killer });
+        this.player.emitSkillEvent(SkillEvents.Die, { killer });
+        this.player.stopInputTracking();
 
         // 切换到观察者
         this.player.entityBridge.joinTeam(1);
@@ -4960,6 +5013,9 @@ class PlayerLifecycle {
         this.player.entityBridge.syncArmor(this.player.stats.armor);
 
         this.player.applyStateTransition(nextState);
+        this.player.startInputTracking(pawn);
+        this.player.ensureProfessionSkillBound();
+        this.player.emitSkillEvent(SkillEvents.Spawn, { state: nextState });
 
         // 给予初始装备
         this._giveStartingEquipment();
@@ -4985,6 +5041,8 @@ class PlayerLifecycle {
             this.player.applyStateTransition(PlayerState.RESPAWNING);
             this.respawn(undefined, undefined, respawnState);
         } else {
+            this.player.startInputTracking(newPawn);
+            this.player.ensureProfessionSkillBound();
             // 非死亡状态的重置（换队等），保持原脚本生命值
             if (this.player.stats.health <= 0) {
                 this.player.healthCombat.die(null);
@@ -5012,6 +5070,9 @@ class PlayerLifecycle {
         this._giveStartingEquipment();
 
         this.player.applyStateTransition(nextState);
+        this.player.startInputTracking(this.player.entityBridge.pawn);
+        this.player.ensureProfessionSkillBound();
+        this.player.emitSkillEvent(SkillEvents.Spawn, { state: nextState });
 
         Instance.Msg(`玩家 ${this.player.entityBridge.getPlayerName()} 已重生 (HP: ${stats.health})`);
     }
@@ -5032,6 +5093,8 @@ class PlayerLifecycle {
      * 断开连接。
      */
     disconnect() {
+        this.player.stopInputTracking();
+        this.player.clearSkillBinding(true);
         this.player.clearBuffs();
         this.player.entityBridge.disconnect();
         this.player.applyStateTransition(PlayerState.DISCONNECTED);
@@ -5048,6 +5111,9 @@ class PlayerLifecycle {
         this.player.entityBridge.syncHealth(stats.health);
         this.player.entityBridge.syncArmor(stats.armor);
         this.player.applyStateTransition(PlayerState.PREPARING);
+        this.player.rebindProfessionSkill();
+        this.player.startInputTracking(this.player.entityBridge.pawn);
+        this.player.emitSkillEvent(SkillEvents.Spawn, { state: PlayerState.PREPARING });
         this._giveStartingEquipment();
     }
 
@@ -5110,6 +5176,12 @@ class Player {
          * @type {Map<string, number>}
          */
         this.buffMap = new Map();
+        /** @type {string} */
+        this.professionId = DEFAULT_PLAYER_PROFESSION;
+        /** @type {number | null} */
+        this.skillId = null;
+        /** @type {string | null} */
+        this.skillTypeId = null;
     }
 
     // ——— 生命周期入口（委托给 Lifecycle） ———
@@ -5325,6 +5397,178 @@ class Player {
         }
     }
 
+    /**
+     * @param {import("../../input/input_const").InputKey} key
+     * @returns {boolean}
+     */
+    handleInputKey(key) {
+        if (this.state !== PlayerState.ALIVE) return false;
+        return this.emitSkillEvent(SkillEvents.Input, { key });
+    }
+
+    /**
+     * @param {string} eventName
+     * @param {Record<string, any>} [params]
+     * @returns {boolean}
+     */
+    emitSkillEvent(eventName, params = {}) {
+        if (this.skillId == null) return false;
+
+        /** @type {import("../../skill/skill_const").SkillEmitRequest} */
+        const emitRequest = {
+            skillId: this.skillId,
+            eventName,
+            params,
+            target: this,
+            result: false,
+        };
+        eventBus.emit(event.Skill.In.SkillEmitRequest, emitRequest);
+        return emitRequest.result;
+    }
+
+    /**
+     * @param {CSPlayerPawn | null} [pawn]
+     * @returns {boolean}
+     */
+    startInputTracking(pawn = this.entityBridge.pawn) {
+        if (!(pawn instanceof CSPlayerPawn)) return false;
+
+        /** @type {import("../../input/input_const").StartRequest} */
+        const startRequest = {
+            slot: this.slot,
+            pawn,
+            result: false,
+        };
+        eventBus.emit(event.Input.In.StartRequest, startRequest);
+        return startRequest.result;
+    }
+
+    /**
+     * @returns {boolean}
+     */
+    stopInputTracking() {
+        /** @type {import("../../input/input_const").StopRequest} */
+        const stopRequest = {
+            slot: this.slot,
+            result: false,
+        };
+        eventBus.emit(event.Input.In.StopRequest, stopRequest);
+        return stopRequest.result;
+    }
+
+    /**
+     * @param {string} professionId
+     * @param {{ forceRecreate?: boolean; allowMissingPrevious?: boolean }} [options]
+     * @returns {boolean}
+     */
+    setProfession(professionId, options = {}) {
+        const config = getPlayerProfessionConfig(professionId);
+        if (!config) return false;
+
+        const forceRecreate = options.forceRecreate ?? false;
+        const allowMissingPrevious = options.allowMissingPrevious ?? false;
+        if (!forceRecreate && this.professionId === professionId && this.skillId != null) {
+            return true;
+        }
+
+        let nextSkillId = null;
+        if (config.skillTypeId) {
+            nextSkillId = this._addSkillFromProfession(config);
+            if (nextSkillId == null) return false;
+        }
+
+        const previousSkillId = this.skillId;
+        if (previousSkillId != null) {
+            const removed = this._removeSkillById(previousSkillId);
+            if (!removed && !allowMissingPrevious) {
+                if (nextSkillId != null) {
+                    this._removeSkillById(nextSkillId);
+                }
+                return false;
+            }
+        }
+
+        this.professionId = professionId;
+        this.skillId = nextSkillId;
+        this.skillTypeId = config.skillTypeId ?? null;
+        return true;
+    }
+
+    /**
+     * @returns {boolean}
+     */
+    ensureProfessionSkillBound() {
+        return this.setProfession(this.professionId ?? DEFAULT_PLAYER_PROFESSION, {
+            forceRecreate: this.skillId == null,
+            allowMissingPrevious: true,
+        });
+    }
+
+    /**
+     * @returns {boolean}
+     */
+    rebindProfessionSkill() {
+        return this.setProfession(this.professionId ?? DEFAULT_PLAYER_PROFESSION, {
+            forceRecreate: true,
+            allowMissingPrevious: true,
+        });
+    }
+
+    /**
+     * @param {boolean} [allowMissing=false]
+     * @returns {boolean}
+     */
+    clearSkillBinding(allowMissing = false) {
+        if (this.skillId == null) {
+            this.skillTypeId = null;
+            return true;
+        }
+
+        const currentSkillId = this.skillId;
+        const removed = this._removeSkillById(currentSkillId);
+        if (!removed && !allowMissing) return false;
+
+        this.skillId = null;
+        this.skillTypeId = null;
+        return true;
+    }
+
+    /**
+     * @param {import("../player_const").PlayerProfessionConfig} config
+     * @returns {number | null}
+     */
+    _addSkillFromProfession(config) {
+        if (!config.skillTypeId) return null;
+
+        /** @type {import("../../skill/skill_const").SkillAddRequest} */
+        const addRequest = {
+            target: this,
+            typeId: config.skillTypeId,
+            params: {
+                ...(config.skillParams ?? {}),
+                professionId: config.id,
+            },
+            result: null,
+        };
+        eventBus.emit(event.Skill.In.SkillAddRequest, addRequest);
+        return addRequest.result;
+    }
+
+    /**
+     * @param {number} skillId
+     * @returns {boolean}
+     */
+    _removeSkillById(skillId) {
+        /** @type {import("../../skill/skill_const").SkillRemoveRequest} */
+        const removeRequest = {
+            skillId,
+            target: this,
+            result: false,
+        };
+        eventBus.emit(event.Skill.In.SkillRemoveRequest, removeRequest);
+        return removeRequest.result;
+    }
+
     // ——— 准备状态 ———
 
     /** @returns {boolean} */
@@ -5383,6 +5627,7 @@ class Player {
 
         // 1. buff 计时 & 过期清理
         this.emitBuffEvent(PlayerBuffEvents.Tick, {});
+        this.emitSkillEvent(SkillEvents.Tick, {});
     }
 
     // ——— 查询 ———
@@ -5690,6 +5935,29 @@ class PlayerManager {
         if (command === "r" || command === "!r") {
             //玩家准备
             this._setPlayerReady(player, true);
+            return;
+        }
+
+        if (command === "profession" || command === "!profession" || command === "class" || command === "!class") {
+            const professionId = parts[1];
+            if (!professionId) {
+                this._adapter.sendMessage(player.slot, `可用职业: ${getPlayerProfessionIds().join(", ")}`);
+                return;
+            }
+
+            const config = getPlayerProfessionConfig(professionId);
+            if (!config) {
+                this._adapter.sendMessage(player.slot, `未知职业 ${professionId}，可用职业: ${getPlayerProfessionIds().join(", ")}`);
+                return;
+            }
+
+            const changed = this.setProfession(player.slot, professionId);
+            this._adapter.sendMessage(
+                player.slot,
+                changed
+                    ? `当前职业已切换为 ${config.displayName} (${config.id})`
+                    : `职业切换失败：${config.displayName} (${config.id})`
+            );
         }
     }
 
@@ -5779,6 +6047,28 @@ class PlayerManager {
         const player = this.players.get(playerSlot);
         if (!player) return amount;
         return player.getAttackDamage(amount);
+    }
+
+    /**
+     * @param {number} playerSlot
+     * @param {string} professionId
+     * @returns {boolean}
+     */
+    setProfession(playerSlot, professionId) {
+        const player = this.players.get(playerSlot);
+        if (!player) return false;
+        return player.setProfession(professionId);
+    }
+
+    /**
+     * @param {number} playerSlot
+     * @param {import("../input/input_const").InputKey} key
+     * @returns {boolean}
+     */
+    handleInput(playerSlot, key) {
+        const player = this.players.get(playerSlot);
+        if (!player) return false;
+        return player.handleInputKey(key);
     }
 
     /**
@@ -6406,9 +6696,6 @@ class ShopSession {
         this.selectedIndex = 0;
         this._lastMessage = "";
         this.state = ShopState.OPEN;
-        /** @type {import("../input/input_const").StartRequest} */
-        const startRequest = { slot: this.slot, pawn, result: false };
-        eventBus.emit(event.Input.In.StartRequest, startRequest);
         this._refreshHud();
         /** @type {import("./shop_const").OnShopOpen} */
         const payload = { slot: this.slot};
@@ -6423,10 +6710,7 @@ class ShopSession {
 
         /** @type {import("../hud/hud_const").HideHudRequest} */
         const hideHudRequest = { slot: this.slot, channel: CHANNAL.SHOP,result:false };
-        /** @type {import("../input/input_const").StopRequest} */
-        const stopRequest = { slot: this.slot, result: false };
         eventBus.emit(event.Hud.In.HideHudRequest, hideHudRequest);
-        eventBus.emit(event.Input.In.StopRequest, stopRequest);
         this.state = ShopState.CLOSED;
         this._pawn = null;
         this._lastMessage = "";
@@ -20189,7 +20473,12 @@ eventBus.on(event.Player.Out.OnAllPlayersReady, () => {
     eventBus.emit(event.Game.In.StartGameRequest, {});
 });
 
-// ——— 3.5 输入 → 商店 ———
+// ——— 3.5 输入 → 玩家技能 / 商店 ———
+
+eventBus.on(event.Input.Out.OnInput, (/** @type {import("./input/input_const").OnInput} */ payload) => {
+    if (payload.key !== "InspectWeapon") return;
+    playerManager.handleInput(payload.slot, payload.key);
+});
 
 // ═══════════════════════════════════════════════
 // 4. 引擎事件注册

@@ -59,6 +59,70 @@ export const PlayerState = {
 };
 
 /**
+ * 玩家职业配置。
+ *
+ * @typedef {object} PlayerProfessionConfig
+ * @property {string} id
+ * @property {string} displayName
+ * @property {string | null} skillTypeId
+ * @property {Record<string, any>} [skillParams]
+ */
+
+/** 默认职业。 */
+export const DEFAULT_PLAYER_PROFESSION = "guardian";
+
+/** @type {Record<string, PlayerProfessionConfig>} */
+export const PLAYER_PROFESSIONS = {
+    guardian: {
+        id: "guardian",
+        displayName: "守护者",
+        skillTypeId: "player_guard",
+        skillParams: {
+            inputKey: "InspectWeapon",
+            cooldown: 8,
+            armor: 25,
+        },
+    },
+    medic: {
+        id: "medic",
+        displayName: "医疗兵",
+        skillTypeId: "player_mend",
+        skillParams: {
+            inputKey: "InspectWeapon",
+            cooldown: 8,
+            heal: 35,
+        },
+    },
+    vanguard: {
+        id: "vanguard",
+        displayName: "先锋",
+        skillTypeId: "player_vanguard",
+        skillParams: {
+            inputKey: "InspectWeapon",
+            cooldown: 10,
+            heal: 20,
+            armor: 15,
+        },
+    },
+};
+
+/**
+ * @param {string | null | undefined} professionId
+ * @returns {PlayerProfessionConfig | null}
+ */
+export function getPlayerProfessionConfig(professionId) {
+    if (!professionId) return null;
+    return PLAYER_PROFESSIONS[professionId] ?? null;
+}
+
+/**
+ * @returns {string[]}
+ */
+export function getPlayerProfessionIds() {
+    return Object.keys(PLAYER_PROFESSIONS);
+}
+
+/**
  * 单个等级的配置。
  *
  * @typedef {object} LevelConfig

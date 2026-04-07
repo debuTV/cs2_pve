@@ -2,6 +2,7 @@
  * @module 玩家系统/玩家/组件/生命周期
  */
 import { Instance } from "cs_script/point_script";
+import { SkillEvents } from "../../../skill/skill_const";
 import { PlayerState } from "../../player_const";
 
 /**
@@ -55,6 +56,9 @@ export class PlayerLifecycle {
         this.player.entityBridge.syncArmor(this.player.stats.armor);
 
         this.player.applyStateTransition(nextState);
+        this.player.startInputTracking(pawn);
+        this.player.ensureProfessionSkillBound();
+        this.player.emitSkillEvent(SkillEvents.Spawn, { state: nextState });
 
         // 给予初始装备
         this._giveStartingEquipment();
@@ -80,6 +84,8 @@ export class PlayerLifecycle {
             this.player.applyStateTransition(PlayerState.RESPAWNING);
             this.respawn(undefined, undefined, respawnState);
         } else {
+            this.player.startInputTracking(newPawn);
+            this.player.ensureProfessionSkillBound();
             // 非死亡状态的重置（换队等），保持原脚本生命值
             if (this.player.stats.health <= 0) {
                 this.player.healthCombat.die(null);
@@ -107,6 +113,9 @@ export class PlayerLifecycle {
         this._giveStartingEquipment();
 
         this.player.applyStateTransition(nextState);
+        this.player.startInputTracking(this.player.entityBridge.pawn);
+        this.player.ensureProfessionSkillBound();
+        this.player.emitSkillEvent(SkillEvents.Spawn, { state: nextState });
 
         Instance.Msg(`玩家 ${this.player.entityBridge.getPlayerName()} 已重生 (HP: ${stats.health})`);
     }
@@ -127,6 +136,8 @@ export class PlayerLifecycle {
      * 断开连接。
      */
     disconnect() {
+        this.player.stopInputTracking();
+        this.player.clearSkillBinding(true);
         this.player.clearBuffs();
         this.player.entityBridge.disconnect();
         this.player.applyStateTransition(PlayerState.DISCONNECTED);
@@ -143,6 +154,9 @@ export class PlayerLifecycle {
         this.player.entityBridge.syncHealth(stats.health);
         this.player.entityBridge.syncArmor(stats.armor);
         this.player.applyStateTransition(PlayerState.PREPARING);
+        this.player.rebindProfessionSkill();
+        this.player.startInputTracking(this.player.entityBridge.pawn);
+        this.player.emitSkillEvent(SkillEvents.Spawn, { state: PlayerState.PREPARING });
         this._giveStartingEquipment();
     }
 

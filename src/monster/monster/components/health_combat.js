@@ -49,11 +49,11 @@ export class MonsterHealthCombat {
             source: meta?.source ?? null,
             reason: meta?.reason,
         };
-        this.monster.buffManager.onBeforeDamageTaken(ctx);
+        this.monster.emitBuffEvent(MonsterBuffEvents.BeforeTakeDamage, ctx);
         amount = ctx.damage;
 
         if (amount <= 0) {
-            this.monster.buffManager.onAfterDamageTaken({ ...ctx, damage: 0 });
+            this.monster.emitBuffEvent(MonsterBuffEvents.TakeDamage, { ...ctx, damage: 0 });
             this.monster.emitEvent({ type: MonsterBuffEvents.TakeDamage, value: 0, health: this.monster.health });
             return false;
         }
@@ -62,7 +62,7 @@ export class MonsterHealthCombat {
         for (const mod of this._damageModifiers) {
             finalAmount = mod(finalAmount);
             if (finalAmount <= 0) {
-                this.monster.buffManager.onAfterDamageTaken({ ...ctx, damage: 0 });
+                this.monster.emitBuffEvent(MonsterBuffEvents.TakeDamage, { ...ctx, damage: 0 });
                 this.monster.emitEvent({ type: MonsterBuffEvents.TakeDamage, value: 0, health: this.monster.health });
                 return false;
             }
@@ -70,7 +70,7 @@ export class MonsterHealthCombat {
 
         const previousHealth = this.monster.health;
         this.monster.health = Math.max(0, Math.min(this.monster.health - finalAmount, this.monster.maxhealth));
-        this.monster.buffManager.onAfterDamageTaken({ ...ctx, damage: finalAmount });
+        this.monster.emitBuffEvent(MonsterBuffEvents.TakeDamage, { ...ctx, damage: finalAmount });
         this.monster.emitEvent({ type: MonsterBuffEvents.TakeDamage, value: finalAmount, health: this.monster.health });
         Instance.Msg(`鎬墿 #${this.monster.id} 鍙楀埌 ${finalAmount} 鐐逛激瀹?(鍘熷:${amount}) (${previousHealth} -> ${this.monster.health})`);
 
@@ -98,8 +98,8 @@ export class MonsterHealthCombat {
 
         const prevState = this.monster.state;
         this.monster.state = MonsterState.DEAD;
-        this.monster.buffManager.onStateChange(prevState, MonsterState.DEAD);
-        this.monster.buffManager.clearAll();
+        this.monster.emitBuffEvent("OnStateChange", { oldState: prevState, nextState: MonsterState.DEAD });
+        this.monster.clearBuffs();
         if (this.monster.model instanceof BaseModelEntity) {
             this.monster.model.Unglow();
         }

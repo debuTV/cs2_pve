@@ -5,7 +5,7 @@ import { CSPlayerController, CSPlayerPawn, Instance } from "cs_script/point_scri
 import { eventBus } from "../eventBus/event_bus";
 import { event } from "../util/definition";
 import { Player } from "./player/player";
-import { PlayerState } from "./player_const";
+import { getPlayerProfessionConfig, getPlayerProfessionIds, PlayerState } from "./player_const";
 
 /**
  * @typedef {object} TP_playerRewardPayload - 玩家奖励分发载荷
@@ -297,6 +297,29 @@ export class PlayerManager {
         if (command === "r" || command === "!r") {
             //玩家准备
             this._setPlayerReady(player, true);
+            return;
+        }
+
+        if (command === "profession" || command === "!profession" || command === "class" || command === "!class") {
+            const professionId = parts[1];
+            if (!professionId) {
+                this._adapter.sendMessage(player.slot, `可用职业: ${getPlayerProfessionIds().join(", ")}`);
+                return;
+            }
+
+            const config = getPlayerProfessionConfig(professionId);
+            if (!config) {
+                this._adapter.sendMessage(player.slot, `未知职业 ${professionId}，可用职业: ${getPlayerProfessionIds().join(", ")}`);
+                return;
+            }
+
+            const changed = this.setProfession(player.slot, professionId);
+            this._adapter.sendMessage(
+                player.slot,
+                changed
+                    ? `当前职业已切换为 ${config.displayName} (${config.id})`
+                    : `职业切换失败：${config.displayName} (${config.id})`
+            );
         }
     }
 
@@ -386,6 +409,28 @@ export class PlayerManager {
         const player = this.players.get(playerSlot);
         if (!player) return amount;
         return player.getAttackDamage(amount);
+    }
+
+    /**
+     * @param {number} playerSlot
+     * @param {string} professionId
+     * @returns {boolean}
+     */
+    setProfession(playerSlot, professionId) {
+        const player = this.players.get(playerSlot);
+        if (!player) return false;
+        return player.setProfession(professionId);
+    }
+
+    /**
+     * @param {number} playerSlot
+     * @param {import("../input/input_const").InputKey} key
+     * @returns {boolean}
+     */
+    handleInput(playerSlot, key) {
+        const player = this.players.get(playerSlot);
+        if (!player) return false;
+        return player.handleInputKey(key);
     }
 
     /**

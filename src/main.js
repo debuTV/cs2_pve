@@ -220,7 +220,12 @@ eventBus.on(event.Player.Out.OnAllPlayersReady, () => {
     eventBus.emit(event.Game.In.StartGameRequest, {});
 });
 
-// ——— 3.5 输入 → 商店 ———
+// ——— 3.5 输入 → 玩家技能 / 商店 ———
+
+eventBus.on(event.Input.Out.OnInput, (/** @type {import("./input/input_const").OnInput} */ payload) => {
+    if (payload.key !== "InspectWeapon") return;
+    playerManager.handleInput(payload.slot, payload.key);
+});
 
 // ═══════════════════════════════════════════════
 // 4. 引擎事件注册

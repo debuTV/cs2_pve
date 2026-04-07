@@ -63,9 +63,6 @@ export class ShopSession {
         this.selectedIndex = 0;
         this._lastMessage = "";
         this.state = ShopState.OPEN;
-        /** @type {import("../input/input_const").StartRequest} */
-        const startRequest = { slot: this.slot, pawn, result: false };
-        eventBus.emit(event.Input.In.StartRequest, startRequest);
         this._refreshHud();
         /** @type {import("./shop_const").OnShopOpen} */
         const payload = { slot: this.slot};
@@ -80,10 +77,7 @@ export class ShopSession {
 
         /** @type {import("../hud/hud_const").HideHudRequest} */
         const hideHudRequest = { slot: this.slot, channel: CHANNAL.SHOP,result:false };
-        /** @type {import("../input/input_const").StopRequest} */
-        const stopRequest = { slot: this.slot, result: false };
         eventBus.emit(event.Hud.In.HideHudRequest, hideHudRequest);
-        eventBus.emit(event.Input.In.StopRequest, stopRequest);
         this.state = ShopState.CLOSED;
         this._pawn = null;
         this._lastMessage = "";

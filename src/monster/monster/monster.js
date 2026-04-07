@@ -8,7 +8,6 @@ import { MonsterBrainState } from "./components/brain_state";
 import { MonsterSkillsManager } from "./components/skills_manager";
 import { MonsterMovementPathAdapter } from "./components/movement_path_adapter";
 import { MonsterAnimator } from "./components/animation";
-import { MonsterBuffManager } from "./components/buff_manager";
 import { eventBus } from "../../eventBus/event_bus";
 import { vec } from "../../util/vector";
 import { event, MovementRequestType } from "../../util/definition";
@@ -67,10 +66,23 @@ export class Monster {
 
         this.entityBridge = new MonsterEntityBridge(this);
         this.healthCombat = new MonsterHealthCombat(this);
-        this.buffManager = new MonsterBuffManager(this);
         this.brainState = new MonsterBrainState(this);
         this.skillsManager = new MonsterSkillsManager(this);
         this.movementPath = new MonsterMovementPathAdapter(this);
+        /**
+         * key 为 buff 类型。
+         * value 为 buff id。
+         * @type {Map<string, number>}
+         */
+        this.buffMap = new Map();
+        /** @type {Map<string, MonsterBuffRuntime>} */
+        this.buffStateMap = new Map();
+        /** @type {Array<() => boolean>} */
+        this._buffUnsubscribers = [
+            eventBus.on(event.Buff.Out.OnBuffRemoved, (/** @type {import("../../buff/buff_const").OnBuffRemoved} */ payload) => {
+                this._removeRuntimeByBuffId(payload.buffId);
+            }),
+        ];
 
         this.initEntities(position, typeConfig);
         this.animation = new MonsterAnimator(this, this.model, typeConfig.animations);
@@ -92,7 +104,7 @@ export class Monster {
         this.initSkills(typeConfig.skill_pool);
         this.movementPath.init(typeConfig);
         this.animation.init(typeConfig.animations);
-        this.buffManager.recomputeModifiers();
+        this.emitBuffEvent("OnRecompute", { recompute: true });
     }
 
     init() {
@@ -139,7 +151,53 @@ export class Monster {
      * @returns {boolean}
      */
     addBuff(typeId, params = {}, source = null, context = null) {
-        return this.buffManager.addBuff(typeId, params, source, context);
+        if (this.buffMap.has(typeId)) return false;
+        const normalizedParams = { ...(params ?? {}) };
+        /** @type {import("../../buff/buff_const").BuffAddRequest} */
+        const addRequest = {
+            configid: typeId,
+            target: this,
+            targetType: "monster",
+            result: -1,
+        };
+        eventBus.emit(event.Buff.In.BuffAddRequest, addRequest);
+        if (addRequest.result <= 0) return false;
+
+        this.buffMap.set(typeId, addRequest.result);
+        this.buffStateMap.set(typeId, {
+            buffId: addRequest.result,
+            typeId,
+            params: normalizedParams,
+            groupKey: typeof normalizedParams.groupKey === "string" ? normalizedParams.groupKey : null,
+            source,
+            context,
+        });
+        return true;
+    }
+
+    /**
+     * @param {string} typeId
+     * @param {Record<string, any>} [params]
+     * @returns {boolean}
+     */
+    refreshBuff(typeId, params = {}) {
+        const id = this.buffMap.get(typeId);
+        if (id == null) return this.addBuff(typeId, params);
+
+        /** @type {import("../../buff/buff_const").BuffRefreshRequest} */
+        const refreshRequest = {
+            buffId: id,
+            result: false,
+        };
+        eventBus.emit(event.Buff.In.BuffRefreshRequest, refreshRequest);
+        if (!refreshRequest.result) return false;
+
+        const runtime = this.buffStateMap.get(typeId);
+        if (runtime) {
+            runtime.params = { ...(params ?? runtime.params) };
+            runtime.groupKey = typeof runtime.params.groupKey === "string" ? runtime.params.groupKey : null;
+        }
+        return true;
     }
 
     /**
@@ -147,7 +205,16 @@ export class Monster {
      * @returns {boolean}
      */
     removeBuff(typeIdOrFilter) {
-        return this.buffManager.removeBuff(typeIdOrFilter);
+        if (typeof typeIdOrFilter === "string") {
+            return this._removeBuffByTypeId(typeIdOrFilter);
+        }
+
+        let removed = false;
+        for (const buff of this.getAllBuffs()) {
+            if (!typeIdOrFilter(buff)) continue;
+            removed = this._removeBuffByTypeId(buff.typeId) || removed;
+        }
+        return removed;
     }
 
     /**
@@ -155,14 +222,70 @@ export class Monster {
      * @returns {boolean}
      */
     hasBuff(typeId) {
-        return this.buffManager.hasBuff(typeId);
+        return this.buffMap.has(typeId);
     }
 
     /**
      * @returns {MonsterBuffRuntime[]}
      */
     getAllBuffs() {
-        return this.buffManager.getAllBuffs();
+        return Array.from(this.buffStateMap.values());
+    }
+
+    clearBuffs() {
+        for (const [typeId] of this.buffMap.entries()) {
+            this._removeBuffByTypeId(typeId);
+        }
+    }
+
+    /**
+     * @param {string} eventName
+     * @param {any} params
+     */
+    emitBuffEvent(eventName, params) {
+        for (const id of this.buffMap.values()) {
+            /** @type {import("../../buff/buff_const").BuffEmitRequest} */
+            const emitRequest = {
+                buffId: id,
+                eventName,
+                params,
+                result: { result: false },
+            };
+            eventBus.emit(event.Buff.In.BuffEmitRequest, emitRequest);
+        }
+    }
+
+    /**
+     * @param {string} typeId
+     * @returns {boolean}
+     */
+    _removeBuffByTypeId(typeId) {
+        const id = this.buffMap.get(typeId);
+        if (id == null) return false;
+
+        /** @type {import("../../buff/buff_const").BuffRemoveRequest} */
+        const removeRequest = {
+            buffId: id,
+            result: false,
+        };
+        eventBus.emit(event.Buff.In.BuffRemoveRequest, removeRequest);
+        if (!removeRequest.result) return false;
+
+        this.buffMap.delete(typeId);
+        this.buffStateMap.delete(typeId);
+        return true;
+    }
+
+    /**
+     * @param {number} buffId
+     */
+    _removeRuntimeByBuffId(buffId) {
+        for (const [typeId, id] of this.buffMap.entries()) {
+            if (id !== buffId) continue;
+            this.buffMap.delete(typeId);
+            this.buffStateMap.delete(typeId);
+            break;
+        }
     }
 
     /**
@@ -240,7 +363,7 @@ export class Monster {
         }
 
         if (dt > 0) {
-            this.buffManager.tick(dt, allmpos);
+            this.emitBuffEvent(MonsterBuffEvents.Tick, { dt, allmpos });
         }
         if (this.state === MonsterState.DEAD) return;
 
@@ -315,7 +438,7 @@ export class Monster {
 
         const prevState = this.state;
         this.state = nextState;
-        this.buffManager.onStateChange(prevState, nextState);
+        this.emitBuffEvent("OnStateChange", { oldState: prevState, nextState });
         this.animation.enter(nextState);
 
         if (nextState === MonsterState.CHASE || nextState === MonsterState.ATTACK) {

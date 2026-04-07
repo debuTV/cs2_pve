@@ -3,6 +3,7 @@
  */
 import { Instance } from "cs_script/point_script";
 import { PlayerBuffEvents } from "../../../buff/buff_const";
+import { SkillEvents } from "../../../skill/skill_const";
 import { PlayerState } from "../../player_const";
 
 /**
@@ -142,6 +143,8 @@ export class PlayerHealthCombat {
 
         // 清理临时战斗 buff
         this.player.emitBuffEvent(PlayerBuffEvents.Die, { killer });
+        this.player.emitSkillEvent(SkillEvents.Die, { killer });
+        this.player.stopInputTracking();
 
         // 切换到观察者
         this.player.entityBridge.joinTeam(1);

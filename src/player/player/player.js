@@ -3,13 +3,14 @@
  */
 import { eventBus } from "../../eventBus/event_bus";
 import { PlayerBuffEvents } from "../../buff/buff_const";
+import { SkillEvents } from "../../skill/skill_const";
 import { event as eventDefs } from "../../util/definition";
 import { PlayerEntityBridge } from "./components/entity_bridge";
 import { PlayerStats } from "./components/player_stats";
 import { PlayerHealthCombat } from "./components/health_combat";
 import { PlayerLifecycle } from "./components/lifecycle";
 import { CSPlayerPawn, Instance } from "cs_script/point_script";
-import { PlayerState } from "../player_const";
+import { DEFAULT_PLAYER_PROFESSION, getPlayerProfessionConfig, PlayerState } from "../player_const";
 
 /**
  * 单玩家聚合根。
@@ -57,6 +58,12 @@ export class Player {
          * @type {Map<string, number>}
          */
         this.buffMap = new Map();
+        /** @type {string} */
+        this.professionId = DEFAULT_PLAYER_PROFESSION;
+        /** @type {number | null} */
+        this.skillId = null;
+        /** @type {string | null} */
+        this.skillTypeId = null;
     }
 
     // ——— 生命周期入口（委托给 Lifecycle） ———
@@ -272,6 +279,178 @@ export class Player {
         }
     }
 
+    /**
+     * @param {import("../../input/input_const").InputKey} key
+     * @returns {boolean}
+     */
+    handleInputKey(key) {
+        if (this.state !== PlayerState.ALIVE) return false;
+        return this.emitSkillEvent(SkillEvents.Input, { key });
+    }
+
+    /**
+     * @param {string} eventName
+     * @param {Record<string, any>} [params]
+     * @returns {boolean}
+     */
+    emitSkillEvent(eventName, params = {}) {
+        if (this.skillId == null) return false;
+
+        /** @type {import("../../skill/skill_const").SkillEmitRequest} */
+        const emitRequest = {
+            skillId: this.skillId,
+            eventName,
+            params,
+            target: this,
+            result: false,
+        };
+        eventBus.emit(eventDefs.Skill.In.SkillEmitRequest, emitRequest);
+        return emitRequest.result;
+    }
+
+    /**
+     * @param {CSPlayerPawn | null} [pawn]
+     * @returns {boolean}
+     */
+    startInputTracking(pawn = this.entityBridge.pawn) {
+        if (!(pawn instanceof CSPlayerPawn)) return false;
+
+        /** @type {import("../../input/input_const").StartRequest} */
+        const startRequest = {
+            slot: this.slot,
+            pawn,
+            result: false,
+        };
+        eventBus.emit(eventDefs.Input.In.StartRequest, startRequest);
+        return startRequest.result;
+    }
+
+    /**
+     * @returns {boolean}
+     */
+    stopInputTracking() {
+        /** @type {import("../../input/input_const").StopRequest} */
+        const stopRequest = {
+            slot: this.slot,
+            result: false,
+        };
+        eventBus.emit(eventDefs.Input.In.StopRequest, stopRequest);
+        return stopRequest.result;
+    }
+
+    /**
+     * @param {string} professionId
+     * @param {{ forceRecreate?: boolean; allowMissingPrevious?: boolean }} [options]
+     * @returns {boolean}
+     */
+    setProfession(professionId, options = {}) {
+        const config = getPlayerProfessionConfig(professionId);
+        if (!config) return false;
+
+        const forceRecreate = options.forceRecreate ?? false;
+        const allowMissingPrevious = options.allowMissingPrevious ?? false;
+        if (!forceRecreate && this.professionId === professionId && this.skillId != null) {
+            return true;
+        }
+
+        let nextSkillId = null;
+        if (config.skillTypeId) {
+            nextSkillId = this._addSkillFromProfession(config);
+            if (nextSkillId == null) return false;
+        }
+
+        const previousSkillId = this.skillId;
+        if (previousSkillId != null) {
+            const removed = this._removeSkillById(previousSkillId);
+            if (!removed && !allowMissingPrevious) {
+                if (nextSkillId != null) {
+                    this._removeSkillById(nextSkillId);
+                }
+                return false;
+            }
+        }
+
+        this.professionId = professionId;
+        this.skillId = nextSkillId;
+        this.skillTypeId = config.skillTypeId ?? null;
+        return true;
+    }
+
+    /**
+     * @returns {boolean}
+     */
+    ensureProfessionSkillBound() {
+        return this.setProfession(this.professionId ?? DEFAULT_PLAYER_PROFESSION, {
+            forceRecreate: this.skillId == null,
+            allowMissingPrevious: true,
+        });
+    }
+
+    /**
+     * @returns {boolean}
+     */
+    rebindProfessionSkill() {
+        return this.setProfession(this.professionId ?? DEFAULT_PLAYER_PROFESSION, {
+            forceRecreate: true,
+            allowMissingPrevious: true,
+        });
+    }
+
+    /**
+     * @param {boolean} [allowMissing=false]
+     * @returns {boolean}
+     */
+    clearSkillBinding(allowMissing = false) {
+        if (this.skillId == null) {
+            this.skillTypeId = null;
+            return true;
+        }
+
+        const currentSkillId = this.skillId;
+        const removed = this._removeSkillById(currentSkillId);
+        if (!removed && !allowMissing) return false;
+
+        this.skillId = null;
+        this.skillTypeId = null;
+        return true;
+    }
+
+    /**
+     * @param {import("../player_const").PlayerProfessionConfig} config
+     * @returns {number | null}
+     */
+    _addSkillFromProfession(config) {
+        if (!config.skillTypeId) return null;
+
+        /** @type {import("../../skill/skill_const").SkillAddRequest} */
+        const addRequest = {
+            target: this,
+            typeId: config.skillTypeId,
+            params: {
+                ...(config.skillParams ?? {}),
+                professionId: config.id,
+            },
+            result: null,
+        };
+        eventBus.emit(eventDefs.Skill.In.SkillAddRequest, addRequest);
+        return addRequest.result;
+    }
+
+    /**
+     * @param {number} skillId
+     * @returns {boolean}
+     */
+    _removeSkillById(skillId) {
+        /** @type {import("../../skill/skill_const").SkillRemoveRequest} */
+        const removeRequest = {
+            skillId,
+            target: this,
+            result: false,
+        };
+        eventBus.emit(eventDefs.Skill.In.SkillRemoveRequest, removeRequest);
+        return removeRequest.result;
+    }
+
     // ——— 准备状态 ———
 
     /** @returns {boolean} */
@@ -330,6 +509,7 @@ export class Player {
 
         // 1. buff 计时 & 过期清理
         this.emitBuffEvent(PlayerBuffEvents.Tick, {});
+        this.emitSkillEvent(SkillEvents.Tick, {});
     }
 
     // ——— 查询 ———
