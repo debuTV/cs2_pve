@@ -105,7 +105,9 @@ export class SkillTemplate
         this.running=false;
     }
     onSkillAdd(){}
-    onSkillDelete(){}
+    onSkillDelete(){
+      this.running = false;
+    }
     /**
      * @param {string} eventType
      * @param {import("./skill_const").EmitEventPayload} payload

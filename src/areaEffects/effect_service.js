@@ -113,10 +113,11 @@ export class AreaEffect {
      * 停止效果并清理粒子句柄。
      */
     stop() {
-        if (!this.alive && !this.particleId) return;
+        if (!this.alive && this.particleId < 1) return;
 
         this.alive = false;
         this._stopParticle();
+        this._buffid.clear();
         this._hitCooldowns.clear();
         this.startTime = 0;
         /** @type {import("./area_const").OnAreaEffectStopped} */
@@ -124,7 +125,6 @@ export class AreaEffect {
             effectId: this.id,
         };
         eventBus.emit(event.AreaEffects.Out.OnStopped, payload);
-        Instance.Msg(`[AreaEffect] #${this.id} ${this.effectName} 已停止销毁`);
     }
 
     /** @returns {boolean} 当前实例是否仍处于存活状态 */
@@ -257,12 +257,14 @@ export class AreaEffect {
 
     /** 停止并释放粒子句柄。 */
     _stopParticle() {
+        if (this.particleId < 1) return false;
         /**@type {import("../particle/particle_const").ParticleStopRequest} */
         const payload = {
             particleId: this.particleId,
             result: false,
         };
         eventBus.emit(event.Particle.In.StopRequest, payload);
+        this.particleId = -1;
         return payload.result;
     }
 

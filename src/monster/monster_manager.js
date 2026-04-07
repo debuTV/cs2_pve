@@ -5,7 +5,7 @@ import { CSPlayerPawn, Entity, Instance} from "cs_script/point_script";
 import { eventBus } from "../eventBus/event_bus";
 import { event } from "../util/definition";
 import { Monster } from "./monster/monster";
-import { spawnPointsDistance,targetTeam,MonsterType } from "./monster_const";
+import { MonsterState, spawnPointsDistance,targetTeam,MonsterType } from "./monster_const";
 import { vec } from "../util/vector";
 export class MonsterManager {
     constructor() {
@@ -58,32 +58,34 @@ export class MonsterManager {
     handleMonsterDeath(monsterInstance, killer) {
         const monsterId = monsterInstance.id;
         if (!this.monsters.has(monsterId)) return;
+        void killer;
         this.activeMonsters = Math.max(0, this.activeMonsters - 1);
         this.totalKills++;
-        this.monsters.delete(monsterId);
         if(this.spawnconfig && this.activeMonsters==0 && this.spawnmonstercount>=this.spawnconfig.totalMonsters) {
             eventBus.emit(event.Monster.Out.OnAllMonstersDead, {});
         }
     }
-    /**
-     * 重置游戏
-     */
-    resetAllGameStatus() {
-        this.nextMonsterId = 1;
+
+    forceCleanup() {
+        for (const monster of this.monsters.values()) {
+            monster.dispose();
+        }
+        this.monsters.clear();
+        this.activeMonsters = 0;
         this.spawnPoints = [];
         this.spawnpretick = -1;
         this.spawnmonstercount = 0;
         this.spawn = false;
-        this.spawnconfig=null;
+        this.spawnconfig = null;
+    }
 
-        for (const [id, monster] of this.monsters) {
-            monster.die(null);//会走handleMonsterDeath，自动从映射表删除
-        }
-
-        this.activeMonsters = 0;
+    /**
+     * 重置游戏
+     */
+    resetAllGameStatus() {
+        this.forceCleanup();
+        this.nextMonsterId = 1;
         this.totalKills = 0;
-
-        this.monsters = new Map();
     }
     /**
      * 每帧主循环。依次：刷新上下文 → 怪物 tick → 刷怪 tick。
@@ -97,7 +99,14 @@ export class MonsterManager {
     {
         const now=Instance.GetGameTime();
         for (const [id, monster] of this.monsters) {
+            if (monster.state === MonsterState.DEAD && !monster.model && !monster.breakable) {
+                this.monsters.delete(id);
+                continue;
+            }
             monster.tick(allmEntities,allppos);
+            if (monster.state === MonsterState.DEAD && !monster.model && !monster.breakable) {
+                this.monsters.delete(id);
+            }
         }
         this.spawntick(now);
     }
@@ -134,7 +143,7 @@ export class MonsterManager {
      * @returns {Monster[]}
      */
     getActiveMonsters() {
-        return Array.from(this.monsters.values());
+        return Array.from(this.monsters.values()).filter(monster => monster.state !== MonsterState.DEAD);
     }
 
     /**
@@ -142,6 +151,7 @@ export class MonsterManager {
      */
     syncMovementStates(movementStates) {
         for (const monster of this.monsters.values()) {
+            if (monster.state === MonsterState.DEAD) continue;
             const model = monster.model;
             if (!model) continue;
             const snapshot = movementStates.get(model);
@@ -162,6 +172,22 @@ export class MonsterManager {
             totalKills: this.totalKills
         };
     }
+
+    /**
+     * 获取当前波次仍需清理的怪物数。
+     * 包含未出生的波次怪物，以及当前仍存活的额外召唤物。
+     * @param {number} [totalMonsters=this.spawnconfig?.totalMonsters ?? 0]
+     * @returns {number}
+     */
+    getRemainingMonsters(totalMonsters = this.spawnconfig?.totalMonsters ?? 0) {
+        const plannedTotal = Math.max(0, Math.round(totalMonsters ?? 0));
+        if (plannedTotal <= 0) {
+            return Math.max(0, this.activeMonsters);
+        }
+
+        return Math.max(0, plannedTotal - this.spawnmonstercount + this.activeMonsters);
+    }
+
     /**
      * 启动一个新波次的刷怪流程。
      *

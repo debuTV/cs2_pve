@@ -27,6 +27,10 @@ export class SpeedBoostSkill extends SkillTemplate {
         this.glow = params.glow ?? null;
     }
 
+    onSkillDelete() {
+        this._endBoost();
+    }
+
     canTrigger(/** @type {any} */ event) {
         if (!this.events.includes(event.type)) return false;
         if (!this._cooldownReady()) return false;

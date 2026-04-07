@@ -33,8 +33,6 @@ export class ThrowStoneSkill extends SkillTemplate {
         this.gravityScale = params.gravityScale ?? 1;
         this.radius = params.radius ?? 32;
         this.maxTargets = params.maxTargets ?? 1;
-        this._projectile = null;
-        this._tickCtx = null;
     }
 
     canTrigger(/** @type {any} */ event) {
@@ -51,8 +49,6 @@ export class ThrowStoneSkill extends SkillTemplate {
             const minDistSq = this.distanceMin * this.distanceMin;
             const maxDistSq = this.distanceMax * this.distanceMax;
             if (distsq < minDistSq || distsq > maxDistSq) return false;
-
-            this._tickCtx = { dt: event.dt, allmpos: event.allmpos };
         }
 
         if (this.animation === null) {
@@ -64,17 +60,7 @@ export class ThrowStoneSkill extends SkillTemplate {
 
     tick() {
         if (this.player) return;
-        if (!this.running) return;
-
-        // if (this._projectile) {
-        //     this._projectile.update(dt);
-        //     if (this._projectile.isFinished()) {
-        //         const hitTargets = this._projectile.getHitTargets();
-        //         void hitTargets;
-        //         this.running = false;
-        //         this._projectile = null;
-        //     }
-        // }
+        this.running = false;
     }
 
     trigger() {
@@ -82,10 +68,18 @@ export class ThrowStoneSkill extends SkillTemplate {
             this._markTriggered();
             return;
         }
-        if (!this.monster) return;
+        const monster = this.monster;
+        const target = monster?.target;
+        if (!monster || !target) return;
 
-        // this._projectile = new ProjectileRunner({ ... });
-        // this.running = true;
+        const distsq = monster.distanceTosq(target);
+        const minDistSq = this.distanceMin * this.distanceMin;
+        const maxDistSq = this.distanceMax * this.distanceMax;
+        if (distsq < minDistSq || distsq > maxDistSq) return;
+
+        this.running = true;
         this._markTriggered();
+        monster.emitAttackEvent(this.damage, target);
+        this.running = false;
     }
 }

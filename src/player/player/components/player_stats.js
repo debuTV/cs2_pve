@@ -80,6 +80,7 @@ export class PlayerStats {
         this.score = 0;
         this.kills = 0;
         this.damageDealt = 0;
+        this.lastMonsterDamage = 0;
         this.headshots = 0;
         this.waveProgress = 0;
 
@@ -145,6 +146,7 @@ export class PlayerStats {
         this.score = 0;
         this.kills = 0;
         this.damageDealt = 0;
+        this.lastMonsterDamage = 0;
         this.headshots = 0;
         this.waveProgress = 0;
 
@@ -183,6 +185,7 @@ export class PlayerStats {
             critMultiplier: this.critMultiplier,
             kills: this.kills,
             score: this.score,
+            lastMonsterDamage: this.lastMonsterDamage,
             exp: this.exp,
             expNeeded: this._getExpNeeded(),
         };
@@ -247,6 +250,20 @@ export class PlayerStats {
         this.player.emitBuffEvent(PlayerBuffEvents.Attack, event);
         event.damage = Math.max(0, Math.round(event.damage));
         return event.damage;
+    }
+
+    /**
+     * 记录一次玩家对怪物造成的最终伤害。
+     * @param {number} amount 最终生效伤害。
+     * @returns {number} 被记录的伤害值。
+     */
+    recordMonsterDamage(amount) {
+        const finalAmount = Math.max(0, Math.round(amount));
+        if (finalAmount <= 0) return 0;
+
+        this.lastMonsterDamage = finalAmount;
+        this.damageDealt += finalAmount;
+        return finalAmount;
     }
 
     // ——— 等级链 ———
@@ -401,6 +418,7 @@ export class PlayerStats {
         this.score = 0;
         this.kills = 0;
         this.damageDealt = 0;
+        this.lastMonsterDamage = 0;
         this.headshots = 0;
         this.waveProgress = 0;
     }

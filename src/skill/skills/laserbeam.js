@@ -1,11 +1,11 @@
 /**
  * @module 怪物系统/怪物技能/激光
  */
-import { Monster } from "../../monster/monster/monster";
-import { Player } from "../../player/player/player";
 import { Instance } from "cs_script/point_script";
 import { SkillEvents } from "../skill_const";
 import { SkillTemplate } from "../skill_template";
+import { Player } from "../../player/player/player";
+import { Monster } from "../../monster/monster/monster";
 
 export class LaserBeamSkill extends SkillTemplate {
     /**
@@ -38,8 +38,8 @@ export class LaserBeamSkill extends SkillTemplate {
         this.pierce = params.pierce ?? false;
         this.maxTargets = params.maxTargets ?? 1;
         this.startDelay = params.startDelay ?? 0;
-        this._tickAccumulator = 0;
-        this._tickCtx = null;
+        this._beamStartedAt = 0;
+        this._nextDamageAt = 0;
     }
     /**
      * @param {any} event
@@ -56,8 +56,6 @@ export class LaserBeamSkill extends SkillTemplate {
         const distsq = this.monster.distanceTosq(this.monster.target);
         if (distsq > this.distance * this.distance) return false;
 
-        this._tickCtx = { dt: event.dt, allmpos: event.allmpos };
-
         if (this.animation === null) {
             this.trigger();
             return false;
@@ -70,30 +68,55 @@ export class LaserBeamSkill extends SkillTemplate {
         if (!this.running || !this.monster) return;
 
         const now = Instance.GetGameTime();
-        if (this.duration > 0 && this.lastTriggerTime + this.duration <= now) {
-            this.running = false;
-            this._tickAccumulator = 0;
+        if (this.duration > 0 && this._beamStartedAt + this.duration <= now) {
+            this._stopBeam();
             return;
         }
 
-        // this._tickAccumulator += dt;
-        // while (this._tickAccumulator >= this.tickInterval) {
-        //     this._tickAccumulator -= this.tickInterval;
-        //     // 射线检测 + 造成伤害
-        // }
+        const target = this.monster.target;
+        if (!target || this.monster.distanceTosq(target) > this.distance * this.distance) {
+            this._stopBeam();
+            return;
+        }
+
+        const interval = this.tickInterval > 0 ? this.tickInterval : 0.25;
+        while (now >= this._nextDamageAt) {
+            this.monster.emitAttackEvent(Math.max(1, Math.round(this.damagePerSecond * interval)), target);
+            this._nextDamageAt += interval;
+        }
     }
 
     trigger() {
-        this._markTriggered();
         if (this.player) {
+            this._markTriggered();
             return;
         }
-        if(this.monster)
-        {
-            if (this.duration > 0) {
-                this.running = true;
-                this._tickAccumulator = 0;
-            }
+        const monster = this.monster;
+        const target = monster?.target;
+        if (!monster || !target) return;
+        if (monster.distanceTosq(target) > this.distance * this.distance) return;
+
+        this._markTriggered();
+        this._beamStartedAt = Instance.GetGameTime();
+        const interval = this.tickInterval > 0 ? this.tickInterval : 0.25;
+        this._nextDamageAt = this._beamStartedAt + this.startDelay;
+
+        if (this.duration <= 0) {
+            monster.emitAttackEvent(Math.max(1, Math.round(this.damagePerSecond * interval)), target);
+            this._stopBeam();
+            return;
         }
+
+        this.running = true;
+    }
+
+    onSkillDelete() {
+        this._stopBeam();
+    }
+
+    _stopBeam() {
+        this.running = false;
+        this._beamStartedAt = 0;
+        this._nextDamageAt = 0;
     }
 }

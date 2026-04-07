@@ -1,7 +1,7 @@
 /**
  * @module 怪物系统/怪物组件/实体桥接
  */
-import { CSPlayerPawn, Instance, PointTemplate } from "cs_script/point_script";
+import { BaseModelEntity, CSPlayerPawn, Instance, PointTemplate } from "cs_script/point_script";
 
 const BREAKABLE_HEALTH_SCALE = 10000;
 
@@ -67,7 +67,9 @@ export class MonsterEntityBridge {
         }
 
         if (this.monster.model) {
-            this.monster.model.Teleport({ position: { x: position.x, y: position.y, z: position.z + 50 } });
+            if (this.monster.model instanceof BaseModelEntity) {
+                this.monster.model.Glow();
+            }
         }
     }
 

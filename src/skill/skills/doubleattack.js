@@ -38,14 +38,16 @@ export class DoubleAttackSkill extends SkillTemplate {
     }
 
     trigger() {
-        this._markTriggered();
         if (this.player) {
+            this._markTriggered();
             return;
         }
-        if (this.monster)
-        {
+        const monster = this.monster;
+        const target = monster?.target;
+        if (!monster || !target) return;
+        if (monster.distanceTosq(target) > monster.attackdist * monster.attackdist) return;
 
-        }
-        // TODO: 第二次攻击逻辑后续补齐。
+        this._markTriggered();
+        monster.emitAttackEvent(monster.damage, target);
     }
 }

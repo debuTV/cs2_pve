@@ -130,6 +130,7 @@ export class PlayerLifecycle {
         this.player.entityBridge.syncHealth(stats.health);
         this.player.entityBridge.syncArmor(stats.armor);
         this.player.applyStateTransition(PlayerState.ALIVE);
+        this.player.startInputTracking(this.player.entityBridge.pawn);
     }
 
     /**
@@ -148,15 +149,18 @@ export class PlayerLifecycle {
      */
     resetGameStatus() {
         const stats = this.player.stats;
+        this.player.clearSkillBinding(true);
         this.player.clearBuffs();
         stats.resetGameProgress();
         this.player.entityBridge.syncMaxHealth(stats.maxHealth);
         this.player.entityBridge.syncHealth(stats.health);
         this.player.entityBridge.syncArmor(stats.armor);
         this.player.applyStateTransition(PlayerState.PREPARING);
-        this.player.rebindProfessionSkill();
+        const rebound = this.player.rebindProfessionSkill();
         this.player.startInputTracking(this.player.entityBridge.pawn);
-        this.player.emitSkillEvent(SkillEvents.Spawn, { state: PlayerState.PREPARING });
+        if (rebound) {
+            this.player.emitSkillEvent(SkillEvents.Spawn, { state: PlayerState.PREPARING });
+        }
         this._giveStartingEquipment();
     }
 

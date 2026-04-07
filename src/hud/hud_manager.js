@@ -37,10 +37,21 @@ export class HudManager {
     }
 
     destroy() {
+        this.clearAllSessions();
         for (const unsubscribe of this._unsubscribers) {
             unsubscribe();
         }
         this._unsubscribers.length = 0;
+    }
+
+    clearAllSessions() {
+        for (const [slot, session] of this._sessions) {
+            session.requests.clear();
+            this._arbitrate(session);
+            if (!session.use) {
+                this._sessions.delete(slot);
+            }
+        }
     }
 
     /**
@@ -69,24 +80,36 @@ export class HudManager {
             session.requests.delete(hideHudRequest.channel);
         }
         this._arbitrate(session);
+        if (!session.use && session.requests.size === 0) {
+            this._sessions.delete(hideHudRequest.slot);
+        }
 
         return true;
     }
 
     /**
      * 每 tick 刷新全部可见 HUD 的贴脸位置。
-     * @param {{ id: number; name: string; slot: number; level: number; money: number; health: number; maxHealth: number; armor: number; attack: number; critChance: number; critMultiplier: number; kills: number; score: number; exp: number; expNeeded: number; pawn: import("cs_script/point_script").CSPlayerPawn | null; }[]} [allAlivePlayersSummary=[]]
+     * @param {{ id: number; name: string; slot: number; level: number; money: number; health: number; maxHealth: number; armor: number; attack: number; critChance: number; critMultiplier: number; kills: number; score: number; lastMonsterDamage: number; exp: number; expNeeded: number; pawn: import("cs_script/point_script").CSPlayerPawn | null; }[]} [allAlivePlayersSummary=[]]
+     * @param {{ remainingMonsters?: number; currentWave?: number; totalWaves?: number; }} [waveSummary={}]
      */
-    tick(allAlivePlayersSummary=[]) {
+    tick(allAlivePlayersSummary=[], waveSummary={}) {
+        const remainingMonsters = Math.max(0, Math.round(waveSummary.remainingMonsters ?? 0));
+        const currentWave = Math.max(0, Math.round(waveSummary.currentWave ?? 0));
+        const totalWaves = Math.max(0, Math.round(waveSummary.totalWaves ?? 0));
+        const waveLabel = totalWaves > 0 ? `${currentWave}/${totalWaves}` : `${currentWave}`;
+
         for (const s of allAlivePlayersSummary) {
             if(!s.pawn)continue;
-            const text = `Lv.${s.level} HP:${s.health}/${s.maxHealth} 护甲:${s.armor}\n$${s.money} 升级还需:${s.expNeeded - s.exp}EXP`;
+            const remainingExp = Math.max(0, s.expNeeded - s.exp);
+            const text = `Lv.${s.level} \nHP:${s.health}/${s.maxHealth} \n护甲:${s.armor}\nMoney:$${s.money} \n升级还需:${remainingExp}EXP\n伤害:${s.lastMonsterDamage} \n剩余怪物:${remainingMonsters} \n波次:${waveLabel}`;
             this.showHud({ slot: s.slot, pawn: s.pawn, text, channel: CHANNAL.STATUS, result: true });
         }
         for (const [, session] of this._sessions) {
             if (!session.use) continue;
-            const s=this._refreshHudPosition(session);
-            if(!s)session.use=false;
+            const refreshed = this._refreshHudPosition(session);
+            if (!refreshed) {
+                this._hideEntity(session);
+            }
         }
     }
 
@@ -148,7 +171,11 @@ export class HudManager {
         }
 
         const request = session.requests.get(winnerChannel);
-        if(!request)return;
+        if (!request) {
+            session.requests.delete(winnerChannel);
+            this._arbitrate(session);
+            return;
+        }
         const channelChanged = previousChannel !== winnerChannel;
         const textChanged = session.lastText !== request.text;
         const pawnChanged = session.pawn !== request.pawn;

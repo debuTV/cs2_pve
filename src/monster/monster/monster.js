@@ -1,7 +1,7 @@
 /**
  * @module 怪物系统/怪物实体
  */
-import { CSPlayerPawn, Entity, Instance } from "cs_script/point_script";
+import { BaseModelEntity, CSPlayerPawn, Entity, Instance } from "cs_script/point_script";
 import { MonsterEntityBridge } from "./components/entity_bridge";
 import { MonsterHealthCombat } from "./components/health_combat";
 import { MonsterBrainState } from "./components/brain_state";
@@ -93,6 +93,8 @@ export class Monster {
         this.lastTargetUpdate = 0;
         this.attackCooldown = 0;
         this.lasttick = 0;
+        this._runtimeReleased = false;
+        this._deathFinalized = false;
 
         /** @type {{ mode: string; onGround: boolean; currentGoalMode: number | null; }} */
         this.movementStateSnapshot = {
@@ -235,9 +237,29 @@ export class Monster {
     }
 
     clearBuffs() {
-        for (const [typeId] of this.buffMap.entries()) {
+        for (const typeId of Array.from(this.buffMap.keys())) {
             this._removeBuffByTypeId(typeId);
         }
+    }
+
+    dispose() {
+        if (this.state !== MonsterState.DEAD) {
+            this.state = MonsterState.DEAD;
+            this.clearBuffs();
+        }
+        this.finalizeDeath(true);
+    }
+
+    finalizeDeath(removeModelAfterDeathAnimation = true) {
+        if (this._deathFinalized) return false;
+        this._deathFinalized = true;
+        this.emitEvent({ type: MonsterBuffEvents.ModelRemove });
+        this._releaseRuntime();
+        this.entityBridge.removeAfterDeath(removeModelAfterDeathAnimation);
+        this.model = null;
+        this.breakable = null;
+        this.state = MonsterState.DEAD;
+        return true;
     }
 
     /**
@@ -271,12 +293,7 @@ export class Monster {
             result: false,
         };
         eventBus.emit(event.Buff.In.BuffRemoveRequest, removeRequest);
-        if (!removeRequest.result) return false;
-
-        this.buffMap.delete(typeId);
-        this.buffStateMap.delete(typeId);
-        this.recomputeDerivedStats();
-        return true;
+        return removeRequest.result;
     }
 
     recomputeDerivedStats() {
@@ -297,6 +314,20 @@ export class Monster {
             this.recomputeDerivedStats();
             break;
         }
+    }
+
+    _releaseRuntime() {
+        if (this._runtimeReleased) return;
+        this._runtimeReleased = true;
+        for (const unsubscribe of this._buffUnsubscribers) {
+            unsubscribe();
+        }
+        this._buffUnsubscribers.length = 0;
+        this.skillsManager.clear();
+        this.buffMap.clear();
+        this.buffStateMap.clear();
+        this.target = null;
+        this.killer = null;
     }
 
     /**

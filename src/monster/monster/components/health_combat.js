@@ -2,6 +2,8 @@
  * @module 怪物系统/怪物组件/生命与战斗
  */
 import { BaseModelEntity, CSPlayerPawn, Instance } from "cs_script/point_script";
+import { eventBus } from "../../../eventBus/event_bus";
+import { event } from "../../../util/definition";
 import { MonsterBuffEvents, MonsterState } from "../../monster_const";
 
 export class MonsterHealthCombat {
@@ -72,6 +74,15 @@ export class MonsterHealthCombat {
         this.monster.health = Math.max(0, Math.min(this.monster.health - finalAmount, this.monster.maxhealth));
         this.monster.emitBuffEvent(MonsterBuffEvents.TakeDamage, { ...ctx, damage: finalAmount });
         this.monster.emitEvent({ type: MonsterBuffEvents.TakeDamage, value: finalAmount, health: this.monster.health });
+        /** @type {import("../../monster_const").OnMonsterDamaged} */
+        const payload = {
+            monster: this.monster,
+            damage: finalAmount,
+            previousHealth,
+            currentHealth: this.monster.health,
+            attacker: attacker instanceof CSPlayerPawn ? attacker : null,
+        };
+        eventBus.emit(event.Monster.Out.OnMonsterDamaged, payload);
         Instance.Msg(`鎬墿 #${this.monster.id} 鍙楀埌 ${finalAmount} 鐐逛激瀹?(鍘熷:${amount}) (${previousHealth} -> ${this.monster.health})`);
 
         if (this.monster.health <= 0) {

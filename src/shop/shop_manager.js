@@ -22,12 +22,17 @@ import { BASE_SHOP_ITEMS ,RAW_KEY_TO_ACTION} from "./shop_const";
  * @navigationTitle 商店管理器
  */
 export class ShopManager {
-    constructor() {
+    /**
+     * @param {{ (shopOpenRequest: import("./shop_const").ShopOpenRequest): boolean; (shopOpenRequest: import("./shop_const").ShopOpenRequest): boolean; }} canOpenShop
+     */
+    constructor(canOpenShop) {
         /**
          * 商店商品列表。
          * @type {import("./shop_const").ShopItemConfig[]}
          */
         this._items = BASE_SHOP_ITEMS;
+        /** @type {(shopOpenRequest: import("./shop_const").ShopOpenRequest) => boolean} */
+        this._canOpenShop = canOpenShop
 
         /**
          *  玩家槽位 → 商店会话 映射表
@@ -70,6 +75,11 @@ export class ShopManager {
     openShop(shopOpenRequest) {
         if (!shopOpenRequest.pawn) {
             Instance.Msg(`[ShopManager] 玩家 Pawn 不存在，无法打开商店 (slot=${shopOpenRequest.slot})`);
+            return false;
+        }
+
+        if (!this._canOpenShop(shopOpenRequest)) {
+            Instance.Msg(`[ShopManager] 玩家不满足打开商店条件 (slot=${shopOpenRequest.slot})`);
             return false;
         }
 

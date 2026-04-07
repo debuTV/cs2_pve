@@ -420,6 +420,18 @@ export class PlayerManager {
     }
 
     /**
+     * 记录指定玩家最近一次对怪物造成的实际伤害。
+     * @param {number} playerSlot
+     * @param {number} amount
+     * @returns {number}
+     */
+    recordMonsterDamage(playerSlot, amount) {
+        const player = this.players.get(playerSlot);
+        if (!player) return 0;
+        return player.recordMonsterDamage(amount);
+    }
+
+    /**
      * @param {number} playerSlot
      * @param {string} professionId
      * @returns {boolean}

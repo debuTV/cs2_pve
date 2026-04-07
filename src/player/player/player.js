@@ -205,6 +205,15 @@ export class Player {
     }
 
     /**
+     * 记录一次玩家对怪物造成的最终伤害。
+     * @param {number} amount
+     * @returns {number}
+     */
+    recordMonsterDamage(amount) {
+        return this.stats.recordMonsterDamage(amount);
+    }
+
+    /**
      * 通过客户端命令给予玩家武器。
      * @param {string} weaponName
      * @returns {boolean}
@@ -250,10 +259,7 @@ export class Player {
             result: false,
         };
         eventBus.emit(eventDefs.Buff.In.BuffRemoveRequest, removeRequest);
-        if (!removeRequest.result) return false;
-        this.buffMap.delete(typeId);
-        this.recomputeDerivedStats();
-        return true;
+        return removeRequest.result;
     }
 
     /**
@@ -279,7 +285,7 @@ export class Player {
      * 清空当前玩家身上的全部 Buff。
      */
     clearBuffs() {
-        for (const [typeId] of this.buffMap.entries()) {
+        for (const typeId of Array.from(this.buffMap.keys())) {
             this.removeBuff(typeId);
         }
     }
@@ -545,9 +551,7 @@ export class Player {
      * 每帧调度入口。
      */
     tick() {
-        
-        if (this.state === PlayerState.DISCONNECTED) return;
-        if (this.state === PlayerState.DEAD) return;
+        if (this.state !== PlayerState.ALIVE) return;
 
         // 1. buff 计时 & 过期清理
         this.emitBuffEvent(PlayerBuffEvents.Tick, {});
@@ -558,7 +562,7 @@ export class Player {
 
     /**
      * 获取玩家属性快照（委托给 Stats）。
-     * @returns {{id: number, name: string, slot: number, level: number, money: number, health: number, maxHealth: number, armor: number, attack: number, critChance: number, critMultiplier: number, kills: number, score: number, exp: number, expNeeded: number,pawn: CSPlayerPawn|null}}
+     * @returns {any}
      */
     getSummary() {
         return { ...this.stats.getSummary(), pawn: this.entityBridge.pawn };

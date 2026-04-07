@@ -169,6 +169,7 @@ export const event={
         },
         Out:{
             OnMonsterSpawn:"Monster_OnMonsterSpawn",    //怪物创建并注册后，payload 使用 OnMonsterSpawn
+            OnMonsterDamaged:"Monster_OnMonsterDamaged",    //怪物实际扣血后，payload 使用 OnMonsterDamaged
             OnMonsterDeath:"Monster_OnMonsterDeath",    //怪物死亡后，payload 使用 OnMonsterDeath
             OnAllMonstersDead:"Monster_OnAllMonstersDead",    //当前波次全部怪物死亡后
             OnAttack:"Monster_OnAttack",    //怪物普攻命中后，payload 使用 OnMonsterAttack

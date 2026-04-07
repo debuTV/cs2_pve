@@ -21,7 +21,6 @@ import { event, MovementRequestType } from "../util/definition";
  * @property {Movement} movement        Movement 实例
  * @property {Entity}   entity          引擎实体引用
  * @property {object}   config          注册时的配置快照
- * @property {Entity|null} ignoreEntity 传给 move_probe 的忽略实体
  * @property {boolean}  useNPCSeparation 当前是否启用分离速度
  * @property {boolean}  usePathRefresh  当前任务是否允许刷新路径
  * @property {Entity|null}  targetEntity  追击目标实体（来自最后一次 Move 请求）
@@ -42,8 +41,6 @@ export class MovementManager {
     constructor() {
         /** @type {Map<Entity, MovementEntry>} */
         this._entries = new Map();
-        /** @type {Entity[]} 提供给 move_probe 的忽略实体列表。 */
-        this.ignoreEntity = [];
 
         /** 路径调度最小堆，按上次更新时间排序。 */
         this._pathHeap = new _MinHeap(1000);
@@ -92,7 +89,7 @@ export class MovementManager {
     /**
      * 注册一个移动实体的 Movement 实例。
      * @param {Entity} key
-     * @param {{ speed?: number, mode?: string, physics?: object, useSeparation?: boolean, ignoreEntity?: Entity | null }} config
+     * @param {{ speed?: number, mode?: string, physics?: object, useSeparation?: boolean }} config
      */
     register(key, config) {
         if (this._entries.has(key)) return;
@@ -108,13 +105,11 @@ export class MovementManager {
             movement,
             entity: key,
             config,
-            ignoreEntity: config.ignoreEntity ?? null,
             useNPCSeparation: config.useSeparation ?? true,
             usePathRefresh: false,
             targetEntity: null,
             targetPosition: null,
         });
-        this._addIgnoreEntity(config.ignoreEntity ?? null);
         this._pathHeap.push(key, 0);
         eventBus.emit(event.Movement.Out.OnRegistered, {
             entity: key,
@@ -131,7 +126,6 @@ export class MovementManager {
         if (!entry) return;
         entry.movement.stop();
         this._entries.delete(key);
-        this._removeIgnoreEntity(entry.ignoreEntity);
         this._pathHeap.remove(key);
         eventBus.emit(event.Movement.Out.OnRemoved, {
             entity: key,
@@ -180,36 +174,12 @@ export class MovementManager {
      * @param {number} now 当前游戏时间
      * @param {number} dt 帧间隔
      * @param {Vector[]} separationPositions
+     * @param {Entity[]} breakableEntities 当前全部怪物 breakable 列表，传给 move_probe 作为忽略实体
      */
-    tick(now,dt, separationPositions) {
+    tick(now,dt, separationPositions, breakableEntities = []) {
         this._consumeRequests();
         this._tickPathRefresh(now);
-        this._updateAll(dt, separationPositions);
-    }
-
-    /**
-     * 向 ignoreEntity 追加一个外部提供的忽略实体。
-        * @param {Entity|null} entity
-     */
-    _addIgnoreEntity(entity) {
-        if (!entity) return;
-        if (this.ignoreEntity.indexOf(entity) !== -1) return;
-        this.ignoreEntity.push(entity);
-    }
-
-    /**
-     * 从 ignoreEntity 中移除一个忽略实体。
-        * @param {Entity|null} entity
-     */
-    _removeIgnoreEntity(entity) {
-        if (!entity) return;
-        const idx = this.ignoreEntity.indexOf(entity);
-        if (idx === -1) return;
-        const last = this.ignoreEntity.length - 1;
-        if (idx !== last) {
-            this.ignoreEntity[idx] = this.ignoreEntity[last];
-        }
-        this.ignoreEntity.pop();
+        this._updateAll(dt, separationPositions, breakableEntities);
     }
 
     // ═══════════════════════════════════════════════
@@ -372,11 +342,12 @@ export class MovementManager {
     /**
      * @param {number} dt
      * @param {Vector[]} separationPositions
+     * @param {Entity[]} breakableEntities
      */
-    _updateAll(dt, separationPositions) {
+    _updateAll(dt, separationPositions, breakableEntities) {
         for (const [key, entry] of this._entries) {
             const sepCtx = entry.useNPCSeparation
-                ? { entities: this.ignoreEntity, positions: separationPositions }
+                ? { entities: breakableEntities, positions: separationPositions }
                 : { entities: [], positions: []};
             entry.movement.update(dt, sepCtx);
         }
@@ -394,7 +365,6 @@ export class MovementManager {
             entry.movement.stop();
         }
         this._entries.clear();
-        this.ignoreEntity.length = 0;
         this._pathHeap.clear();
         this._pendingRequests.length = 0;
     }

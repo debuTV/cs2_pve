@@ -1,7 +1,7 @@
 /**
  * 维护主循环共享的临时上下文快照。
  */
-export class contextManager{
+export class ContextManager {
     constructor()
     {
         /** @type {import("../monster/monster/monster").Monster[]} */
@@ -10,12 +10,7 @@ export class contextManager{
         this.monsterEntities = [];
         /** @type {import("cs_script/point_script").Vector[]} */
         this.separationPositions = [];
-        /** @type {import("cs_script/point_script").Entity[]} */
-        this.breakableEntities = [];
-        /** @type {import("cs_script/point_script").Vector[]} */
-        this.playerPositions = [];
-        /** @type {import("cs_script/point_script").Vector[]} */
-        this.monsterPositions = [];
+        this.resetTickContext();
     }
 
     /**
@@ -35,6 +30,11 @@ export class contextManager{
 
     resetTickContext()
     {
-        this.updateTickContext();
+        /** @type {import("../monster/monster/monster").Monster[]} */
+        this.activeMonsters = [];
+        /** @type {import("cs_script/point_script").Entity[]} */
+        this.monsterEntities = [];
+        /** @type {import("cs_script/point_script").Vector[]} */
+        this.separationPositions = [];
     }
 }

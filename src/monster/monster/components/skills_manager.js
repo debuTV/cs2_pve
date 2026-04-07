@@ -52,6 +52,14 @@ export class MonsterSkillsManager {
         }
     }
 
+    clear() {
+        this._requestedSkill = null;
+        for (const skill of this.monster.skills) {
+            skill.onSkillDelete();
+        }
+        this.monster.skills.length = 0;
+    }
+
     /**
      * @param {MonsterSkill} skill
      */

@@ -72,10 +72,7 @@ export class MonsterAnimator {
         this.setonStateFinish((/** @type {number} */ state) => {
             if (state == MonsterState.ATTACK) this.monster.onOccupationEnd("attack");
             else if (state == MonsterState.SKILL) this.monster.onOccupationEnd("skill");
-            else if (state == MonsterState.DEAD) {
-                this.monster.emitEvent({ type: MonsterBuffEvents.ModelRemove });
-                this.monster.entityBridge.removeAfterDeath(removeModelAfterDeathAnimation);
-            }
+            else if (state == MonsterState.DEAD) this.monster.finalizeDeath(removeModelAfterDeathAnimation);
         });
     }
 
@@ -165,7 +162,9 @@ export class MonsterAnimator {
                 this.play("skill");
                 break;
             case MonsterState.DEAD:
-                this.play("dead");
+                if (!this.play("dead")) {
+                    this.monster.finalizeDeath(removeModelAfterDeathAnimation);
+                }
                 break;
         }
     }

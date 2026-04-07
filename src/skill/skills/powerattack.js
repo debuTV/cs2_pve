@@ -52,9 +52,12 @@ export class PowerAttackSkill extends SkillTemplate {
             this._markTriggered();
             return;
         }
-        if (!this.monster) return;
+        const monster = this.monster;
+        const target = monster?.target;
+        if (!monster || !target) return;
+        if (monster.distanceTosq(target) > monster.attackdist * monster.attackdist) return;
 
-        // TODO: 击飞 Buff 的实际施加逻辑后续补齐。
         this._markTriggered();
+        monster.emitAttackEvent(Math.max(1, Math.round(monster.damage * 2)), target);
     }
 }

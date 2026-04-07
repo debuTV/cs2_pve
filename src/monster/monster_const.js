@@ -22,7 +22,7 @@ export const spawnPointsDistance=-1;
  * - `true`：动画结束后删除模型。
  * - `false`：动画结束后保留模型，不删除。
  */
-export const removeModelAfterDeathAnimation=false;
+export const removeModelAfterDeathAnimation=true;
 //==================怪物移动相关设置================
 /** 世界重力加速度（单位/秒²）。 */
 export const gravity=800;
@@ -111,6 +111,14 @@ export const MonsterBuffEvents = {
  * @property {import("./monster/monster").Monster} monster
  * @property {import("cs_script/point_script").Entity|null|undefined} killer
  * @property {number} reward
+ */
+/**
+ * @typedef {object} OnMonsterDamaged
+ * @property {import("./monster/monster").Monster} monster
+ * @property {number} damage
+ * @property {number} previousHealth
+ * @property {number} currentHealth
+ * @property {import("cs_script/point_script").CSPlayerPawn|null} attacker
  */
 /**
  * @typedef {object} OnMonsterAttack

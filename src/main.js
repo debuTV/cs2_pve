@@ -25,9 +25,11 @@ import { eventBus } from "./eventBus/event_bus";
 import { event, MovementRequestType } from "./util/definition";
 
 // ——— 各模块独立导入 ———
+import { GameState } from "./game/game_const";
 import { GameManager } from "./game/game_manager";
 import { WaveManager } from "./wave/wave_manager";
 import { PlayerManager } from "./player/player_manager";
+import { PlayerState } from "./player/player_const";
 import { InputManager } from "./input/input_manager";
 import { ShopManager } from "./shop/shop_manager";
 import { HudManager } from "./hud/hud_manager";
@@ -37,7 +39,7 @@ import { BuffManager } from "./buff/buff_manager";
 import { ParticleManager } from "./particle/particle_manager";
 import { NavMesh } from "./navmesh/path_manager";
 import { MovementManager } from "./movement/movement_manager";
-import { contextManager } from "./tempContext/tempContext_manager";
+import { ContextManager } from "./tempContext/tempContext_manager";
 import { AreaEffectManager } from "./areaEffects/area_manager";
 // ═══════════════════════════════════════════════
 // 1. 服务器初始化
@@ -66,7 +68,28 @@ const gameManager = new GameManager(adapter);
 const waveManager = new WaveManager(adapter);
 const playerManager = new PlayerManager(adapter);
 const inputManager = new InputManager();
-const shopManager = new ShopManager();
+const shopManager = new ShopManager(
+    (/** @type {import("./shop/shop_const").ShopOpenRequest} */ shopOpenRequest) => {
+        const { slot, pawn } = shopOpenRequest;
+        if (typeof slot !== "number" || slot < 0) return false;
+        if (!pawn?.IsValid?.() || !pawn?.IsAlive?.()) return false;
+
+        const controller = pawn.GetPlayerController?.();
+        if (!controller || controller.GetPlayerSlot?.() !== slot) return false;
+
+        const player = playerManager.getPlayer(slot);
+        if (!player || player.entityBridge.pawn !== pawn) return false;
+
+        if (gameManager.gameState === GameState.PREPARE) {
+            return player.state === PlayerState.PREPARING || player.state === PlayerState.READY;
+        }
+
+        if (gameManager.gameState === GameState.PLAYING) {
+            return player.state === PlayerState.ALIVE;
+        }
+
+        return false;
+    });
 const hudManager = new HudManager();
 const skillManager = new SkillManager();
 const monsterManager = new MonsterManager();
@@ -77,7 +100,23 @@ movementManager.initPathScheduler((start, end) => navMesh.findPath(start, end));
 const buffManager = new BuffManager();
 const particleManager = new ParticleManager();
 const areaEffectManager = new AreaEffectManager();
-const tempContext = new contextManager();
+const tempContext = new ContextManager();
+
+function cleanupFinishedMatch() {
+    shopManager.closeAll();
+    hudManager.clearAllSessions();
+    waveManager.resetGame();
+    monsterManager.stopWave();
+    for (const player of playerManager.getActivePlayers()) {
+        player.stopInputTracking();
+    }
+    monsterManager.forceCleanup();
+    movementManager.cleanup();
+    areaEffectManager.cleanup();
+    particleManager.cleanup();
+    buffManager.clearAll();
+    tempContext.resetTickContext();
+}
 
 // ═══════════════════════════════════════════════
 // 3. 跨模块回调绑定（全部集中在此）
@@ -131,25 +170,18 @@ eventBus.on(event.Game.Out.OnStartGame, (payload) => {
 
 eventBus.on(event.Game.Out.OnGameLost, (payload) => {
     void payload;
-    shopManager.closeAll();
-    for (const player of playerManager.getActivePlayers()) {
-        player.stopInputTracking();
-    }
-    monsterManager.stopWave();
+    cleanupFinishedMatch();
 });
 
 eventBus.on(event.Game.Out.OnGameWin, (payload) => {
     void payload;
-    shopManager.closeAll();
-    for (const player of playerManager.getActivePlayers()) {
-        player.stopInputTracking();
-    }
-    monsterManager.stopWave();
+    cleanupFinishedMatch();
 });
 
 eventBus.on(event.Game.Out.OnResetGame, (payload) => {
     void payload;
     shopManager.closeAll();
+    hudManager.clearAllSessions();
     waveManager.resetGame();
     skillManager.clearAll();
     monsterManager.resetAllGameStatus();
@@ -182,6 +214,12 @@ eventBus.on(event.Monster.Out.OnMonsterDeath, (/** @type {import("./monster/mons
             reason: `击杀 ${payload.monster.type} 经验`,
         });
     }
+});
+eventBus.on(event.Monster.Out.OnMonsterDamaged, (/** @type {import("./monster/monster_const").OnMonsterDamaged} */ payload) => {
+    const attackerSlot = payload.attacker?.GetPlayerController?.()?.GetPlayerSlot?.();
+    if (typeof attackerSlot !== "number" || attackerSlot < 0) return;
+
+    playerManager.recordMonsterDamage(attackerSlot, payload.damage);
 });
 eventBus.on(event.Monster.Out.OnAttack, (/** @type {import("./monster/monster_const").OnMonsterAttack} */ payload) => {
     const targetSlot = payload.target?.GetPlayerController?.()?.GetPlayerSlot?.();
@@ -408,6 +446,9 @@ Instance.SetThink(() => {
         const monsterEntities = activeMonsters
             .map((monster) => monster.model)
             .filter((entity) => entity != null);
+        const monsterBreakableEntities = activeMonsters
+            .map((monster) => monster.breakable)
+            .filter((entity) => entity != null);
         const separationPositions = monsterEntities
             .map((entity) => entity.GetAbsOrigin())
             .filter((position) => position != null);
@@ -416,7 +457,17 @@ Instance.SetThink(() => {
             monsterEntities,
             separationPositions,
         });
-        movementManager.tick(now, dt, tempContext.separationPositions);
+        movementManager.tick(now, dt, tempContext.separationPositions, monsterBreakableEntities);
+        const am=Array.from(movementManager.getAllStates());
+        for (let i =0;i<am.length;i++){
+            const a=am[i];
+            Instance.DebugScreenText({
+                text: `mode: ${a[1].mode}`, 
+                x: 500,
+                y: 200+i*20,
+                duration: 1/64});
+        }
+
         monsterManager.syncMovementStates(movementManager.getAllStates());
         areaEffectManager.tick(now, {
             players: alivePlayers,
@@ -433,7 +484,16 @@ Instance.SetThink(() => {
 
     // ── 5.2 其他模块 tick ──
     shopManager.tick();
-    hudManager.tick(alivePlayers.map(p => p.getSummary()));
+    if (gameManager.gameState === GameState.PLAYING) {
+        const waveProgress = waveManager.getProgress();
+        hudManager.tick(alivePlayers.map(p => p.getSummary()), {
+            remainingMonsters: monsterManager.getRemainingMonsters(waveProgress.wave?.totalMonsters),
+            currentWave: waveProgress.current,
+            totalWaves: waveProgress.total,
+        });
+    } else if (gameManager.gameState === GameState.WON || gameManager.gameState === GameState.LOST) {
+        hudManager.clearAllSessions();
+    }
 
     // ── 5.3 玩家状态 HUD 同步 ──
     Instance.SetNextThink(now + 1 / 64);
