@@ -3,6 +3,7 @@
  */
 
 import { MovementPriority, MovementRequestType } from "../../../util/definition";
+import { MonsterState } from "../../monster_const";
 
 /**
  * 怪物移动意图适配器（事件驱动）。
@@ -92,6 +93,19 @@ export class MonsterMovementPathAdapter {
         this._submitChase();
     }
 
+    refreshMovement() {
+        if (!this._active) return;
+        if (this.monster.state === MonsterState.DEAD) {
+            this.deactivate();
+            return;
+        }
+        if (!this.monster.target) {
+            this.deactivate();
+            return;
+        }
+        this._submitChase();
+    }
+
     /** 内部：提交一次 Chase Move 请求。 */
     _submitChase() {
         const entity = this._getMovementEntity();
@@ -105,6 +119,7 @@ export class MonsterMovementPathAdapter {
             targetEntity: target,
             usePathRefresh: !this.monster.isOccupied(),
             useNPCSeparation: true,
+            maxSpeed: this.monster.speed,
             Mode: this._defaultMode,
         });
     }

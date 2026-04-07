@@ -104,18 +104,22 @@ export class GameManager {
      * 触发游戏失败。将状态切换为 LOST 并广播失败消息。
      */
     gameLost() {
+        if (this.gameState === GameState.LOST || this.gameState === GameState.WON) return false;
         this.gameState = GameState.LOST;
         this._adapter.broadcast("=== 游戏失败 ===");
         eventBus.emit(event.Game.Out.OnGameLost);
+        return true;
     }
 
     /**
      * 触发游戏胜利。将状态切换为 WON 并广播胜利消息。
      */
     gameWon() {
+        if (this.gameState === GameState.LOST || this.gameState === GameState.WON) return false;
         this.gameState = GameState.WON;
         this._adapter.broadcast("=== 游戏胜利 ===");
         eventBus.emit(event.Game.Out.OnGameWin);
+        return true;
     }
 
     /**
@@ -130,6 +134,6 @@ export class GameManager {
      * 检查游戏状态。是否正在游戏
      */
     checkGameState() {
-        return this.gameState == GameState.PLAYING;
+        return this.gameState === GameState.PLAYING;
     }
 }

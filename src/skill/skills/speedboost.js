@@ -1,7 +1,7 @@
 /**
  * @module 怪物系统/怪物技能/急速
  */
-import { BaseModelEntity, Instance } from "cs_script/point_script";
+import { BaseModelEntity } from "cs_script/point_script";
 import { SkillEvents } from "../skill_const";
 import { SkillTemplate } from "../skill_template";
 
@@ -22,9 +22,6 @@ export class SpeedBoostSkill extends SkillTemplate {
      */
     constructor(player, monster, id, params = {}) {
         super(player, monster, "speedboost", id, params);
-        this.runtime = params.runtime ?? 3;
-        this.speed_mult = params.speed_mult ?? 1;
-        this.speed_value = params.speed_value ?? 0;
         this.animation = params.animation ?? null;
         this.events = params.events ?? [SkillEvents.Tick];
         this.glow = params.glow ?? null;
@@ -53,16 +50,7 @@ export class SpeedBoostSkill extends SkillTemplate {
         const monster = this.monster;
         if (!this.running || !monster) return;
 
-        /** @type {any[]} */
-        const buffs = monster.getAllBuffs();
-        const hasOwnBuff = buffs.some((buff) => buff.groupKey === this._getBuffGroupKey());
-
-        if (!hasOwnBuff) {
-            this._endBoost();
-            return;
-        }
-
-        if (this.runtime !== -1 && this.lastTriggerTime + this.runtime <= Instance.GetGameTime()) {
+        if (!monster.hasBuff("speed_up")) {
             this._endBoost();
         }
     }
@@ -76,20 +64,7 @@ export class SpeedBoostSkill extends SkillTemplate {
         const monster = this.monster;
         if (!monster) return;
 
-        const buff = monster.addBuff("speed_up", {
-            duration: this.runtime,
-            multiplier: this.speed_mult,
-            flatBonus: this.speed_value,
-            groupKey: this._getBuffGroupKey(),
-        }, {
-            sourceType: "monster-self-buff",
-            sourceId: monster.id,
-            monsterId: monster.id,
-            monsterType: monster.type ?? "unknown",
-            skillTypeId: this.typeId,
-        }, {
-            monster,
-        });
+        const buff = monster.addBuff("speed_up");
 
         if (!buff) return;
 
@@ -106,9 +81,5 @@ export class SpeedBoostSkill extends SkillTemplate {
         if (this.glow && monster && monster.model instanceof BaseModelEntity) {
             monster.model.Unglow();
         }
-    }
-
-    _getBuffGroupKey() {
-        return `skill:speedboost:${this.id}`;
     }
 }

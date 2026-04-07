@@ -104,7 +104,7 @@ export class Monster {
         this.initSkills(typeConfig.skill_pool);
         this.movementPath.init(typeConfig);
         this.animation.init(typeConfig.animations);
-        this.emitBuffEvent("OnRecompute", { recompute: true });
+        this.recomputeDerivedStats();
     }
 
     init() {
@@ -172,6 +172,7 @@ export class Monster {
             source,
             context,
         });
+        this.recomputeDerivedStats();
         return true;
     }
 
@@ -197,6 +198,7 @@ export class Monster {
             runtime.params = { ...(params ?? runtime.params) };
             runtime.groupKey = typeof runtime.params.groupKey === "string" ? runtime.params.groupKey : null;
         }
+        this.recomputeDerivedStats();
         return true;
     }
 
@@ -273,7 +275,15 @@ export class Monster {
 
         this.buffMap.delete(typeId);
         this.buffStateMap.delete(typeId);
+        this.recomputeDerivedStats();
         return true;
+    }
+
+    recomputeDerivedStats() {
+        this.damage = this.baseDamage;
+        this.speed = this.baseSpeed;
+        this.emitBuffEvent("OnRecompute", { recompute: true });
+        this.movementPath.refreshMovement();
     }
 
     /**
@@ -284,6 +294,7 @@ export class Monster {
             if (id !== buffId) continue;
             this.buffMap.delete(typeId);
             this.buffStateMap.delete(typeId);
+            this.recomputeDerivedStats();
             break;
         }
     }

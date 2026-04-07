@@ -126,7 +126,8 @@ export class MonsterManager {
         if (!typeId) return null;
         const monster = this.monsters.get(monsterId);
         if (!monster) return null;
-        return monster.addBuff(typeId, params);
+        void params;
+        return monster.addBuff(typeId);
     }
 
     /**

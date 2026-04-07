@@ -9,11 +9,12 @@ import { getPlayerProfessionConfig, getPlayerProfessionIds, PlayerState } from "
 
 /**
  * @typedef {object} TP_playerRewardPayload - 玩家奖励分发载荷
- * @property {"buff"|"money"|"exp"|"heal"|"armor"|"damage"|"ready"|"respawn"|"resetGameStatus"} type - 奖励类型
+ * @property {"buff"|"money"|"exp"|"heal"|"armor"|"damage"|"weapon"|"ready"|"respawn"|"resetGameStatus"} type - 奖励类型
  * @property {string} [buffTypeId] - Buff 类型 ID（仅 type="buff" 时适用）
  * @property {Record<string, any>} [params] - Buff 参数（仅 type="buff" 时适用）
  * @property {Record<string, any>|null} [source] - Buff 来源（仅 type="buff" 时适用）
  * @property {number} [amount] - 数值（仅 type="money"、"exp"、"heal"、"armor"、"damage" 时适用）
+ * @property {string} [weaponName] - 武器名称（仅 type="weapon" 时适用）
  * @property {string} [reason] - 原因描述（仅 type="money"、"exp" 时适用）
  * @property {boolean} [isReady] - 准备状态（仅 type="ready" 时适用）
  * @property {number} [health] - 生命值（仅 type="respawn" 时适用）
@@ -68,39 +69,46 @@ export class PlayerManager {
         //this._statusTextCache = new Map();
         //this._tempDisableLogKeys = new Set();
         this.ingame = false;
-        /** @type {Record<string, (player: Player, payload: TP_playerRewardPayload) => void>} */
+        /** @type {Record<string, (player: Player, payload: TP_playerRewardPayload) => boolean>} */
         this._rewardHandlers = {
             buff: (player, payload) => {
-                if (!payload.buffTypeId) return;
-                player.addBuff(payload.buffTypeId, payload.params ?? {});
+                if (!payload.buffTypeId) return false;
+                return player.addBuff(payload.buffTypeId);
             },
             money: (player, payload) => {
-                player.addMoney(payload.amount ?? 0);
+                return player.addMoney(payload.amount ?? 0) !== 0;
             },
             exp: (player, payload) => {
-                player.addExp(payload.amount ?? 0);
+                return player.addExp(payload.amount ?? 0) !== 0;
             },
             heal: (player, payload) => {
-                player.heal(payload.amount ?? 0);
+                return player.heal(payload.amount ?? 0);
             },
             armor: (player, payload) => {
-                player.giveArmor(payload.amount ?? 0);
+                return player.giveArmor(payload.amount ?? 0);
             },
             damage: (player, payload) => {
                 player.takeDamage(payload.amount ?? 0, null);
+                return true;
+            },
+            weapon: (player, payload) => {
+                if (!payload.weaponName) return false;
+                return player.giveWeapon(payload.weaponName);
             },
             ready: (player, payload) => {
-                this._setPlayerReady(player, payload.isReady ?? false);
+                return this._setPlayerReady(player, payload.isReady ?? false);
             },
             respawn: (player, payload) => {
                 player.respawn(
                     payload.health ?? 100,
                     payload.armor ?? 0,
-                    payload.targetState ?? this.ingame ? PlayerState.ALIVE : PlayerState.PREPARING
+                    payload.targetState ?? (this.ingame ? PlayerState.ALIVE : PlayerState.PREPARING)
                 );
+                return true;
             },
             resetGameStatus: (player) => {
                 player.resetGameStatus();
+                return true;
             }
         };
         /** @type {Array<() => boolean>} */
@@ -470,16 +478,15 @@ export class PlayerManager {
      * 把请求路由到对应 Player，并补齐当前目标玩家上下文。
      * @param {number|null} playerSlot null = 全体玩家
      * @param {string} typeId Buff 类型 ID
-     * @param {Record<string, any>} params Buff 参数
      * @returns {any}
      */
-    applyBuff(playerSlot, typeId, params) {
+    applyBuff(playerSlot, typeId) {
         if (!typeId) return null;
 
         /** @type {any} */
         let appliedBuff = null;
         this._forEachTargetPlayer(playerSlot, (player) => {
-            const buff = player.addBuff(typeId, params);
+            const buff = player.addBuff(typeId);
             if (appliedBuff == null) {
                 appliedBuff = buff;
             }
@@ -491,13 +498,16 @@ export class PlayerManager {
      * 统一奖励/效果分发入口
      * @param {number|null} playerSlot  null = 全体玩家
      * @param {TP_playerRewardPayload} payload
+     * @returns {boolean}
      */
     dispatchReward(playerSlot, payload) {
         const handler = this._rewardHandlers[payload.type];
-        if (!handler) return;
+        if (!handler) return false;
+        let allSucceeded = true;
         this._forEachTargetPlayer(playerSlot, (player) => {
-            handler(player, payload);
+            allSucceeded = handler(player, payload) && allSucceeded;
         });
+        return allSucceeded;
     }
 
     /**
@@ -524,7 +534,10 @@ export class PlayerManager {
         }
 
         for (const reward of rewards) {
-            this.dispatchReward(playerSlot, reward);
+            const applied = this.dispatchReward(playerSlot, reward);
+            if (!applied) {
+                return false;
+            }
         }
 
         return true;

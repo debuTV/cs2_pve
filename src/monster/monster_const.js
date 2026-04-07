@@ -17,8 +17,12 @@ export const targetTeam=5;
 //export const clearbyRound=true;
 /** 怪物生成点到最近玩家的距离阈值，大于此值则关闭该生成点。`-1` 表示不检测。 */
 export const spawnPointsDistance=-1;
-/** 怪物死亡后是否留下尸体。开启后尸体将永远不会被脚本删除。 */
-export const monstercorpse=true;
+/**
+ * 怪物死亡后，是否在死亡动画播放完成时删除模型。
+ * - `true`：动画结束后删除模型。
+ * - `false`：动画结束后保留模型，不删除。
+ */
+export const removeModelAfterDeathAnimation=false;
 //==================怪物移动相关设置================
 /** 世界重力加速度（单位/秒²）。 */
 export const gravity=800;

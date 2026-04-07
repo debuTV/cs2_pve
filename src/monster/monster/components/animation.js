@@ -2,7 +2,7 @@
  * @module 怪物系统/怪物组件/动画占用
  */
 import { Entity, Instance } from "cs_script/point_script";
-import { MonsterBuffEvents, MonsterState, monstercorpse } from "../../monster_const";
+import { MonsterBuffEvents, MonsterState, removeModelAfterDeathAnimation } from "../../monster_const";
 
 /**
  * 怪物动画控制器。
@@ -74,7 +74,7 @@ export class MonsterAnimator {
             else if (state == MonsterState.SKILL) this.monster.onOccupationEnd("skill");
             else if (state == MonsterState.DEAD) {
                 this.monster.emitEvent({ type: MonsterBuffEvents.ModelRemove });
-                this.monster.entityBridge.removeAfterDeath(monstercorpse);
+                this.monster.entityBridge.removeAfterDeath(removeModelAfterDeathAnimation);
             }
         });
     }

@@ -77,6 +77,7 @@ movementManager.initPathScheduler((start, end) => navMesh.findPath(start, end));
 const buffManager = new BuffManager();
 const particleManager = new ParticleManager();
 const areaEffectManager = new AreaEffectManager();
+const tempContext = new contextManager();
 
 // ═══════════════════════════════════════════════
 // 3. 跨模块回调绑定（全部集中在此）
@@ -131,11 +132,19 @@ eventBus.on(event.Game.Out.OnStartGame, (payload) => {
 eventBus.on(event.Game.Out.OnGameLost, (payload) => {
     void payload;
     shopManager.closeAll();
+    for (const player of playerManager.getActivePlayers()) {
+        player.stopInputTracking();
+    }
+    monsterManager.stopWave();
 });
 
 eventBus.on(event.Game.Out.OnGameWin, (payload) => {
     void payload;
     shopManager.closeAll();
+    for (const player of playerManager.getActivePlayers()) {
+        player.stopInputTracking();
+    }
+    monsterManager.stopWave();
 });
 
 eventBus.on(event.Game.Out.OnResetGame, (payload) => {
@@ -163,6 +172,25 @@ eventBus.on(event.Monster.Out.OnMonsterDeath, (/** @type {import("./monster/mons
         priority: -1,
     };
     eventBus.emit(event.Movement.In.RemoveRequest, removePayload);
+
+    const killerPawn = /** @type {import("cs_script/point_script").CSPlayerPawn | null | undefined} */ (payload.killer);
+    const killerSlot = killerPawn?.GetPlayerController?.()?.GetPlayerSlot?.();
+    if (typeof killerSlot === "number" && killerSlot >= 0 && payload.reward > 0) {
+        playerManager.dispatchReward(killerSlot, {
+            type: "exp",
+            amount: payload.reward,
+            reason: `击杀 ${payload.monster.type} 经验`,
+        });
+    }
+});
+eventBus.on(event.Monster.Out.OnAttack, (/** @type {import("./monster/monster_const").OnMonsterAttack} */ payload) => {
+    const targetSlot = payload.target?.GetPlayerController?.()?.GetPlayerSlot?.();
+    if (typeof targetSlot !== "number" || targetSlot < 0) return;
+
+    const player = playerManager.getPlayer(targetSlot);
+    if (!player) return;
+
+    player.takeDamage(payload.damage, payload.monster.model ?? null);
 });
 eventBus.on(event.Monster.Out.OnAllMonstersDead, () => {
     eventBus.emit(event.Wave.In.WaveEndRequest, {result: false});
@@ -355,7 +383,7 @@ Instance.SetThink(() => {
     const now = Instance.GetGameTime();
     const dt = Math.max(0, now - _lastTime);
     _lastTime = now;
-    const activePlayers = playerManager.getActivePlayers();
+    const isGamePlaying = gameManager.checkGameState();
     const alivePlayers = playerManager.getAlivePlayers();
     const alivePawns = alivePlayers
         .map((player) => player.entityBridge.pawn)
@@ -368,29 +396,44 @@ Instance.SetThink(() => {
     // ── 5.1 输入 / 玩家 / 波次 / Buff ──
     inputManager.tick();
     playerManager.tick();
-    waveManager.tick();
-    monsterManager.tick(currentMonsterEntities, alivePawns);
-    skillManager.tick();
-    const activeMonsters = monsterManager.getActiveMonsters();
-    const monsterEntities = activeMonsters
-        .map((monster) => monster.model)
-        .filter((entity) => entity != null);
-    const separationPositions = monsterEntities
-        .map((entity) => entity.GetAbsOrigin())
-        .filter((position) => position != null);
-    movementManager.tick(now, dt, separationPositions);
-    monsterManager.syncMovementStates(movementManager.getAllStates());
-    areaEffectManager.tick(now, {
-        players: alivePlayers,
-        monsters: activeMonsters,
-    });
-    particleManager.tickAll(now);
-    buffManager.tick();
-    navMesh.tick(alivePawns[0]?.GetAbsOrigin?.());
+    if (isGamePlaying) {
+        waveManager.tick();
+    }
+    if (isGamePlaying) {
+        monsterManager.tick(currentMonsterEntities, alivePawns);
+    }
+    if (isGamePlaying) {
+        skillManager.tick();
+        const activeMonsters = monsterManager.getActiveMonsters();
+        const monsterEntities = activeMonsters
+            .map((monster) => monster.model)
+            .filter((entity) => entity != null);
+        const separationPositions = monsterEntities
+            .map((entity) => entity.GetAbsOrigin())
+            .filter((position) => position != null);
+        tempContext.updateTickContext({
+            activeMonsters,
+            monsterEntities,
+            separationPositions,
+        });
+        movementManager.tick(now, dt, tempContext.separationPositions);
+        monsterManager.syncMovementStates(movementManager.getAllStates());
+        areaEffectManager.tick(now, {
+            players: alivePlayers,
+            monsters: tempContext.activeMonsters,
+        });
+        particleManager.tickAll(now);
+        buffManager.tick();
+    } else {
+        tempContext.resetTickContext();
+    }
+    if (isGamePlaying) {
+        navMesh.tick(alivePawns[0]?.GetAbsOrigin?.());
+    }
 
     // ── 5.2 其他模块 tick ──
     shopManager.tick();
-    hudManager.tick(activePlayers.map(p => p.getSummary()));
+    hudManager.tick(alivePlayers.map(p => p.getSummary()));
 
     // ── 5.3 玩家状态 HUD 同步 ──
     Instance.SetNextThink(now + 1 / 64);

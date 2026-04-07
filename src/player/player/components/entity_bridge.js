@@ -156,6 +156,18 @@ export class PlayerEntityBridge {
         }
     }
 
+    /**
+     * 向对应玩家发送客户端命令。
+     * @param {string} command
+     * @returns {boolean}
+     */
+    clientCommand(command) {
+        const slot = this.getSlot();
+        if (!this.isControllerValid() || slot < 0 || !command) return false;
+        Instance.ClientCommand(slot, command);
+        return true;
+    }
+
     /** 清除所有武器 */
     destroyWeapons() {
         if (this.pawn && this.pawn.IsValid()) {

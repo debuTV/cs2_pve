@@ -72,14 +72,14 @@ export class MonsterEntityBridge {
     }
 
     /**
-     * 死亡后移除引擎实体。breakable 始终移除，model 可根据配置保留为尸体。
-     * @param {boolean} keepCorpse 是否保留模型作为尸体
+     * 死亡后移除引擎实体。breakable 始终移除，model 是否删除由参数控制。
+     * @param {boolean} [removeModelAfterDeathAnimation=true] 是否删除怪物模型
      */
-    removeAfterDeath(keepCorpse) {
+    removeAfterDeath(removeModelAfterDeathAnimation = true) {
         if (this.monster.breakable?.IsValid()) {
             this.monster.breakable.Remove();
         }
-        if (!keepCorpse && this.monster.model?.IsValid()) {
+        if (removeModelAfterDeathAnimation && this.monster.model?.IsValid()) {
             this.monster.model.Remove();
         }
     }

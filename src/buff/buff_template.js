@@ -1,31 +1,11 @@
 import { Instance } from "cs_script/point_script";
-import { Monster } from "../monster/monster/monster";
-import { Player } from "../player/player/player";
 import { eventBus } from "../eventBus/event_bus";
 import { event } from "../util/definition";
-export const BuffFactory = {
-    /**
-     * 根据 typeId 创建对应的buff实例。未识别的 id 返回 null。
-     * @param {Monster|Player} target 所属怪物实例
-     * @param {string} targetType Buff 目标类型
-     * @param {string} typeid buff类型标识
-     * @param {number} id 
-     * @param {any} params buff配置参数
-     * @returns {BuffTemplate|null}
-     */
-    create(target,targetType,typeid,id, params) {
-        switch (typeid) {
-            case "corestats":
-                return null;
-            default:
-                return null;
-        } 
-    }
-};
+
 export class BuffTemplate{
     /**
      * @param {number}id
-     * @param {Monster|Player} target Buff 作用的目标
+     * @param {import("../monster/monster/monster").Monster|import("../player/player/player").Player} target Buff 作用的目标
      * @param {string} targetType Buff 目标类型
      * @param {string} typeId Buff 类型标识
      * @param {Record<string, any>} params Buff 运行参数
@@ -86,6 +66,8 @@ export class BuffTemplate{
      */
     OnBuffEmit(eventName,params)
     {
+        void eventName;
+        void params;
         return {result:false};
     }
 }

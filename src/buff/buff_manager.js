@@ -1,6 +1,7 @@
 import { Player } from "../player/player/player";
 import { Monster } from "../monster/monster/monster";
-import { BuffFactory, BuffTemplate } from "./buff_template";
+import { BuffTemplate } from "./buff_template";
+import { BuffFactory } from "./buff_factory";
 import { eventBus } from "../eventBus/event_bus";
 import { event } from "../util/definition";
 import { buffconfig } from "./buff_const";
@@ -48,7 +49,11 @@ export class BuffManager {
     addbuff(buffAddRequest)
     {
         const config=buffconfig[buffAddRequest.configid];
-        const buff = BuffFactory.create(buffAddRequest.target,buffAddRequest.targetType,config.typeid,this.id++, config.params);
+        if (!config) {
+            return -1;
+        }
+        const params = { ...(config.params ?? {}) };
+        const buff = BuffFactory.create(buffAddRequest.target,buffAddRequest.targetType,config.typeid,this.id++, params);
         if (buff) {
             buff.start();
             this.buffMap.set(buff.id, buff);

@@ -58,6 +58,12 @@ export class Player {
          * @type {Map<string, number>}
          */
         this.buffMap = new Map();
+        /** @type {Array<() => boolean>} */
+        this._buffUnsubscribers = [
+            eventBus.on(eventDefs.Buff.Out.OnBuffRemoved, (/** @type {import("../../buff/buff_const").OnBuffRemoved} */ payload) => {
+                this._removeRuntimeByBuffId(payload.buffId);
+            }),
+        ];
         /** @type {string} */
         this.professionId = DEFAULT_PLAYER_PROFESSION;
         /** @type {number | null} */
@@ -99,6 +105,10 @@ export class Player {
      */
     disconnect() {
         this.lifecycle.disconnect();
+        for (const unsubscribe of this._buffUnsubscribers) {
+            unsubscribe();
+        }
+        this._buffUnsubscribers.length = 0;
     }
 
     /**
@@ -168,17 +178,19 @@ export class Player {
     /**
      * 增加金钱。
      * @param {number} amount 金额
+     * @returns {number}
      */
     addMoney(amount) {
-        this.stats.addMoney(amount);
+        return this.stats.addMoney(amount);
     }
 
     /**
      * 增加经验值。
      * @param {number} amount 经验量
+     * @returns {number}
      */
     addExp(amount) {
-        this.stats.addExp(amount);
+        return this.stats.addExp(amount);
     }
 
     // ——— 输出伤害（基于等级配置缩放） ———
@@ -192,15 +204,23 @@ export class Player {
         return this.stats.getAttackDamage(baseDamage);
     }
 
+    /**
+     * 通过客户端命令给予玩家武器。
+     * @param {string} weaponName
+     * @returns {boolean}
+     */
+    giveWeapon(weaponName) {
+        return this.entityBridge.clientCommand(`give ${weaponName}`);
+    }
+
     // ——— Buff 入口（直接驱动全局 Buff 系统） ———
 
     /**
      * 添加指定类型的 Buff。
      * @param {string} typeId Buff 类型标识
-     * @param {Record<string, any>} params Buff 初始化参数
      * @returns {boolean} 是否成功添加 Buff
      */
-    addBuff(typeId, params) {
+    addBuff(typeId) {
         if (this.buffMap.has(typeId)) return false;
         /** @type {import("../../buff/buff_const").BuffAddRequest} */
         const addRequest = {
@@ -212,6 +232,7 @@ export class Player {
         eventBus.emit(eventDefs.Buff.In.BuffAddRequest, addRequest);
         if (addRequest.result <= 0) return false;
         this.buffMap.set(typeId, addRequest.result);
+        this.recomputeDerivedStats();
         return true;
     }
 
@@ -231,25 +252,27 @@ export class Player {
         eventBus.emit(eventDefs.Buff.In.BuffRemoveRequest, removeRequest);
         if (!removeRequest.result) return false;
         this.buffMap.delete(typeId);
+        this.recomputeDerivedStats();
         return true;
     }
 
     /**
      * 刷新指定类型的 Buff；若不存在则尝试直接添加。
      * @param {string} typeId Buff 类型标识
-     * @param {Record<string, any>} params Buff 刷新参数
      * @returns {boolean} 是否成功
      */
-    refreshBuff(typeId, params) {
+    refreshBuff(typeId) {
         const id = this.buffMap.get(typeId);
-        if (id == null) return this.addBuff(typeId, params);
+        if (id == null) return this.addBuff(typeId);
         /** @type {import("../../buff/buff_const").BuffRefreshRequest} */
         const refreshRequest = {
             buffId: id,
             result: false,
         };
         eventBus.emit(eventDefs.Buff.In.BuffRefreshRequest, refreshRequest);
-        return refreshRequest.result;
+        if (!refreshRequest.result) return false;
+        this.recomputeDerivedStats();
+        return true;
     }
 
     /**
@@ -259,6 +282,25 @@ export class Player {
         for (const [typeId] of this.buffMap.entries()) {
             this.removeBuff(typeId);
         }
+    }
+
+    /**
+     * @param {number} buffId
+     */
+    _removeRuntimeByBuffId(buffId) {
+        for (const [typeId, id] of this.buffMap.entries()) {
+            if (id !== buffId) continue;
+            this.buffMap.delete(typeId);
+            this.recomputeDerivedStats();
+            break;
+        }
+    }
+
+    recomputeDerivedStats() {
+        this.stats.refreshLevelStats();
+        this.entityBridge.syncMaxHealth(this.stats.maxHealth);
+        this.entityBridge.syncHealth(this.stats.health);
+        this.entityBridge.syncArmor(this.stats.armor);
     }
 
     /**
@@ -460,7 +502,7 @@ export class Player {
 
     /** @returns {boolean} */
     get isAlive() {
-        return this.state !== PlayerState.DEAD && this.state !== PlayerState.DISCONNECTED;
+        return this.state === PlayerState.ALIVE;
     }
 
     /** @returns {boolean} */

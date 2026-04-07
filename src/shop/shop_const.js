@@ -44,7 +44,7 @@ export const BASE_SHOP_ITEMS = [
     { id: "heal_large",  displayName: "大型治疗包", cost: 500,  requiredLevel: 3, payload: { type: "heal",  amount: 80 } },
     { id: "armor_small", displayName: "轻型护甲",   cost: 300,  requiredLevel: 1, payload: { type: "armor", amount: 50 } },
     { id: "armor_full",  displayName: "重型护甲",   cost: 800,  requiredLevel: 5, payload: { type: "armor", amount: 100 } },
-    { id: "buff_attack", displayName: "强攻增益",   cost: 600,  requiredLevel: 2, payload: { type: "buff",  buffTypeId: "attack_up", params: { duration: 30, multiplier: 1.35 } } },
+    { id: "buff_attack", displayName: "强攻增益",   cost: 600,  requiredLevel: 2, payload: { type: "buff",  buffTypeId: "attack_up" } },
     { id: "weapon_ak47", displayName: "AK-47",      cost: 2700, requiredLevel: 4, payload: { type: "weapon", weaponName: "weapon_ak47" } },
 ];
 

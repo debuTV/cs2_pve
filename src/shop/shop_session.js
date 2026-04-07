@@ -228,10 +228,29 @@ export class ShopSession {
             return { result: ShopResult.GRANT_FAILED, message: this._lastMessage };
         }
 
-        const grantResult = this._dispatchRewards([
-            { type: "money", amount: -ctx.price },
+        const rewardGrantResult = this._dispatchRewards([
             rewardBuildResult.reward,
         ]);
+
+        if (!rewardGrantResult.success) {
+            this._lastMessage = rewardGrantResult.message ?? "购买失败";
+            this._refreshHud();
+            return { result: ShopResult.GRANT_FAILED, message: this._lastMessage };
+        }
+
+        const costGrantResult = this._dispatchRewards([
+            { type: "money", amount: -ctx.price },
+        ]);
+
+        if (!costGrantResult.success) {
+            this._lastMessage = costGrantResult.message ?? "扣费失败";
+            this._refreshHud();
+            return { result: ShopResult.GRANT_FAILED, message: this._lastMessage };
+        }
+
+        const grantResult = rewardGrantResult.message
+            ? rewardGrantResult
+            : costGrantResult;
 
         if (!grantResult.success) {
             this._lastMessage = grantResult.message ?? "购买失败";
@@ -280,17 +299,16 @@ export class ShopSession {
                     reward: {
                         type: "buff",
                         buffTypeId: payload.buffTypeId,
-                        params: payload.params,
-                        source: {
-                            sourceType: "shop",
-                            itemId: item.id,
-                        },
                     },
                 };
             case "money":
                 return { reward: { type: "money", amount: payload.amount ?? 0 } };
             case "weapon":
-                return { reward: null, message: "武器系统暂未接入" };
+                if (!payload.weaponName) {
+                    return { reward: null, message: "商品无武器定义" };
+                }
+
+                return { reward: { type: "weapon", weaponName: payload.weaponName } };
             default:
                 return { reward: null, message: `未知效果类型: ${payload.type}` };
         }

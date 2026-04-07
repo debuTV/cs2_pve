@@ -2,6 +2,8 @@
  * @module 波次系统/波次配置
  */
 
+import { MonsterType } from "../monster/monster_const";
+
 /**
  * 波次状态枚举。
  *
@@ -57,7 +59,7 @@ export const wavesConfig=[
             monster_breakablemaxs:{x:30,y:30,z:75},//最大怪物的breakable的maxs
             broadcastmessage:[{message:"",delay:1}],
             // monster 系统已独立拆出，主工程仅保留波次元数据。
-            monsterTypes:[]
+            monsterTypes:[MonsterType.Zombie]
         },{ 
             name: "训练波", 
             totalMonsters: 4, 
@@ -69,6 +71,6 @@ export const wavesConfig=[
             monster_breakablemins:{x:-30,y:-30,z:0},//最大怪物的breakable的mins
             monster_breakablemaxs:{x:30,y:30,z:75},//最大怪物的breakable的maxs
             broadcastmessage:[{message:"",delay:1}],
-            monsterTypes:[]
+            monsterTypes:[MonsterType.Zombie]
         },
     ];

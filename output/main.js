@@ -314,6 +314,8 @@ const event={
             BuffEmitRequest:"Buff_OnBuffEmitRequest",              //其他模块发生事件告诉buff
         },
         Out:{
+            OnBuffAdded:"Buff_OnBuffAdded",                //Buff 添加后
+            OnBuffRefreshed:"Buff_OnBuffRefreshed",        //Buff 刷新后
             OnBuffRemoved:"Buff_OnBuffRemoved",            //Buff 移除后
         }
     },
@@ -558,18 +560,22 @@ class GameManager {
      * 触发游戏失败。将状态切换为 LOST 并广播失败消息。
      */
     gameLost() {
+        if (this.gameState === GameState.LOST || this.gameState === GameState.WON) return false;
         this.gameState = GameState.LOST;
         this._adapter.broadcast("=== 游戏失败 ===");
         eventBus.emit(event.Game.Out.OnGameLost);
+        return true;
     }
 
     /**
      * 触发游戏胜利。将状态切换为 WON 并广播胜利消息。
      */
     gameWon() {
+        if (this.gameState === GameState.LOST || this.gameState === GameState.WON) return false;
         this.gameState = GameState.WON;
         this._adapter.broadcast("=== 游戏胜利 ===");
         eventBus.emit(event.Game.Out.OnGameWin);
+        return true;
     }
 
     /**
@@ -584,13 +590,259 @@ class GameManager {
      * 检查游戏状态。是否正在游戏
      */
     checkGameState() {
-        return this.gameState == GameState.PLAYING;
+        return this.gameState === GameState.PLAYING;
     }
 }
 
 /**
+ * @module 怪物系统/脚本全局配置
+ */
+
+/** 观赏模式下，玩家是否受到怪物基础伤害（直接造成原始伤害，不进行修改）。 */
+//export const playerDamage=true;
+/** 是否在新回合开始或结束时重置脚本。观赏模式（ZE 模式）推荐开启。 */
+//export const clearbyRound=true;
+/** 怪物生成点到最近玩家的距离阈值，大于此值则关闭该生成点。`-1` 表示不检测。 */
+const spawnPointsDistance=-1;
+/**
+ * 怪物死亡后，是否在死亡动画播放完成时删除模型。
+ * - `true`：动画结束后删除模型。
+ * - `false`：动画结束后保留模型，不删除。
+ */
+const removeModelAfterDeathAnimation=false;
+/** 地面摩擦力系数，影响怪物减速效果。 */
+//export const friction=6;
+/** 怪物可攀爬的最大台阶高度（单位），建议与 NavMesh 设置保持一致。 */
+//export const stepHeight=13;
+/** 路径节点切换距离——怪物距下一个导航点小于此值时切换到再下一个点。 */
+//export const goalTolerance=8;
+/** 到达最后一个导航点后的停止距离——距目标小于此值后怪物不再前进。 */
+//export const arriveDistance=1;
+/** 移动判定阈值——单帧位移小于此值时视为怪物未移动。 */
+//export const moveEpsilon=0.5;
+/** 卡死判定时间（秒）——连续无移动超过此时长视为怪物卡死。 */
+//export const timeThreshold=2;
+
+/** 怪物移动碰撞盒最小角（负半尺寸）。盒子过大容易过不去门，过小则怪物看起来会穿墙。 */
+//export const Tracemins={x:-4,y:-4,z:1};
+/** 怪物移动碰撞盒最大角（正半尺寸）。 */
+//export const Tracemaxs={x:4,y:4,z:4};
+/** 地面检测射线向下延伸的距离（单位）。 */
+//export const groundCheckDist=8;
+/** 每次移动后与碰撞面保持的安全距离（单位）。 */
+//export const surfaceEpsilon=4;
+
+/**
+ * 怪物状态枚举。
+ *
+ * 定义了怪物在战斗循环中可能处于的所有状态。
+ * Monster 的 `brainState` 组件和 `tickDispatcher` 会根据这些值
+ * 决定每帧应该执行的行为（移动、攻击、施法或待机）。
+ *
+ * 状态流转典型路径：
+ * `IDLE → CHASE → ATTACK → CHASE` 或 `IDLE → CHASE → SKILL → CHASE`，
+ * 死亡后进入 `DEAD` 终态。
+ *
+ * - `IDLE` (0)：空闲状态，刚生成或无目标时的默认状态。
+ * - `CHASE` (1)：追击状态，正在寻路并移动向目标玩家。
+ * - `ATTACK` (2)：攻击状态，到达攻击距离后执行普通攻击动作。
+ * - `SKILL` (3)：技能状态，正在施放主动技能，此时移动和普攻被暂停。
+ * - `DEAD` (4)：死亡终态，怪物已被击杀，等待清理。
+ */
+const MonsterState = {
+    IDLE: 0,//空闲
+    CHASE: 1,//追人
+    ATTACK: 2,//攻击
+    SKILL:  3,//技能
+    DEAD: 4//死亡
+};
+/**
+ * 怪物事件类型常量。
+ *
+ * 收录怪物技能内部事件名称字符串。
+ * 使用统一常量替代散落的字符串，防止拼写错误导致事件丢失。
+ *
+ * 事件按职责分为四组：
+ * - **生命周期**：生成（Spawn）、死亡（Die）、模型移除（ModelRemove）。
+ * - **战斗**：受伤（TakeDamage）、攻击命中（AttackTrue）、攻击未命中（AttackFalse）。
+ * - **AI**：每帧心跳（Tick）、目标更新（TargetUpdate）。
+ * - **技能**：技能施放（SkillCast）。
+ *
+ */
+const MonsterBuffEvents = {
+    // 生命周期
+    Spawn:        "OnSpawn",
+    Die:          "OnDie",
+    ModelRemove:  "OnModelRemove",
+    // 战斗
+    BeforeTakeDamage: "BeforeTakeDamage", // 受伤前事件，允许修改伤害
+    TakeDamage:   "OnTakeDamage",        // 受伤后事件，提供最终伤害值
+    AttackTrue:   "OnAttackTrue",
+    AttackFalse:  "OnAttackFalse",
+    // AI
+    Tick:         "OnTick",
+    TargetUpdate: "OnupdateTarget"};
+
+/**
+ * @typedef {object} OnMonsterSpawn
+ * @property {import("./monster/monster").Monster} monster
+ */
+/**
+ * @typedef {object} OnMonsterDeath
+ * @property {import("./monster/monster").Monster} monster
+ * @property {import("cs_script/point_script").Entity|null|undefined} killer
+ * @property {number} reward
+ */
+/**
+ * @typedef {object} OnMonsterAttack
+ * @property {import("./monster/monster").Monster} monster
+ * @property {number} damage
+ * @property {import("cs_script/point_script").CSPlayerPawn} target
+ */
+/**
+ * @typedef {object} MonsterBeforeTakeDamageRequest
+ * @property {import("./monster/monster").Monster} monster
+ * @property {number} amount
+ * @property {import("cs_script/point_script").CSPlayerPawn|null} attacker
+ * @property {number|void} result
+ */
+/**
+ * @typedef {object} MonsterSpawnRequest
+ * @property {import("./monster/monster").Monster} monster
+ * @property {{typeName?: string, radiusMin?: number, radiusMax?: number, tries?: number}} options
+ * @property {boolean} result
+ */
+/**
+ * @typedef {object} MonsterSkillAddRequest
+ * @property {import("./monster/monster").Monster} monster
+ * @property {string} typeId
+ * @property {Record<string, any>} params
+ * @property {number|null} result
+ */
+/**
+ * @typedef {object} MonsterSkillUseRequest
+ * @property {import("./monster/monster").Monster} monster
+ * @property {number} skillId
+ * @property {Record<string, any>} params
+ * @property {boolean} result
+ */
+/**
+ * @typedef {object} MonsterSkillEmitRequest
+ * @property {import("./monster/monster").Monster} monster
+ * @property {number} skillId
+ * @property {string} eventName
+ * @property {Record<string, any>} params
+ * @property {boolean} result
+ */
+
+/**
+ * 怪物配置
+ * @type {{ [key: string]: import("../util/definition").monsterTypes }} 
+ */
+const MonsterType={
+    "Zombie":{            
+            template_name:"headcrab_classic_template",
+            model_name:"headcrab_classic_model",//模型本体，animations播放的是这个模型的动画
+            name: "Zombie",
+            baseHealth: 100,
+            baseDamage: 10,
+            speed: 150,
+            reward: 100,
+            attackdist:80,
+            attackCooldown:0.1,
+            movementmode:"walk",
+            skill_pool:[
+                //// 示例：同类型技能重复（分别叠加不同属性）
+                //{
+                //    id:"corestats",
+                //    chance: 1,
+                //    params:{ health_value:200 }          // 实例 id=0
+                //},
+                //{
+                //    id:"corestats",
+                //    chance: 1,
+                //    params:{ speed_mult:1.5 }            // 实例 id=1，两个 corestats 独立生效
+                //},
+                //// 示例：单个技能绑定多个触发事件
+                //{
+                //    id:"spawn",
+                //    chance: 1,
+                //    params:{ events:["OnSpawn","OnTakeDamage"], count:1, typeName:"Zombie", maxSummons:3 }
+                //},
+                //// 示例：有动画的 pounce
+                //{
+                //    id:"pounce",
+                //    chance: 1,
+                //    params:{ cooldown:5, distance:250, animation:"pounce" }
+                //},
+                //// 示例：无动画的 pounce（在 canTrigger 内直接执行）
+                //{
+                //    id:"pounce",
+                //    chance: 1,
+                //    params:{ cooldown:10, distance:400 }  // 无 animation → 无动画直触发
+                //},
+                //// 示例：护盾
+                //{
+                //    id: "shield",
+                //    chance: 1,
+                //    params: { cooldown:15, runtime:-1, value:50 }
+                //},
+                //// 示例：急速（5秒内速度×1.8，冷却10秒，可选发光）
+                //{
+                //    id: "speedboost",
+                //    chance: 1,
+                //    params: { cooldown:10, runtime:5, speed_mult:1.8, glow:{r:255,g:128,b:0} }
+                //},
+                //// 示例：投掷石头（trigger 待实现）
+                //{
+                //    id: "throwstone",
+                //    chance: 1,
+                //    params: { cooldown:6, distanceMin:100, distanceMax:500, damage:15, projectileSpeed:600 }
+                //},
+                //// 示例：持续激光（trigger 待实现，2秒持续，每0.25秒结算一次）
+                //{
+                //    id: "laserbeam",
+                //    chance: 1,
+                //    params: { cooldown:8, distance:400, duration:2, damagePerSecond:30, tickInterval:0.25 }
+                //},
+                //// 示例：死亡时产卵
+                //{
+                //    id: "spawn",
+                //    chance: 1,
+                //    params: { count:1, typeName:"Zombie", maxSummons:3, radiusMin:24, radiusMax:96, tries:6 }
+                //}
+            ],
+            animations:{
+                "idle":[
+                    "headcrab_classic_idle",
+                    "headcrab_classic_idle_b",
+                    "headcrab_classic_idle_c"
+                ],
+                "walk":[
+                    "headcrab_classic_walk",
+                    "headcrab_classic_run"
+                ],
+                "attack":[
+                    "headcrab_classic_attack_antic_02",
+                    "headcrab_classic_attack_antic_03",
+                    "headcrab_classic_attack_antic_04"
+                ],
+                "skill":[
+                    "headcrab_classic_attack_antic_02",
+                    "headcrab_classic_attack_antic_03",
+                    "headcrab_classic_attack_antic_04"
+                ],
+                "pounce":[
+                    "headcrab_classic_jumpattack"
+                ]
+            }
+        }
+};
+
+/**
  * @module 波次系统/波次配置
  */
+
 
 /**
  * 波次状态枚举。
@@ -647,7 +899,7 @@ const wavesConfig=[
             monster_breakablemaxs:{x:30,y:30,z:75},//最大怪物的breakable的maxs
             broadcastmessage:[{message:"",delay:1}],
             // monster 系统已独立拆出，主工程仅保留波次元数据。
-            monsterTypes:[]
+            monsterTypes:[MonsterType.Zombie]
         },{ 
             name: "训练波", 
             totalMonsters: 4, 
@@ -659,7 +911,7 @@ const wavesConfig=[
             monster_breakablemins:{x:-30,y:-30,z:0},//最大怪物的breakable的mins
             monster_breakablemaxs:{x:30,y:30,z:75},//最大怪物的breakable的maxs
             broadcastmessage:[{message:"",delay:1}],
-            monsterTypes:[]
+            monsterTypes:[MonsterType.Zombie]
         },
     ];
 
@@ -1000,259 +1252,18 @@ class MonsterEntityBridge {
     }
 
     /**
-     * 死亡后移除引擎实体。breakable 始终移除，model 可根据配置保留为尸体。
-     * @param {boolean} keepCorpse 是否保留模型作为尸体
+     * 死亡后移除引擎实体。breakable 始终移除，model 是否删除由参数控制。
+     * @param {boolean} [removeModelAfterDeathAnimation=true] 是否删除怪物模型
      */
-    removeAfterDeath(keepCorpse) {
+    removeAfterDeath(removeModelAfterDeathAnimation = true) {
         if (this.monster.breakable?.IsValid()) {
             this.monster.breakable.Remove();
         }
-        if (!keepCorpse && this.monster.model?.IsValid()) {
+        if (removeModelAfterDeathAnimation && this.monster.model?.IsValid()) {
             this.monster.model.Remove();
         }
     }
 }
-
-/**
- * @module 怪物系统/脚本全局配置
- */
-
-/** 观赏模式下，玩家是否受到怪物基础伤害（直接造成原始伤害，不进行修改）。 */
-//export const playerDamage=true;
-/** 是否在新回合开始或结束时重置脚本。观赏模式（ZE 模式）推荐开启。 */
-//export const clearbyRound=true;
-/** 怪物生成点到最近玩家的距离阈值，大于此值则关闭该生成点。`-1` 表示不检测。 */
-const spawnPointsDistance=-1;
-/** 怪物死亡后是否留下尸体。开启后尸体将永远不会被脚本删除。 */
-const monstercorpse=true;
-/** 地面摩擦力系数，影响怪物减速效果。 */
-//export const friction=6;
-/** 怪物可攀爬的最大台阶高度（单位），建议与 NavMesh 设置保持一致。 */
-//export const stepHeight=13;
-/** 路径节点切换距离——怪物距下一个导航点小于此值时切换到再下一个点。 */
-//export const goalTolerance=8;
-/** 到达最后一个导航点后的停止距离——距目标小于此值后怪物不再前进。 */
-//export const arriveDistance=1;
-/** 移动判定阈值——单帧位移小于此值时视为怪物未移动。 */
-//export const moveEpsilon=0.5;
-/** 卡死判定时间（秒）——连续无移动超过此时长视为怪物卡死。 */
-//export const timeThreshold=2;
-
-/** 怪物移动碰撞盒最小角（负半尺寸）。盒子过大容易过不去门，过小则怪物看起来会穿墙。 */
-//export const Tracemins={x:-4,y:-4,z:1};
-/** 怪物移动碰撞盒最大角（正半尺寸）。 */
-//export const Tracemaxs={x:4,y:4,z:4};
-/** 地面检测射线向下延伸的距离（单位）。 */
-//export const groundCheckDist=8;
-/** 每次移动后与碰撞面保持的安全距离（单位）。 */
-//export const surfaceEpsilon=4;
-
-/**
- * 怪物状态枚举。
- *
- * 定义了怪物在战斗循环中可能处于的所有状态。
- * Monster 的 `brainState` 组件和 `tickDispatcher` 会根据这些值
- * 决定每帧应该执行的行为（移动、攻击、施法或待机）。
- *
- * 状态流转典型路径：
- * `IDLE → CHASE → ATTACK → CHASE` 或 `IDLE → CHASE → SKILL → CHASE`，
- * 死亡后进入 `DEAD` 终态。
- *
- * - `IDLE` (0)：空闲状态，刚生成或无目标时的默认状态。
- * - `CHASE` (1)：追击状态，正在寻路并移动向目标玩家。
- * - `ATTACK` (2)：攻击状态，到达攻击距离后执行普通攻击动作。
- * - `SKILL` (3)：技能状态，正在施放主动技能，此时移动和普攻被暂停。
- * - `DEAD` (4)：死亡终态，怪物已被击杀，等待清理。
- */
-const MonsterState = {
-    IDLE: 0,//空闲
-    CHASE: 1,//追人
-    ATTACK: 2,//攻击
-    SKILL:  3,//技能
-    DEAD: 4//死亡
-};
-/**
- * 怪物事件类型常量。
- *
- * 收录怪物技能内部事件名称字符串。
- * 使用统一常量替代散落的字符串，防止拼写错误导致事件丢失。
- *
- * 事件按职责分为四组：
- * - **生命周期**：生成（Spawn）、死亡（Die）、模型移除（ModelRemove）。
- * - **战斗**：受伤（TakeDamage）、攻击命中（AttackTrue）、攻击未命中（AttackFalse）。
- * - **AI**：每帧心跳（Tick）、目标更新（TargetUpdate）。
- * - **技能**：技能施放（SkillCast）。
- *
- */
-const MonsterBuffEvents = {
-    // 生命周期
-    Spawn:        "OnSpawn",
-    Die:          "OnDie",
-    ModelRemove:  "OnModelRemove",
-    // 战斗
-    BeforeTakeDamage: "BeforeTakeDamage", // 受伤前事件，允许修改伤害
-    TakeDamage:   "OnTakeDamage",        // 受伤后事件，提供最终伤害值
-    AttackTrue:   "OnAttackTrue",
-    AttackFalse:  "OnAttackFalse",
-    // AI
-    Tick:         "OnTick",
-    TargetUpdate: "OnupdateTarget"};
-
-/**
- * @typedef {object} OnMonsterSpawn
- * @property {import("./monster/monster").Monster} monster
- */
-/**
- * @typedef {object} OnMonsterDeath
- * @property {import("./monster/monster").Monster} monster
- * @property {import("cs_script/point_script").Entity|null|undefined} killer
- * @property {number} reward
- */
-/**
- * @typedef {object} OnMonsterAttack
- * @property {import("./monster/monster").Monster} monster
- * @property {number} damage
- * @property {import("cs_script/point_script").CSPlayerPawn} target
- */
-/**
- * @typedef {object} MonsterBeforeTakeDamageRequest
- * @property {import("./monster/monster").Monster} monster
- * @property {number} amount
- * @property {import("cs_script/point_script").CSPlayerPawn|null} attacker
- * @property {number|void} result
- */
-/**
- * @typedef {object} MonsterSpawnRequest
- * @property {import("./monster/monster").Monster} monster
- * @property {{typeName?: string, radiusMin?: number, radiusMax?: number, tries?: number}} options
- * @property {boolean} result
- */
-/**
- * @typedef {object} MonsterSkillAddRequest
- * @property {import("./monster/monster").Monster} monster
- * @property {string} typeId
- * @property {Record<string, any>} params
- * @property {number|null} result
- */
-/**
- * @typedef {object} MonsterSkillUseRequest
- * @property {import("./monster/monster").Monster} monster
- * @property {number} skillId
- * @property {Record<string, any>} params
- * @property {boolean} result
- */
-/**
- * @typedef {object} MonsterSkillEmitRequest
- * @property {import("./monster/monster").Monster} monster
- * @property {number} skillId
- * @property {string} eventName
- * @property {Record<string, any>} params
- * @property {boolean} result
- */
-
-/**
- * 怪物配置
- * @type {{ [key: string]: import("../util/definition").monsterTypes }} 
- */
-const MonsterType={
-    "Zombie":{            
-            template_name:"headcrab_classic_template",
-            model_name:"headcrab_classic_model",//模型本体，animations播放的是这个模型的动画
-            name: "Zombie",
-            baseHealth: 100,
-            baseDamage: 10,
-            speed: 150,
-            reward: 100,
-            attackdist:80,
-            attackCooldown:0.1,
-            movementmode:"walk",
-            skill_pool:[
-                //// 示例：同类型技能重复（分别叠加不同属性）
-                //{
-                //    id:"corestats",
-                //    chance: 1,
-                //    params:{ health_value:200 }          // 实例 id=0
-                //},
-                //{
-                //    id:"corestats",
-                //    chance: 1,
-                //    params:{ speed_mult:1.5 }            // 实例 id=1，两个 corestats 独立生效
-                //},
-                //// 示例：单个技能绑定多个触发事件
-                //{
-                //    id:"spawn",
-                //    chance: 1,
-                //    params:{ events:["OnSpawn","OnTakeDamage"], count:1, typeName:"Zombie", maxSummons:3 }
-                //},
-                //// 示例：有动画的 pounce
-                //{
-                //    id:"pounce",
-                //    chance: 1,
-                //    params:{ cooldown:5, distance:250, animation:"pounce" }
-                //},
-                //// 示例：无动画的 pounce（在 canTrigger 内直接执行）
-                //{
-                //    id:"pounce",
-                //    chance: 1,
-                //    params:{ cooldown:10, distance:400 }  // 无 animation → 无动画直触发
-                //},
-                //// 示例：护盾
-                //{
-                //    id: "shield",
-                //    chance: 1,
-                //    params: { cooldown:15, runtime:-1, value:50 }
-                //},
-                //// 示例：急速（5秒内速度×1.8，冷却10秒，可选发光）
-                //{
-                //    id: "speedboost",
-                //    chance: 1,
-                //    params: { cooldown:10, runtime:5, speed_mult:1.8, glow:{r:255,g:128,b:0} }
-                //},
-                //// 示例：投掷石头（trigger 待实现）
-                //{
-                //    id: "throwstone",
-                //    chance: 1,
-                //    params: { cooldown:6, distanceMin:100, distanceMax:500, damage:15, projectileSpeed:600 }
-                //},
-                //// 示例：持续激光（trigger 待实现，2秒持续，每0.25秒结算一次）
-                //{
-                //    id: "laserbeam",
-                //    chance: 1,
-                //    params: { cooldown:8, distance:400, duration:2, damagePerSecond:30, tickInterval:0.25 }
-                //},
-                //// 示例：死亡时产卵
-                //{
-                //    id: "spawn",
-                //    chance: 1,
-                //    params: { count:1, typeName:"Zombie", maxSummons:3, radiusMin:24, radiusMax:96, tries:6 }
-                //}
-            ],
-            animations:{
-                "idle":[
-                    "headcrab_classic_idle",
-                    "headcrab_classic_idle_b",
-                    "headcrab_classic_idle_c"
-                ],
-                "walk":[
-                    "headcrab_classic_walk",
-                    "headcrab_classic_run"
-                ],
-                "attack":[
-                    "headcrab_classic_attack_antic_02",
-                    "headcrab_classic_attack_antic_03",
-                    "headcrab_classic_attack_antic_04"
-                ],
-                "skill":[
-                    "headcrab_classic_attack_antic_02",
-                    "headcrab_classic_attack_antic_03",
-                    "headcrab_classic_attack_antic_04"
-                ],
-                "pounce":[
-                    "headcrab_classic_jumpattack"
-                ]
-            }
-        }
-};
 
 /**
  * @module 怪物系统/怪物组件/生命与战斗
@@ -1780,6 +1791,7 @@ class CoreStats extends SkillTemplate {
             if (this.params.speed_mult ) this.monster.baseSpeed *= this.params.speed_mult;
             if (this.params.reward_value ) this.monster.baseReward += this.params.reward_value;
             if (this.params.reward_mult ) this.monster.baseReward *= this.params.reward_mult;
+            this.monster.recomputeDerivedStats();
         }
     }
 }
@@ -2322,9 +2334,6 @@ class SpeedBoostSkill extends SkillTemplate {
      */
     constructor(player, monster, id, params = {}) {
         super(player, monster, "speedboost", id, params);
-        this.runtime = params.runtime ?? 3;
-        this.speed_mult = params.speed_mult ?? 1;
-        this.speed_value = params.speed_value ?? 0;
         this.animation = params.animation ?? null;
         this.events = params.events ?? [SkillEvents.Tick];
         this.glow = params.glow ?? null;
@@ -2353,16 +2362,7 @@ class SpeedBoostSkill extends SkillTemplate {
         const monster = this.monster;
         if (!this.running || !monster) return;
 
-        /** @type {any[]} */
-        const buffs = monster.getAllBuffs();
-        const hasOwnBuff = buffs.some((buff) => buff.groupKey === this._getBuffGroupKey());
-
-        if (!hasOwnBuff) {
-            this._endBoost();
-            return;
-        }
-
-        if (this.runtime !== -1 && this.lastTriggerTime + this.runtime <= Instance.GetGameTime()) {
+        if (!monster.hasBuff("speed_up")) {
             this._endBoost();
         }
     }
@@ -2376,20 +2376,7 @@ class SpeedBoostSkill extends SkillTemplate {
         const monster = this.monster;
         if (!monster) return;
 
-        const buff = monster.addBuff("speed_up", {
-            duration: this.runtime,
-            multiplier: this.speed_mult,
-            flatBonus: this.speed_value,
-            groupKey: this._getBuffGroupKey(),
-        }, {
-            sourceType: "monster-self-buff",
-            sourceId: monster.id,
-            monsterId: monster.id,
-            monsterType: monster.type ?? "unknown",
-            skillTypeId: this.typeId,
-        }, {
-            monster,
-        });
+        const buff = monster.addBuff("speed_up");
 
         if (!buff) return;
 
@@ -2406,10 +2393,6 @@ class SpeedBoostSkill extends SkillTemplate {
         if (this.glow && monster && monster.model instanceof BaseModelEntity) {
             monster.model.Unglow();
         }
-    }
-
-    _getBuffGroupKey() {
-        return `skill:speedboost:${this.id}`;
     }
 }
 
@@ -2956,6 +2939,19 @@ class MonsterMovementPathAdapter {
         this._submitChase();
     }
 
+    refreshMovement() {
+        if (!this._active) return;
+        if (this.monster.state === MonsterState.DEAD) {
+            this.deactivate();
+            return;
+        }
+        if (!this.monster.target) {
+            this.deactivate();
+            return;
+        }
+        this._submitChase();
+    }
+
     /** 内部：提交一次 Chase Move 请求。 */
     _submitChase() {
         const entity = this._getMovementEntity();
@@ -2969,6 +2965,7 @@ class MonsterMovementPathAdapter {
             targetEntity: target,
             usePathRefresh: !this.monster.isOccupied(),
             useNPCSeparation: true,
+            maxSpeed: this.monster.speed,
             Mode: this._defaultMode,
         });
     }
@@ -3060,7 +3057,7 @@ class MonsterAnimator {
             else if (state == MonsterState.SKILL) this.monster.onOccupationEnd("skill");
             else if (state == MonsterState.DEAD) {
                 this.monster.emitEvent({ type: MonsterBuffEvents.ModelRemove });
-                this.monster.entityBridge.removeAfterDeath(monstercorpse);
+                this.monster.entityBridge.removeAfterDeath(removeModelAfterDeathAnimation);
             }
         });
     }
@@ -3470,7 +3467,7 @@ class Monster {
         this.initSkills(typeConfig.skill_pool);
         this.movementPath.init(typeConfig);
         this.animation.init(typeConfig.animations);
-        this.emitBuffEvent("OnRecompute", { recompute: true });
+        this.recomputeDerivedStats();
     }
 
     init() {
@@ -3538,6 +3535,7 @@ class Monster {
             source,
             context,
         });
+        this.recomputeDerivedStats();
         return true;
     }
 
@@ -3563,6 +3561,7 @@ class Monster {
             runtime.params = { ...(params ?? runtime.params) };
             runtime.groupKey = typeof runtime.params.groupKey === "string" ? runtime.params.groupKey : null;
         }
+        this.recomputeDerivedStats();
         return true;
     }
 
@@ -3639,7 +3638,15 @@ class Monster {
 
         this.buffMap.delete(typeId);
         this.buffStateMap.delete(typeId);
+        this.recomputeDerivedStats();
         return true;
+    }
+
+    recomputeDerivedStats() {
+        this.damage = this.baseDamage;
+        this.speed = this.baseSpeed;
+        this.emitBuffEvent("OnRecompute", { recompute: true });
+        this.movementPath.refreshMovement();
     }
 
     /**
@@ -3650,6 +3657,7 @@ class Monster {
             if (id !== buffId) continue;
             this.buffMap.delete(typeId);
             this.buffStateMap.delete(typeId);
+            this.recomputeDerivedStats();
             break;
         }
     }
@@ -3940,8 +3948,35 @@ const PlayerBuffEvents = {
  * @property {number} buffId Buff id
  */
 //=====================预制buff配置====================
+// Buff 构建参数的唯一来源。运行时只按 configid 查这里的预设，不接受外部附加参数。
 /**@type {Record<string, BuffConfig>} */
 const buffconfig={
+	poison:{
+		configid:"poison",
+		typeid:"poison",
+		params:{
+			duration:1,
+			tickInterval:0.5,
+			dps:8,
+		}
+	},
+	attack_up:{
+		configid:"attack_up",
+		typeid:"attack_up",
+		params:{
+			duration:30,
+			multiplier:1.35,
+		}
+	},
+	speed_up:{
+		configid:"speed_up",
+		typeid:"speed_up",
+		params:{
+			duration:5,
+			multiplier:1.8,
+			flatBonus:0,
+		}
+	},
 	aaa:{
 		configid:"aaa",
 		typeid:"bbb",
@@ -4104,6 +4139,18 @@ class PlayerEntityBridge {
         if (this.pawn && this.pawn.IsValid()) {
             this.pawn.GiveNamedItem(itemName, forceCreate);
         }
+    }
+
+    /**
+     * 向对应玩家发送客户端命令。
+     * @param {string} command
+     * @returns {boolean}
+     */
+    clientCommand(command) {
+        const slot = this.getSlot();
+        if (!this.isControllerValid() || slot < 0 || !command) return false;
+        Instance.ClientCommand(slot, command);
+        return true;
     }
 
     /** 清除所有武器 */
@@ -5176,6 +5223,12 @@ class Player {
          * @type {Map<string, number>}
          */
         this.buffMap = new Map();
+        /** @type {Array<() => boolean>} */
+        this._buffUnsubscribers = [
+            eventBus.on(event.Buff.Out.OnBuffRemoved, (/** @type {import("../../buff/buff_const").OnBuffRemoved} */ payload) => {
+                this._removeRuntimeByBuffId(payload.buffId);
+            }),
+        ];
         /** @type {string} */
         this.professionId = DEFAULT_PLAYER_PROFESSION;
         /** @type {number | null} */
@@ -5217,6 +5270,10 @@ class Player {
      */
     disconnect() {
         this.lifecycle.disconnect();
+        for (const unsubscribe of this._buffUnsubscribers) {
+            unsubscribe();
+        }
+        this._buffUnsubscribers.length = 0;
     }
 
     /**
@@ -5286,17 +5343,19 @@ class Player {
     /**
      * 增加金钱。
      * @param {number} amount 金额
+     * @returns {number}
      */
     addMoney(amount) {
-        this.stats.addMoney(amount);
+        return this.stats.addMoney(amount);
     }
 
     /**
      * 增加经验值。
      * @param {number} amount 经验量
+     * @returns {number}
      */
     addExp(amount) {
-        this.stats.addExp(amount);
+        return this.stats.addExp(amount);
     }
 
     // ——— 输出伤害（基于等级配置缩放） ———
@@ -5310,15 +5369,23 @@ class Player {
         return this.stats.getAttackDamage(baseDamage);
     }
 
+    /**
+     * 通过客户端命令给予玩家武器。
+     * @param {string} weaponName
+     * @returns {boolean}
+     */
+    giveWeapon(weaponName) {
+        return this.entityBridge.clientCommand(`give ${weaponName}`);
+    }
+
     // ——— Buff 入口（直接驱动全局 Buff 系统） ———
 
     /**
      * 添加指定类型的 Buff。
      * @param {string} typeId Buff 类型标识
-     * @param {Record<string, any>} params Buff 初始化参数
      * @returns {boolean} 是否成功添加 Buff
      */
-    addBuff(typeId, params) {
+    addBuff(typeId) {
         if (this.buffMap.has(typeId)) return false;
         /** @type {import("../../buff/buff_const").BuffAddRequest} */
         const addRequest = {
@@ -5330,6 +5397,7 @@ class Player {
         eventBus.emit(event.Buff.In.BuffAddRequest, addRequest);
         if (addRequest.result <= 0) return false;
         this.buffMap.set(typeId, addRequest.result);
+        this.recomputeDerivedStats();
         return true;
     }
 
@@ -5349,25 +5417,27 @@ class Player {
         eventBus.emit(event.Buff.In.BuffRemoveRequest, removeRequest);
         if (!removeRequest.result) return false;
         this.buffMap.delete(typeId);
+        this.recomputeDerivedStats();
         return true;
     }
 
     /**
      * 刷新指定类型的 Buff；若不存在则尝试直接添加。
      * @param {string} typeId Buff 类型标识
-     * @param {Record<string, any>} params Buff 刷新参数
      * @returns {boolean} 是否成功
      */
-    refreshBuff(typeId, params) {
+    refreshBuff(typeId) {
         const id = this.buffMap.get(typeId);
-        if (id == null) return this.addBuff(typeId, params);
+        if (id == null) return this.addBuff(typeId);
         /** @type {import("../../buff/buff_const").BuffRefreshRequest} */
         const refreshRequest = {
             buffId: id,
             result: false,
         };
         eventBus.emit(event.Buff.In.BuffRefreshRequest, refreshRequest);
-        return refreshRequest.result;
+        if (!refreshRequest.result) return false;
+        this.recomputeDerivedStats();
+        return true;
     }
 
     /**
@@ -5377,6 +5447,25 @@ class Player {
         for (const [typeId] of this.buffMap.entries()) {
             this.removeBuff(typeId);
         }
+    }
+
+    /**
+     * @param {number} buffId
+     */
+    _removeRuntimeByBuffId(buffId) {
+        for (const [typeId, id] of this.buffMap.entries()) {
+            if (id !== buffId) continue;
+            this.buffMap.delete(typeId);
+            this.recomputeDerivedStats();
+            break;
+        }
+    }
+
+    recomputeDerivedStats() {
+        this.stats.refreshLevelStats();
+        this.entityBridge.syncMaxHealth(this.stats.maxHealth);
+        this.entityBridge.syncHealth(this.stats.health);
+        this.entityBridge.syncArmor(this.stats.armor);
     }
 
     /**
@@ -5578,7 +5667,7 @@ class Player {
 
     /** @returns {boolean} */
     get isAlive() {
-        return this.state !== PlayerState.DEAD && this.state !== PlayerState.DISCONNECTED;
+        return this.state === PlayerState.ALIVE;
     }
 
     /** @returns {boolean} */
@@ -5647,11 +5736,12 @@ class Player {
 
 /**
  * @typedef {object} TP_playerRewardPayload - 玩家奖励分发载荷
- * @property {"buff"|"money"|"exp"|"heal"|"armor"|"damage"|"ready"|"respawn"|"resetGameStatus"} type - 奖励类型
+ * @property {"buff"|"money"|"exp"|"heal"|"armor"|"damage"|"weapon"|"ready"|"respawn"|"resetGameStatus"} type - 奖励类型
  * @property {string} [buffTypeId] - Buff 类型 ID（仅 type="buff" 时适用）
  * @property {Record<string, any>} [params] - Buff 参数（仅 type="buff" 时适用）
  * @property {Record<string, any>|null} [source] - Buff 来源（仅 type="buff" 时适用）
  * @property {number} [amount] - 数值（仅 type="money"、"exp"、"heal"、"armor"、"damage" 时适用）
+ * @property {string} [weaponName] - 武器名称（仅 type="weapon" 时适用）
  * @property {string} [reason] - 原因描述（仅 type="money"、"exp" 时适用）
  * @property {boolean} [isReady] - 准备状态（仅 type="ready" 时适用）
  * @property {number} [health] - 生命值（仅 type="respawn" 时适用）
@@ -5706,39 +5796,46 @@ class PlayerManager {
         //this._statusTextCache = new Map();
         //this._tempDisableLogKeys = new Set();
         this.ingame = false;
-        /** @type {Record<string, (player: Player, payload: TP_playerRewardPayload) => void>} */
+        /** @type {Record<string, (player: Player, payload: TP_playerRewardPayload) => boolean>} */
         this._rewardHandlers = {
             buff: (player, payload) => {
-                if (!payload.buffTypeId) return;
-                player.addBuff(payload.buffTypeId, payload.params ?? {});
+                if (!payload.buffTypeId) return false;
+                return player.addBuff(payload.buffTypeId);
             },
             money: (player, payload) => {
-                player.addMoney(payload.amount ?? 0);
+                return player.addMoney(payload.amount ?? 0) !== 0;
             },
             exp: (player, payload) => {
-                player.addExp(payload.amount ?? 0);
+                return player.addExp(payload.amount ?? 0) !== 0;
             },
             heal: (player, payload) => {
-                player.heal(payload.amount ?? 0);
+                return player.heal(payload.amount ?? 0);
             },
             armor: (player, payload) => {
-                player.giveArmor(payload.amount ?? 0);
+                return player.giveArmor(payload.amount ?? 0);
             },
             damage: (player, payload) => {
                 player.takeDamage(payload.amount ?? 0, null);
+                return true;
+            },
+            weapon: (player, payload) => {
+                if (!payload.weaponName) return false;
+                return player.giveWeapon(payload.weaponName);
             },
             ready: (player, payload) => {
-                this._setPlayerReady(player, payload.isReady ?? false);
+                return this._setPlayerReady(player, payload.isReady ?? false);
             },
             respawn: (player, payload) => {
                 player.respawn(
                     payload.health ?? 100,
                     payload.armor ?? 0,
-                    payload.targetState ?? this.ingame ? PlayerState.ALIVE : PlayerState.PREPARING
+                    payload.targetState ?? (this.ingame ? PlayerState.ALIVE : PlayerState.PREPARING)
                 );
+                return true;
             },
             resetGameStatus: (player) => {
                 player.resetGameStatus();
+                return true;
             }
         };
         /** @type {Array<() => boolean>} */
@@ -6108,16 +6205,15 @@ class PlayerManager {
      * 把请求路由到对应 Player，并补齐当前目标玩家上下文。
      * @param {number|null} playerSlot null = 全体玩家
      * @param {string} typeId Buff 类型 ID
-     * @param {Record<string, any>} params Buff 参数
      * @returns {any}
      */
-    applyBuff(playerSlot, typeId, params) {
+    applyBuff(playerSlot, typeId) {
         if (!typeId) return null;
 
         /** @type {any} */
         let appliedBuff = null;
         this._forEachTargetPlayer(playerSlot, (player) => {
-            const buff = player.addBuff(typeId, params);
+            const buff = player.addBuff(typeId);
             if (appliedBuff == null) {
                 appliedBuff = buff;
             }
@@ -6129,13 +6225,16 @@ class PlayerManager {
      * 统一奖励/效果分发入口
      * @param {number|null} playerSlot  null = 全体玩家
      * @param {TP_playerRewardPayload} payload
+     * @returns {boolean}
      */
     dispatchReward(playerSlot, payload) {
         const handler = this._rewardHandlers[payload.type];
-        if (!handler) return;
+        if (!handler) return false;
+        let allSucceeded = true;
         this._forEachTargetPlayer(playerSlot, (player) => {
-            handler(player, payload);
+            allSucceeded = handler(player, payload) && allSucceeded;
         });
+        return allSucceeded;
     }
 
     /**
@@ -6162,7 +6261,10 @@ class PlayerManager {
         }
 
         for (const reward of rewards) {
-            this.dispatchReward(playerSlot, reward);
+            const applied = this.dispatchReward(playerSlot, reward);
+            if (!applied) {
+                return false;
+            }
         }
 
         return true;
@@ -6582,7 +6684,7 @@ const BASE_SHOP_ITEMS = [
     { id: "heal_large",  displayName: "大型治疗包", cost: 500,  requiredLevel: 3, payload: { type: "heal",  amount: 80 } },
     { id: "armor_small", displayName: "轻型护甲",   cost: 300,  requiredLevel: 1, payload: { type: "armor", amount: 50 } },
     { id: "armor_full",  displayName: "重型护甲",   cost: 800,  requiredLevel: 5, payload: { type: "armor", amount: 100 } },
-    { id: "buff_attack", displayName: "强攻增益",   cost: 600,  requiredLevel: 2, payload: { type: "buff",  buffTypeId: "attack_up", params: { duration: 30, multiplier: 1.35 } } },
+    { id: "buff_attack", displayName: "强攻增益",   cost: 600,  requiredLevel: 2, payload: { type: "buff",  buffTypeId: "attack_up" } },
     { id: "weapon_ak47", displayName: "AK-47",      cost: 2700, requiredLevel: 4, payload: { type: "weapon", weaponName: "weapon_ak47" } },
 ];
 
@@ -6861,10 +6963,29 @@ class ShopSession {
             return { result: ShopResult.GRANT_FAILED, message: this._lastMessage };
         }
 
-        const grantResult = this._dispatchRewards([
-            { type: "money", amount: -ctx.price },
+        const rewardGrantResult = this._dispatchRewards([
             rewardBuildResult.reward,
         ]);
+
+        if (!rewardGrantResult.success) {
+            this._lastMessage = rewardGrantResult.message ?? "购买失败";
+            this._refreshHud();
+            return { result: ShopResult.GRANT_FAILED, message: this._lastMessage };
+        }
+
+        const costGrantResult = this._dispatchRewards([
+            { type: "money", amount: -ctx.price },
+        ]);
+
+        if (!costGrantResult.success) {
+            this._lastMessage = costGrantResult.message ?? "扣费失败";
+            this._refreshHud();
+            return { result: ShopResult.GRANT_FAILED, message: this._lastMessage };
+        }
+
+        const grantResult = rewardGrantResult.message
+            ? rewardGrantResult
+            : costGrantResult;
 
         if (!grantResult.success) {
             this._lastMessage = grantResult.message ?? "购买失败";
@@ -6913,17 +7034,16 @@ class ShopSession {
                     reward: {
                         type: "buff",
                         buffTypeId: payload.buffTypeId,
-                        params: payload.params,
-                        source: {
-                            sourceType: "shop",
-                            itemId: item.id,
-                        },
                     },
                 };
             case "money":
                 return { reward: { type: "money", amount: payload.amount ?? 0 } };
             case "weapon":
-                return { reward: null, message: "武器系统暂未接入" };
+                if (!payload.weaponName) {
+                    return { reward: null, message: "商品无武器定义" };
+                }
+
+                return { reward: { type: "weapon", weaponName: payload.weaponName } };
             default:
                 return { reward: null, message: `未知效果类型: ${payload.type}` };
         }
@@ -7695,7 +7815,7 @@ class MonsterManager {
         if (!typeId) return null;
         const monster = this.monsters.get(monsterId);
         if (!monster) return null;
-        return monster.addBuff(typeId, params);
+        return monster.addBuff(typeId);
     }
 
     /**
@@ -7904,23 +8024,262 @@ class MonsterManager {
     }
 }
 
+class BuffTemplate{
+    /**
+     * @param {number}id
+     * @param {import("../monster/monster/monster").Monster|import("../player/player/player").Player} target Buff 作用的目标
+     * @param {string} targetType Buff 目标类型
+     * @param {string} typeId Buff 类型标识
+     * @param {Record<string, any>} params Buff 运行参数
+     */
+    constructor(id, target, targetType, typeId, params)
+    {
+        this.id = id;
+        this.target = target;
+        this.targetType = targetType;
+        this.typeId = typeId;
+        this.duration = params.duration;
+        this.params = { ...(params ?? {}) };
+        this.startTime = Instance.GetGameTime();
+        this.use = false;
+    }
+    tick()
+    {
+        const currentTime=Instance.GetGameTime();
+        if(this.duration!==-1 && currentTime-this.startTime>=this.duration)this.stop();
+    }
+    start()
+    {
+        if (this.use) return false;
+        this.use = true;
+        this.startTime = Instance.GetGameTime();
+        /** @type {import("./buff_const").OnBuffAdded} */
+        const payload = { buffId: this.id };
+        eventBus.emit(event.Buff.Out.OnBuffAdded, payload);
+        return true;
+    }
+    stop()
+    {
+        if (!this.use) return false;
+        this.use = false;
+        /** @type {import("./buff_const").OnBuffRemoved} */
+        const payload = { buffId: this.id };
+        eventBus.emit(event.Buff.Out.OnBuffRemoved, payload);
+        return true;
+    }
+    refresh()
+    {
+        if (typeof this.params.duration === "number") {
+            this.duration = this.params.duration;
+        }
+        this.startTime = Instance.GetGameTime();
+        /** @type {import("./buff_const").OnBuffRefreshed} */
+        const payload = { buffId: this.id };
+        eventBus.emit(event.Buff.Out.OnBuffRefreshed, payload);
+        return true;
+    }
+    /**
+     * 事件对外接口
+     */
+    /**
+     * 目标每tick调用
+     * @param {string} eventName
+     * @param {any} params
+     */
+    OnBuffEmit(eventName,params)
+    {
+        return {result:false};
+    }
+}
+
+class PoisonBuff extends BuffTemplate {
+    /**
+     * @param {number} id
+     * @param {import("../../monster/monster/monster").Monster|import("../../player/player/player").Player} target
+     * @param {string} targetType
+     * @param {{ duration?: number; tickInterval?: number; dps?: number }} [params]
+     */
+    constructor(id, target, targetType, params = {}) {
+        super(id, target, targetType, "poison", params);
+        this.duration = typeof params.duration === "number" ? params.duration : 1;
+        this.tickInterval = Math.max(0.1, typeof params.tickInterval === "number" ? params.tickInterval : 0.5);
+        this.dps = Math.max(0, typeof params.dps === "number" ? params.dps : 8);
+        this._nextTickTime = Instance.GetGameTime() + this.tickInterval;
+    }
+
+    start() {
+        const started = super.start();
+        if (!started) return false;
+        this._nextTickTime = Instance.GetGameTime() + this.tickInterval;
+        return true;
+    }
+
+    refresh() {
+        const refreshed = super.refresh();
+        if (!refreshed) return false;
+        this._nextTickTime = Instance.GetGameTime() + this.tickInterval;
+        return true;
+    }
+
+    tick() {
+        if (!this.use) return;
+        if (!this._isTargetAlive()) {
+            this.stop();
+            return;
+        }
+
+        super.tick();
+        if (!this.use) return;
+
+        const now = Instance.GetGameTime();
+        while (this.use && now >= this._nextTickTime) {
+            this._applyTickDamage(this.tickInterval);
+            this._nextTickTime += this.tickInterval;
+        }
+    }
+
+    /**
+     * @param {string} eventName
+     * @param {{ nextState?: number }} [params]
+     */
+    OnBuffEmit(eventName, params = {}) {
+        if (eventName === "OnDeath") {
+            this.stop();
+            return { result: true };
+        }
+
+        if (eventName === "OnStateChange") {
+            if (this.targetType === "player" && params.nextState === PlayerState.DEAD) {
+                this.stop();
+                return { result: true };
+            }
+            if (this.targetType === "monster" && params.nextState === MonsterState.DEAD) {
+                this.stop();
+                return { result: true };
+            }
+        }
+
+        return { result: false };
+    }
+
+    /**
+     * @param {number} intervalSeconds
+     */
+    _applyTickDamage(intervalSeconds) {
+        const damage = this.dps * intervalSeconds;
+        if (damage <= 0) return;
+
+        if (this.targetType === "player") {
+            this.target.takeDamage(damage, null);
+        } else if (this.targetType === "monster") {
+            this.target.takeDamage(damage, null, { reason: "poison" });
+        }
+
+        if (!this._isTargetAlive()) {
+            this.stop();
+        }
+    }
+
+    _isTargetAlive() {
+        if (!this.target) return false;
+        if (this.targetType === "player") {
+            return this.target.state !== PlayerState.DEAD && this.target.state !== PlayerState.DISCONNECTED;
+        }
+        if (this.targetType === "monster") {
+            return this.target.state !== MonsterState.DEAD;
+        }
+        return false;
+    }
+}
+
+class AttackUpBuff extends BuffTemplate {
+    /**
+     * @param {number} id
+     * @param {import("../../player/player/player").Player} target
+     * @param {string} targetType
+     * @param {{ duration?: number; multiplier?: number }} [params]
+     */
+    constructor(id, target, targetType, params = {}) {
+        super(id, target, targetType, "attack_up", params);
+        this.duration = typeof params.duration === "number" ? params.duration : 30;
+        this.multiplier = typeof params.multiplier === "number" ? params.multiplier : 1.35;
+    }
+
+    /**
+     * @param {string} eventName
+     */
+    OnBuffEmit(eventName) {
+        if (eventName !== "OnRecompute") {
+            return { result: false };
+        }
+        if (this.targetType !== "player") {
+            return { result: false };
+        }
+
+        const player = /** @type {import("../../player/player/player").Player} */ (this.target);
+        player.stats.attackScale *= this.multiplier;
+        return { result: true };
+    }
+}
+
+class SpeedUpBuff extends BuffTemplate {
+    /**
+     * @param {number} id
+     * @param {import("../../monster/monster/monster").Monster} target
+     * @param {string} targetType
+     * @param {{ duration?: number; multiplier?: number; flatBonus?: number }} [params]
+     */
+    constructor(id, target, targetType, params = {}) {
+        super(id, target, targetType, "speed_up", params);
+        this.duration = typeof params.duration === "number" ? params.duration : 5;
+        this.multiplier = typeof params.multiplier === "number" ? params.multiplier : 1.8;
+        this.flatBonus = typeof params.flatBonus === "number" ? params.flatBonus : 0;
+    }
+
+    /**
+     * @param {string} eventName
+     */
+    OnBuffEmit(eventName) {
+        if (eventName !== "OnRecompute") {
+            return { result: false };
+        }
+        if (this.targetType !== "monster") {
+            return { result: false };
+        }
+
+        const monster = /** @type {import("../../monster/monster/monster").Monster} */ (this.target);
+        monster.speed = Math.max(0, monster.speed * this.multiplier + this.flatBonus);
+        return { result: true };
+    }
+}
+
 const BuffFactory = {
     /**
-     * 根据 typeId 创建对应的buff实例。未识别的 id 返回 null。
-     * @param {Monster|Player} target 所属怪物实例
-     * @param {string} targetType Buff 目标类型
-     * @param {string} typeid buff类型标识
-     * @param {number} id 
-     * @param {any} params buff配置参数
-     * @returns {BuffTemplate|null}
+     * 根据 typeId 创建对应的 buff 实例。未识别的 id 返回 null。
+     * @param {import("../monster/monster/monster").Monster|import("../player/player/player").Player} target
+     * @param {string} targetType
+     * @param {string} typeid
+     * @param {number} id
+     * @param {Record<string, any>} params
+     * @returns {import("./buff_template").BuffTemplate|null}
      */
-    create(target,targetType,typeid,id, params) {
+    create(target, targetType, typeid, id, params) {
         switch (typeid) {
+            case "poison":
+                return new PoisonBuff(id, target, targetType, params);
+            case "attack_up":
+                return targetType === "player"
+                    ? new AttackUpBuff(id, /** @type {import("../player/player/player").Player} */ (target), targetType, params)
+                    : null;
+            case "speed_up":
+                return targetType === "monster"
+                    ? new SpeedUpBuff(id, /** @type {import("../monster/monster/monster").Monster} */ (target), targetType, params)
+                    : null;
             case "corestats":
                 return null;
             default:
                 return null;
-        } 
+        }
     }
 };
 
@@ -7968,7 +8327,11 @@ class BuffManager {
     addbuff(buffAddRequest)
     {
         const config=buffconfig[buffAddRequest.configid];
-        const buff = BuffFactory.create(buffAddRequest.target,buffAddRequest.targetType,config.typeid,this.id++, config.params);
+        if (!config) {
+            return -1;
+        }
+        const params = { ...(config.params ?? {}) };
+        const buff = BuffFactory.create(buffAddRequest.target,buffAddRequest.targetType,config.typeid,this.id++, params);
         if (buff) {
             buff.start();
             this.buffMap.set(buff.id, buff);
@@ -19832,6 +20195,47 @@ class _MinHeap {
 }
 
 /**
+ * 维护主循环共享的临时上下文快照。
+ */
+class contextManager{
+    constructor()
+    {
+        /** @type {import("../monster/monster/monster").Monster[]} */
+        this.activeMonsters = [];
+        /** @type {import("cs_script/point_script").Entity[]} */
+        this.monsterEntities = [];
+        /** @type {import("cs_script/point_script").Vector[]} */
+        this.separationPositions = [];
+        /** @type {import("cs_script/point_script").Entity[]} */
+        this.breakableEntities = [];
+        /** @type {import("cs_script/point_script").Vector[]} */
+        this.playerPositions = [];
+        /** @type {import("cs_script/point_script").Vector[]} */
+        this.monsterPositions = [];
+    }
+
+    /**
+     * 更新本 tick 用到的怪物相关临时快照。
+     * @param {{
+     *   activeMonsters?: import("../monster/monster/monster").Monster[];
+     *   monsterEntities?: import("cs_script/point_script").Entity[];
+     *   separationPositions?: import("cs_script/point_script").Vector[];
+     * }} [nextContext]
+     */
+    updateTickContext(nextContext = {})
+    {
+        this.activeMonsters = Array.isArray(nextContext.activeMonsters) ? [...nextContext.activeMonsters] : [];
+        this.monsterEntities = Array.isArray(nextContext.monsterEntities) ? [...nextContext.monsterEntities] : [];
+        this.separationPositions = Array.isArray(nextContext.separationPositions) ? [...nextContext.separationPositions] : [];
+    }
+
+    resetTickContext()
+    {
+        this.updateTickContext();
+    }
+}
+
+/**
  * @module 区域效果/效果配置
  */
 /**
@@ -20337,6 +20741,7 @@ movementManager.initPathScheduler((start, end) => navMesh.findPath(start, end));
 const buffManager = new BuffManager();
 const particleManager = new ParticleManager();
 const areaEffectManager = new AreaEffectManager();
+const tempContext = new contextManager();
 
 // ═══════════════════════════════════════════════
 // 3. 跨模块回调绑定（全部集中在此）
@@ -20388,10 +20793,18 @@ eventBus.on(event.Game.Out.OnStartGame, (payload) => {
 
 eventBus.on(event.Game.Out.OnGameLost, (payload) => {
     shopManager.closeAll();
+    for (const player of playerManager.getActivePlayers()) {
+        player.stopInputTracking();
+    }
+    monsterManager.stopWave();
 });
 
 eventBus.on(event.Game.Out.OnGameWin, (payload) => {
     shopManager.closeAll();
+    for (const player of playerManager.getActivePlayers()) {
+        player.stopInputTracking();
+    }
+    monsterManager.stopWave();
 });
 
 eventBus.on(event.Game.Out.OnResetGame, (payload) => {
@@ -20418,6 +20831,25 @@ eventBus.on(event.Monster.Out.OnMonsterDeath, (/** @type {import("./monster/mons
         priority: -1,
     };
     eventBus.emit(event.Movement.In.RemoveRequest, removePayload);
+
+    const killerPawn = /** @type {import("cs_script/point_script").CSPlayerPawn | null | undefined} */ (payload.killer);
+    const killerSlot = killerPawn?.GetPlayerController?.()?.GetPlayerSlot?.();
+    if (typeof killerSlot === "number" && killerSlot >= 0 && payload.reward > 0) {
+        playerManager.dispatchReward(killerSlot, {
+            type: "exp",
+            amount: payload.reward,
+            reason: `击杀 ${payload.monster.type} 经验`,
+        });
+    }
+});
+eventBus.on(event.Monster.Out.OnAttack, (/** @type {import("./monster/monster_const").OnMonsterAttack} */ payload) => {
+    const targetSlot = payload.target?.GetPlayerController?.()?.GetPlayerSlot?.();
+    if (typeof targetSlot !== "number" || targetSlot < 0) return;
+
+    const player = playerManager.getPlayer(targetSlot);
+    if (!player) return;
+
+    player.takeDamage(payload.damage, payload.monster.model ?? null);
 });
 eventBus.on(event.Monster.Out.OnAllMonstersDead, () => {
     eventBus.emit(event.Wave.In.WaveEndRequest, {result: false});
@@ -20605,7 +21037,7 @@ Instance.SetThink(() => {
     const now = Instance.GetGameTime();
     const dt = Math.max(0, now - _lastTime);
     _lastTime = now;
-    const activePlayers = playerManager.getActivePlayers();
+    const isGamePlaying = gameManager.checkGameState();
     const alivePlayers = playerManager.getAlivePlayers();
     const alivePawns = alivePlayers
         .map((player) => player.entityBridge.pawn)
@@ -20618,29 +21050,44 @@ Instance.SetThink(() => {
     // ── 5.1 输入 / 玩家 / 波次 / Buff ──
     inputManager.tick();
     playerManager.tick();
-    waveManager.tick();
-    monsterManager.tick(currentMonsterEntities, alivePawns);
-    skillManager.tick();
-    const activeMonsters = monsterManager.getActiveMonsters();
-    const monsterEntities = activeMonsters
-        .map((monster) => monster.model)
-        .filter((entity) => entity != null);
-    const separationPositions = monsterEntities
-        .map((entity) => entity.GetAbsOrigin())
-        .filter((position) => position != null);
-    movementManager.tick(now, dt, separationPositions);
-    monsterManager.syncMovementStates(movementManager.getAllStates());
-    areaEffectManager.tick(now, {
-        players: alivePlayers,
-        monsters: activeMonsters,
-    });
-    particleManager.tickAll(now);
-    buffManager.tick();
-    navMesh.tick(alivePawns[0]?.GetAbsOrigin?.());
+    if (isGamePlaying) {
+        waveManager.tick();
+    }
+    if (isGamePlaying) {
+        monsterManager.tick(currentMonsterEntities, alivePawns);
+    }
+    if (isGamePlaying) {
+        skillManager.tick();
+        const activeMonsters = monsterManager.getActiveMonsters();
+        const monsterEntities = activeMonsters
+            .map((monster) => monster.model)
+            .filter((entity) => entity != null);
+        const separationPositions = monsterEntities
+            .map((entity) => entity.GetAbsOrigin())
+            .filter((position) => position != null);
+        tempContext.updateTickContext({
+            activeMonsters,
+            monsterEntities,
+            separationPositions,
+        });
+        movementManager.tick(now, dt, tempContext.separationPositions);
+        monsterManager.syncMovementStates(movementManager.getAllStates());
+        areaEffectManager.tick(now, {
+            players: alivePlayers,
+            monsters: tempContext.activeMonsters,
+        });
+        particleManager.tickAll(now);
+        buffManager.tick();
+    } else {
+        tempContext.resetTickContext();
+    }
+    if (isGamePlaying) {
+        navMesh.tick(alivePawns[0]?.GetAbsOrigin?.());
+    }
 
     // ── 5.2 其他模块 tick ──
     shopManager.tick();
-    hudManager.tick(activePlayers.map(p => p.getSummary()));
+    hudManager.tick(alivePlayers.map(p => p.getSummary()));
 
     // ── 5.3 玩家状态 HUD 同步 ──
     Instance.SetNextThink(now + 1 / 64);
