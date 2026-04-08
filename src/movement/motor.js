@@ -20,6 +20,13 @@ import {
 /** @typedef {import("cs_script/point_script").Entity} Entity */
 
 /**
+ * @typedef {object} SeparationContext
+ * @property {Entity[]} entities
+ * @property {import("../octree/octree").SpatialOctree | null} octree
+ * @property {Entity | null} selfBreakable
+ */
+
+/**
  * 运动电机：负责速度、重力、碰撞检测、地面吸附和位移推进。
  * 不感知任何业务语义（monster / path / mode 等）。
  *
@@ -64,13 +71,13 @@ export class Motor {
      * @param {Vector} wishDir   期望方向（单位向量）
      * @param {number} wishSpeed 期望速度
      * @param {number} dt        帧间隔
-     * @param {{entities: Entity[], positions: Vector[]}} sepCtx 分离上下文
+     * @param {SeparationContext} sepCtx 分离上下文
      * @returns {Vector} 新位置
      */
     moveGround(pos, wishDir, wishSpeed, dt, sepCtx) {
         this._applyFriction(dt);
         this._accelerate2D(wishDir, wishSpeed, dt);
-        this.velocity = vec.add(this.velocity, this._computeSeparation(pos, sepCtx.positions));
+        this.velocity = vec.add(this.velocity, this._computeSeparation(pos, sepCtx));
 
         const move = vec.scale(this.velocity, dt);
         move.z = 0;
@@ -88,7 +95,7 @@ export class Motor {
      * @param {Vector} wishDir
      * @param {number} wishSpeed
      * @param {number} dt
-     * @param {{entities: Entity[], positions: Vector[]}} sepCtx 分离上下文
+    * @param {SeparationContext} sepCtx 分离上下文
      * @returns {Vector}
      */
     moveAir(pos, wishDir, wishSpeed, dt, sepCtx) {
@@ -107,7 +114,7 @@ export class Motor {
         // 重力
         this.velocity.z = Math.max(-this.gravity, this.velocity.z - this.gravity * dt);
         // 分离
-        this.velocity = vec.add(this.velocity, this._computeSeparation(pos, sepCtx.positions));
+        this.velocity = vec.add(this.velocity, this._computeSeparation(pos, sepCtx));
 
         const move = vec.scale(this.velocity, dt);
         const result = this._airSlideMove(pos, move, sepCtx.entities);
@@ -128,12 +135,12 @@ export class Motor {
      * @param {Vector} wishDir
      * @param {number} wishSpeed
      * @param {number} dt
-     * @param {{entities: Entity[], positions: Vector[]}} sepCtx 分离上下文
+      * @param {SeparationContext} sepCtx 分离上下文
      * @returns {Vector}
      */
     moveFly(pos, wishDir, wishSpeed, dt, sepCtx) {
         this._accelerate3D(wishDir, wishSpeed, dt);
-        this.velocity = vec.add(this.velocity, this._computeSeparation(pos, sepCtx.positions));
+          this.velocity = vec.add(this.velocity, this._computeSeparation(pos, sepCtx));
 
         const move = vec.scale(this.velocity, dt);
         const result = this._airSlideMove(pos, move, sepCtx.entities);
@@ -154,7 +161,7 @@ export class Motor {
      * @param {Vector} goalPos
      * @param {number} baseSpeed
      * @param {number} dt
-     * @param {{entities: Entity[], positions: Vector[]}} sepCtx 分离上下文
+    * @param {SeparationContext} sepCtx 分离上下文
      * @returns {Vector}
      */
     moveLadder(pos, goalPos, baseSpeed, dt, sepCtx) {
@@ -244,23 +251,29 @@ export class Motor {
     }
 
     /**
-     * NPC-NPC 分离速度（直接消费位置缓存，不调用 GetAbsOrigin）
-     * @param {Vector} pos        当前怪物位置
-     * @param {Vector[]} positions 所有活跃怪物位置缓存
+     * NPC-NPC 分离速度（基于八叉树查询 breakable 邻居）
+     * @param {Vector} pos 当前怪物位置
+     * @param {SeparationContext} sepCtx 分离上下文
      * @returns {Vector}
      */
-    _computeSeparation(pos, positions) {
+    _computeSeparation(pos, sepCtx) {
+        if (!sepCtx.octree) return vec.get(0, 0, 0);
         const radius = separationRadius;
-        const radiusSq = radius * radius;
         const maxStrength = separationMaxStrength;
         const maxStrengthSq = maxStrength * maxStrength;
         const minRadiusSq = separationMinRadius * separationMinRadius;
+        const radiusSq = radius * radius;
         const falloffRangeSq = Math.max(1e-6, radiusSq - minRadiusSq);
         const minDistSq = 16;
-        let sep = vec.get(0, 0, 0);
-        for (let i = 0; i < positions.length; i++) {
+        const neighbors = sepCtx.octree.querySphere(pos, radius, {
+            excludeEntity: sepCtx.selfBreakable,
+        });
+        if (neighbors.length === 0) return vec.get(0, 0, 0);
 
-            const otherPos = positions[i];
+        let sep = vec.get(0, 0, 0);
+
+        for (let i = 0; i < neighbors.length; i++) {
+            const otherPos = neighbors[i].position;
             let delta = vec.sub(pos, otherPos);
             const dist2Dsq = vec.length2Dsq(delta);
             if (dist2Dsq < minDistSq || vec.lengthsq(delta) > radiusSq) continue;

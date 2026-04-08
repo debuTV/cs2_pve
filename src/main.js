@@ -41,6 +41,7 @@ import { NavMesh } from "./navmesh/path_manager";
 import { MovementManager } from "./movement/movement_manager";
 import { ContextManager } from "./tempContext/tempContext_manager";
 import { AreaEffectManager } from "./areaEffects/area_manager";
+const ticks=1/64;
 // ═══════════════════════════════════════════════
 // 1. 服务器初始化
 // ═══════════════════════════════════════════════
@@ -443,30 +444,47 @@ Instance.SetThink(() => {
     if (isGamePlaying) {
         skillManager.tick();
         const activeMonsters = monsterManager.getActiveMonsters();
-        const monsterEntities = activeMonsters
-            .map((monster) => monster.model)
-            .filter((entity) => entity != null);
-        const monsterBreakableEntities = activeMonsters
-            .map((monster) => monster.breakable)
-            .filter((entity) => entity != null);
-        const separationPositions = monsterEntities
-            .map((entity) => entity.GetAbsOrigin())
-            .filter((position) => position != null);
+        /** @type {import("cs_script/point_script").Entity[]} */
+        const monsterEntities = [];
+        /** @type {import("cs_script/point_script").Entity[]} */
+        const monsterBreakableEntities = [];
+        /** @type {Map<import("cs_script/point_script").Entity, import("cs_script/point_script").Entity>} */
+        const modelToBreakable = new Map();
+
+        for (let i = 0; i < activeMonsters.length; i++) {
+            const monster = activeMonsters[i];
+            const model = monster.model;
+            const breakable = monster.breakable;
+
+            if (model?.IsValid?.()) {
+                monsterEntities.push(model);
+            }
+
+            if (!breakable?.IsValid?.()) continue;
+
+            monsterBreakableEntities.push(breakable);
+            if (model?.IsValid?.()) {
+                modelToBreakable.set(model, breakable);
+            }
+        }
+
         tempContext.updateTickContext({
             activeMonsters,
             monsterEntities,
-            separationPositions,
         });
-        movementManager.tick(now, dt, tempContext.separationPositions, monsterBreakableEntities);
-        const am=Array.from(movementManager.getAllStates());
-        for (let i =0;i<am.length;i++){
-            const a=am[i];
-            Instance.DebugScreenText({
-                text: `mode: ${a[1].mode}`, 
-                x: 500,
-                y: 200+i*20,
-                duration: 1/64});
-        }
+        movementManager.tick(now, dt, {
+            breakableEntities: monsterBreakableEntities,
+            modelToBreakable,
+        });
+        //const am=Array.from(movementManager.getAllStates());
+        //for (let i =0;i<am.length;i++){
+        //    const a=am[i];
+        //    Instance.DebugScreenText({
+        //        text: `mode: ${a[1].mode}`, 
+        //        x: 500,
+        //        y: 200+i*20,
+        //        duration: 1/64});
+        //}
 
         monsterManager.syncMovementStates(movementManager.getAllStates());
         areaEffectManager.tick(now, {
@@ -496,9 +514,9 @@ Instance.SetThink(() => {
     }
 
     // ── 5.3 玩家状态 HUD 同步 ──
-    Instance.SetNextThink(now + 1 / 64);
+    Instance.SetNextThink(now + ticks);
 });
-Instance.SetNextThink(Instance.GetGameTime() + 1 / 64);
+Instance.SetNextThink(Instance.GetGameTime() + ticks);
 
 Instance.Msg("=== PvE Release 已启动 ===");
 

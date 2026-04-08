@@ -8,8 +8,6 @@ export class ContextManager {
         this.activeMonsters = [];
         /** @type {import("cs_script/point_script").Entity[]} */
         this.monsterEntities = [];
-        /** @type {import("cs_script/point_script").Vector[]} */
-        this.separationPositions = [];
         this.resetTickContext();
     }
 
@@ -18,14 +16,12 @@ export class ContextManager {
      * @param {{
      *   activeMonsters?: import("../monster/monster/monster").Monster[];
      *   monsterEntities?: import("cs_script/point_script").Entity[];
-     *   separationPositions?: import("cs_script/point_script").Vector[];
      * }} [nextContext]
      */
     updateTickContext(nextContext = {})
     {
         this.activeMonsters = Array.isArray(nextContext.activeMonsters) ? [...nextContext.activeMonsters] : [];
         this.monsterEntities = Array.isArray(nextContext.monsterEntities) ? [...nextContext.monsterEntities] : [];
-        this.separationPositions = Array.isArray(nextContext.separationPositions) ? [...nextContext.separationPositions] : [];
     }
 
     resetTickContext()
@@ -34,7 +30,5 @@ export class ContextManager {
         this.activeMonsters = [];
         /** @type {import("cs_script/point_script").Entity[]} */
         this.monsterEntities = [];
-        /** @type {import("cs_script/point_script").Vector[]} */
-        this.separationPositions = [];
     }
 }

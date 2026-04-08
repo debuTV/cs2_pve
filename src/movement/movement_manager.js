@@ -12,9 +12,27 @@ import { Movement } from "./movement";
 import { PathState } from "./movement_const";
 import { eventBus } from "../eventBus/event_bus";
 import { event, MovementRequestType } from "../util/definition";
+import { SpatialOctree } from "../octree/octree";
 
 /** @typedef {import("cs_script/point_script").Entity} Entity */
 /** @typedef {import("cs_script/point_script").Vector} Vector */
+
+/**
+ * @typedef {object} SeparationFrameContext
+ * @property {Entity[]} breakableEntities
+ * @property {Map<Entity, Entity>} modelToBreakable
+ */
+
+const EMPTY_FRAME_CONTEXT = {
+    breakableEntities: [],
+    modelToBreakable: new Map(),
+};
+
+const EMPTY_SEPARATION_CONTEXT = {
+    entities: [],
+    octree: null,
+    selfBreakable: null,
+};
 
 /**
  * @typedef {object} MovementEntry
@@ -41,9 +59,14 @@ export class MovementManager {
     constructor() {
         /** @type {Map<Entity, MovementEntry>} */
         this._entries = new Map();
+        /** @type {Map<Entity, Entity>} */
+        this._modelToBreakable = new Map();
+        /** @type {Entity[]} */
+        this._breakableIgnoreEntities = [];
+        this._separationOctree = new SpatialOctree();
 
         /** 路径调度最小堆，按上次更新时间排序。 */
-        this._pathHeap = new _MinHeap(1000);
+        this._pathHeap = new _MinHeap(256);
         /**
          * 寻路函数，由 main 通过 initPathScheduler 注入。
          * @type {((start: Vector, end: Vector) => {pos: Vector, mode: number}[] | null) | null}
@@ -125,6 +148,11 @@ export class MovementManager {
         const entry = this._entries.get(key);
         if (!entry) return;
         entry.movement.stop();
+        const breakable = this._modelToBreakable.get(key);
+        if (breakable) {
+            this._separationOctree.remove(breakable);
+            this._modelToBreakable.delete(key);
+        }
         this._entries.delete(key);
         this._pathHeap.remove(key);
         eventBus.emit(event.Movement.Out.OnRemoved, {
@@ -173,13 +201,13 @@ export class MovementManager {
      * 3. 批量 movement.update
      * @param {number} now 当前游戏时间
      * @param {number} dt 帧间隔
-     * @param {Vector[]} separationPositions
-     * @param {Entity[]} breakableEntities 当前全部怪物 breakable 列表，传给 move_probe 作为忽略实体
+     * @param {SeparationFrameContext} separationFrameContext 当前帧分离查询上下文
      */
-    tick(now,dt, separationPositions, breakableEntities = []) {
+    tick(now,dt, separationFrameContext = EMPTY_FRAME_CONTEXT) {
         this._consumeRequests();
+        this._syncSeparationFrame(separationFrameContext);
         this._tickPathRefresh(now);
-        this._updateAll(dt, separationPositions, breakableEntities);
+        this._updateAll(dt);
     }
 
     // ═══════════════════════════════════════════════
@@ -286,7 +314,7 @@ export class MovementManager {
             const current = this._pathHeap.pop();
             if (!current.node) break;
 
-            if (current.node === first || now - current.cost <= 0.5) {
+            if (current.node === first || now - current.cost <= 3) {
                 this._pathHeap.push(current.node, current.cost);
                 break;
             }
@@ -335,21 +363,69 @@ export class MovementManager {
         return true;
     }
 
+    /**
+     * 同步本帧活跃怪物的 breakable 集合，并维护增量空间索引。
+     * @param {SeparationFrameContext} separationFrameContext
+     */
+    _syncSeparationFrame(separationFrameContext = EMPTY_FRAME_CONTEXT) {
+        this._breakableIgnoreEntities = separationFrameContext.breakableEntities;
+        const nextModelToBreakable = separationFrameContext.modelToBreakable;
+
+        for (const [model, breakable] of this._modelToBreakable) {
+            const nextBreakable = nextModelToBreakable.get(model);
+            if (nextBreakable === breakable && breakable?.IsValid?.()) continue;
+            this._separationOctree.remove(breakable);
+            this._modelToBreakable.delete(model);
+        }
+
+        for (const [model, breakable] of nextModelToBreakable) {
+            if (!model?.IsValid?.() || !breakable?.IsValid?.()) continue;
+
+            const prevBreakable = this._modelToBreakable.get(model);
+            if (prevBreakable && prevBreakable !== breakable) {
+                this._separationOctree.remove(prevBreakable);
+            }
+
+            this._modelToBreakable.set(model, breakable);
+
+            if (!this._separationOctree.has(breakable)) {
+                const breakablePos = breakable.GetAbsOrigin();
+                if (breakablePos) {
+                    this._separationOctree.insert(breakable, breakablePos);
+                }
+                continue;
+            }
+
+            if (!this._entries.has(model)) {
+                const breakablePos = breakable.GetAbsOrigin();
+                if (breakablePos) {
+                    this._separationOctree.update(breakable, breakablePos);
+                }
+            }
+        }
+    }
+
     // ═══════════════════════════════════════════════
     // 内部：批量更新
     // ═══════════════════════════════════════════════
 
     /**
      * @param {number} dt
-     * @param {Vector[]} separationPositions
-     * @param {Entity[]} breakableEntities
      */
-    _updateAll(dt, separationPositions, breakableEntities) {
+    _updateAll(dt) {
         for (const [key, entry] of this._entries) {
+            const selfBreakable = this._modelToBreakable.get(key) ?? null;
             const sepCtx = entry.useNPCSeparation
-                ? { entities: breakableEntities, positions: separationPositions }
-                : { entities: [], positions: []};
-            entry.movement.update(dt, sepCtx);
+                ? {
+                    entities: this._breakableIgnoreEntities,
+                    octree: this._separationOctree,
+                    selfBreakable,
+                }
+                : EMPTY_SEPARATION_CONTEXT;
+            const newPos = entry.movement.update(dt, sepCtx);
+            if (selfBreakable?.IsValid?.() && newPos) {
+                this._separationOctree.update(selfBreakable, newPos);
+            }
         }
     }
 
@@ -365,6 +441,9 @@ export class MovementManager {
             entry.movement.stop();
         }
         this._entries.clear();
+        this._modelToBreakable.clear();
+        this._breakableIgnoreEntities = [];
+        this._separationOctree.clear();
         this._pathHeap.clear();
         this._pendingRequests.length = 0;
     }

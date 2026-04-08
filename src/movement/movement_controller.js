@@ -63,7 +63,11 @@ export class MovementController {
 
     /**
      * @param {number} dt
-     * @param {{entities: Entity[], positions: import("cs_script/point_script").Vector[]}} sepCtx
+        * @param {{
+        *   entities: Entity[];
+        *   octree: import("../octree/octree").SpatialOctree | null;
+        *   selfBreakable: Entity | null;
+        * }} sepCtx
      * @returns {import("cs_script/point_script").Vector | undefined}
      */
     update(dt, sepCtx) {

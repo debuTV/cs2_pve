@@ -136,13 +136,20 @@ export class Movement {
     /**
      * 每帧更新（唯一驱动入口）
      * @param {number} dt         帧间隔（秒）
-     * @param {{entities: Entity[], positions: Vector[]}} sepCtx 分离上下文
+     * @param {{
+     *   entities: Entity[];
+     *   octree: import("../octree/octree").SpatialOctree | null;
+     *   selfBreakable: Entity | null;
+     * }} sepCtx 分离上下文
+     * @returns {Vector | undefined}
      */
     update(dt, sepCtx) {
         if (this._isStopped) return;
 
         // PORTAL 特殊处理（在常规 controller 之前）
-        if (this._handlePortal()) return;
+        if (this._handlePortal()) {
+            return this.entity.GetAbsOrigin();
+        }
 
         // 更新 maxSpeed（支持运行时改速度后生效）
         // controller → mode → motor
@@ -159,6 +166,7 @@ export class Movement {
                 position: newPos,
                 angles: { pitch: 0, yaw: this._currentYaw, roll: 0 }
             });
+            return newPos;
         }
     }
 

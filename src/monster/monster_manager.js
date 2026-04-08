@@ -23,7 +23,6 @@ export class MonsterManager {
         /** 累计击杀数。
          * @type {number} */
         this.totalKills = 0;
-
         /**
          * 当前波次可用的生成点实体列表。由 `spawnWave` 按配置名称查找并填充，
          * 每次新波次开始时清空重建。
@@ -108,13 +107,11 @@ export class MonsterManager {
                 this.monsters.delete(id);
             }
         }
-        this.spawntick(now);
+        this.spawntick();
     }
-    /**
-     * @param {number} now
-     */
-    spawntick(now)
+    spawntick()
     {
+        const now=Instance.GetGameTime();
         if (!this.spawn||!this.spawnconfig) return;
         if (this.spawnmonstercount >= this.spawnconfig.totalMonsters) return this.stopWave();
         if (now - this.spawnpretick < this.spawnconfig.spawnInterval) return;

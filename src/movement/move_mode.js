@@ -31,7 +31,11 @@ export class MoveMode {
     /**
      * @param {LocoContext} ctx
      * @param {number} dt
-     * @param {{entities: Entity[], positions: Vector[]}} sepCtx
+        * @param {{
+        *   entities: Entity[];
+        *   octree: import("../octree/octree").SpatialOctree | null;
+        *   selfBreakable: Entity | null;
+        * }} sepCtx
      * @returns {Vector}
      */
     update(ctx, dt, sepCtx) {return {x:0,y:0,z:0};}
@@ -42,7 +46,11 @@ export class MoveWalk extends MoveMode {
     /**
      * @param {LocoContext} ctx
      * @param {number} dt
-     * @param {{entities: Entity[], positions: Vector[]}} sepCtx
+        * @param {{
+        *   entities: Entity[];
+        *   octree: import("../octree/octree").SpatialOctree | null;
+        *   selfBreakable: Entity | null;
+        * }} sepCtx
      * @return {Vector}
      */
     update(ctx, dt, sepCtx) {
@@ -85,7 +93,11 @@ export class MoveAir extends MoveMode {
     /**
      * @param {LocoContext} ctx
      * @param {number} dt
-     * @param {{entities: Entity[], positions: Vector[]}} sepCtx
+        * @param {{
+        *   entities: Entity[];
+        *   octree: import("../octree/octree").SpatialOctree | null;
+        *   selfBreakable: Entity | null;
+        * }} sepCtx
      * @return {Vector}
      */
     update(ctx, dt, sepCtx) {
@@ -112,7 +124,11 @@ export class MoveFly extends MoveMode {
     /**
      * @param {LocoContext} ctx
      * @param {number} dt
-     * @param {{entities: Entity[], positions: Vector[]}} sepCtx
+        * @param {{
+        *   entities: Entity[];
+        *   octree: import("../octree/octree").SpatialOctree | null;
+        *   selfBreakable: Entity | null;
+        * }} sepCtx
      * @return {Vector}
      */
     update(ctx, dt, sepCtx) {
@@ -141,7 +157,11 @@ export class MoveLadder extends MoveMode {
     /**
      * @param {LocoContext} ctx
      * @param {number} dt
-     * @param {{entities: Entity[], positions: Vector[]}} sepCtx
+        * @param {{
+        *   entities: Entity[];
+        *   octree: import("../octree/octree").SpatialOctree | null;
+        *   selfBreakable: Entity | null;
+        * }} sepCtx
      * @return {Vector}
      */
     update(ctx, dt, sepCtx) {

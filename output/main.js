@@ -898,11 +898,11 @@ const WaveState = {
 const wavesConfig=[
         { 
             name: "训练波", 
-            totalMonsters: 1, 
+            totalMonsters: 200, 
             reward: 500, 
             spawnInterval: 0.1, 
             preparationTime: 0, //波次开始到第一个怪物出现时间，这段时间可以用来发消息
-            aliveMonster:1, //同时存在的怪物数量
+            aliveMonster:120, //同时存在的怪物数量
             monster_spawn_points_name:["monster_spawnpoint"],//这一波生成点
             monster_breakablemins:{x:-30,y:-30,z:0},//最大怪物的breakable的mins
             monster_breakablemaxs:{x:30,y:30,z:75},//最大怪物的breakable的maxs
@@ -1255,11 +1255,11 @@ class MonsterEntityBridge {
             });
         }
 
-        if (this.monster.model) {
-            if (this.monster.model instanceof BaseModelEntity) {
-                this.monster.model.Glow();
-            }
-        }
+        //if (this.monster.model) {
+        //    if (this.monster.model instanceof BaseModelEntity) {
+        //        this.monster.model.Glow();
+        //    }
+        //}
     }
 
     /**
@@ -7875,7 +7875,6 @@ class MonsterManager {
         /** 累计击杀数。
          * @type {number} */
         this.totalKills = 0;
-
         /**
          * 当前波次可用的生成点实体列表。由 `spawnWave` 按配置名称查找并填充，
          * 每次新波次开始时清空重建。
@@ -7948,7 +7947,7 @@ class MonsterManager {
      */
     tick(allmEntities,allppos)
     {
-        const now=Instance.GetGameTime();
+        Instance.GetGameTime();
         for (const [id, monster] of this.monsters) {
             if (monster.state === MonsterState.DEAD && !monster.model && !monster.breakable) {
                 this.monsters.delete(id);
@@ -7959,13 +7958,11 @@ class MonsterManager {
                 this.monsters.delete(id);
             }
         }
-        this.spawntick(now);
+        this.spawntick();
     }
-    /**
-     * @param {number} now
-     */
-    spawntick(now)
+    spawntick()
     {
+        const now=Instance.GetGameTime();
         if (!this.spawn||!this.spawnconfig) return;
         if (this.spawnmonstercount >= this.spawnconfig.totalMonsters) return this.stopWave();
         if (now - this.spawnpretick < this.spawnconfig.spawnInterval) return;
@@ -18848,6 +18845,13 @@ class MoveProbe {
 /** @typedef {import("cs_script/point_script").Entity} Entity */
 
 /**
+ * @typedef {object} SeparationContext
+ * @property {Entity[]} entities
+ * @property {import("../octree/octree").SpatialOctree | null} octree
+ * @property {Entity | null} selfBreakable
+ */
+
+/**
  * 运动电机：负责速度、重力、碰撞检测、地面吸附和位移推进。
  * 不感知任何业务语义（monster / path / mode 等）。
  *
@@ -18892,13 +18896,13 @@ class Motor {
      * @param {Vector} wishDir   期望方向（单位向量）
      * @param {number} wishSpeed 期望速度
      * @param {number} dt        帧间隔
-     * @param {{entities: Entity[], positions: Vector[]}} sepCtx 分离上下文
+     * @param {SeparationContext} sepCtx 分离上下文
      * @returns {Vector} 新位置
      */
     moveGround(pos, wishDir, wishSpeed, dt, sepCtx) {
         this._applyFriction(dt);
         this._accelerate2D(wishDir, wishSpeed, dt);
-        this.velocity = vec$1.add(this.velocity, this._computeSeparation(pos, sepCtx.positions));
+        this.velocity = vec$1.add(this.velocity, this._computeSeparation(pos, sepCtx));
 
         const move = vec$1.scale(this.velocity, dt);
         move.z = 0;
@@ -18916,7 +18920,7 @@ class Motor {
      * @param {Vector} wishDir
      * @param {number} wishSpeed
      * @param {number} dt
-     * @param {{entities: Entity[], positions: Vector[]}} sepCtx 分离上下文
+    * @param {SeparationContext} sepCtx 分离上下文
      * @returns {Vector}
      */
     moveAir(pos, wishDir, wishSpeed, dt, sepCtx) {
@@ -18935,7 +18939,7 @@ class Motor {
         // 重力
         this.velocity.z = Math.max(-this.gravity, this.velocity.z - this.gravity * dt);
         // 分离
-        this.velocity = vec$1.add(this.velocity, this._computeSeparation(pos, sepCtx.positions));
+        this.velocity = vec$1.add(this.velocity, this._computeSeparation(pos, sepCtx));
 
         const move = vec$1.scale(this.velocity, dt);
         const result = this._airSlideMove(pos, move, sepCtx.entities);
@@ -18956,12 +18960,12 @@ class Motor {
      * @param {Vector} wishDir
      * @param {number} wishSpeed
      * @param {number} dt
-     * @param {{entities: Entity[], positions: Vector[]}} sepCtx 分离上下文
+      * @param {SeparationContext} sepCtx 分离上下文
      * @returns {Vector}
      */
     moveFly(pos, wishDir, wishSpeed, dt, sepCtx) {
         this._accelerate3D(wishDir, wishSpeed, dt);
-        this.velocity = vec$1.add(this.velocity, this._computeSeparation(pos, sepCtx.positions));
+          this.velocity = vec$1.add(this.velocity, this._computeSeparation(pos, sepCtx));
 
         const move = vec$1.scale(this.velocity, dt);
         const result = this._airSlideMove(pos, move, sepCtx.entities);
@@ -18982,7 +18986,7 @@ class Motor {
      * @param {Vector} goalPos
      * @param {number} baseSpeed
      * @param {number} dt
-     * @param {{entities: Entity[], positions: Vector[]}} sepCtx 分离上下文
+    * @param {SeparationContext} sepCtx 分离上下文
      * @returns {Vector}
      */
     moveLadder(pos, goalPos, baseSpeed, dt, sepCtx) {
@@ -19072,23 +19076,29 @@ class Motor {
     }
 
     /**
-     * NPC-NPC 分离速度（直接消费位置缓存，不调用 GetAbsOrigin）
-     * @param {Vector} pos        当前怪物位置
-     * @param {Vector[]} positions 所有活跃怪物位置缓存
+     * NPC-NPC 分离速度（基于八叉树查询 breakable 邻居）
+     * @param {Vector} pos 当前怪物位置
+     * @param {SeparationContext} sepCtx 分离上下文
      * @returns {Vector}
      */
-    _computeSeparation(pos, positions) {
+    _computeSeparation(pos, sepCtx) {
+        if (!sepCtx.octree) return vec$1.get(0, 0, 0);
         const radius = separationRadius;
-        const radiusSq = radius * radius;
         const maxStrength = separationMaxStrength;
         const maxStrengthSq = maxStrength * maxStrength;
         const minRadiusSq = separationMinRadius * separationMinRadius;
+        const radiusSq = radius * radius;
         const falloffRangeSq = Math.max(1e-6, radiusSq - minRadiusSq);
         const minDistSq = 16;
-        let sep = vec$1.get(0, 0, 0);
-        for (let i = 0; i < positions.length; i++) {
+        const neighbors = sepCtx.octree.querySphere(pos, radius, {
+            excludeEntity: sepCtx.selfBreakable,
+        });
+        if (neighbors.length === 0) return vec$1.get(0, 0, 0);
 
-            const otherPos = positions[i];
+        let sep = vec$1.get(0, 0, 0);
+
+        for (let i = 0; i < neighbors.length; i++) {
+            const otherPos = neighbors[i].position;
             let delta = vec$1.sub(pos, otherPos);
             const dist2Dsq = vec$1.length2Dsq(delta);
             if (dist2Dsq < minDistSq || vec$1.lengthsq(delta) > radiusSq) continue;
@@ -19323,7 +19333,11 @@ class MoveMode {
     /**
      * @param {LocoContext} ctx
      * @param {number} dt
-     * @param {{entities: Entity[], positions: Vector[]}} sepCtx
+        * @param {{
+        *   entities: Entity[];
+        *   octree: import("../octree/octree").SpatialOctree | null;
+        *   selfBreakable: Entity | null;
+        * }} sepCtx
      * @returns {Vector}
      */
     update(ctx, dt, sepCtx) {return {x:0,y:0,z:0};}
@@ -19334,7 +19348,11 @@ class MoveWalk extends MoveMode {
     /**
      * @param {LocoContext} ctx
      * @param {number} dt
-     * @param {{entities: Entity[], positions: Vector[]}} sepCtx
+        * @param {{
+        *   entities: Entity[];
+        *   octree: import("../octree/octree").SpatialOctree | null;
+        *   selfBreakable: Entity | null;
+        * }} sepCtx
      * @return {Vector}
      */
     update(ctx, dt, sepCtx) {
@@ -19377,7 +19395,11 @@ class MoveAir extends MoveMode {
     /**
      * @param {LocoContext} ctx
      * @param {number} dt
-     * @param {{entities: Entity[], positions: Vector[]}} sepCtx
+        * @param {{
+        *   entities: Entity[];
+        *   octree: import("../octree/octree").SpatialOctree | null;
+        *   selfBreakable: Entity | null;
+        * }} sepCtx
      * @return {Vector}
      */
     update(ctx, dt, sepCtx) {
@@ -19404,7 +19426,11 @@ class MoveFly extends MoveMode {
     /**
      * @param {LocoContext} ctx
      * @param {number} dt
-     * @param {{entities: Entity[], positions: Vector[]}} sepCtx
+        * @param {{
+        *   entities: Entity[];
+        *   octree: import("../octree/octree").SpatialOctree | null;
+        *   selfBreakable: Entity | null;
+        * }} sepCtx
      * @return {Vector}
      */
     update(ctx, dt, sepCtx) {
@@ -19433,7 +19459,11 @@ class MoveLadder extends MoveMode {
     /**
      * @param {LocoContext} ctx
      * @param {number} dt
-     * @param {{entities: Entity[], positions: Vector[]}} sepCtx
+        * @param {{
+        *   entities: Entity[];
+        *   octree: import("../octree/octree").SpatialOctree | null;
+        *   selfBreakable: Entity | null;
+        * }} sepCtx
      * @return {Vector}
      */
     update(ctx, dt, sepCtx) {
@@ -19554,7 +19584,11 @@ class MovementController {
 
     /**
      * @param {number} dt
-     * @param {{entities: Entity[], positions: import("cs_script/point_script").Vector[]}} sepCtx
+        * @param {{
+        *   entities: Entity[];
+        *   octree: import("../octree/octree").SpatialOctree | null;
+        *   selfBreakable: Entity | null;
+        * }} sepCtx
      * @returns {import("cs_script/point_script").Vector | undefined}
      */
     update(dt, sepCtx) {
@@ -19695,13 +19729,20 @@ class Movement {
     /**
      * 每帧更新（唯一驱动入口）
      * @param {number} dt         帧间隔（秒）
-     * @param {{entities: Entity[], positions: Vector[]}} sepCtx 分离上下文
+     * @param {{
+     *   entities: Entity[];
+     *   octree: import("../octree/octree").SpatialOctree | null;
+     *   selfBreakable: Entity | null;
+     * }} sepCtx 分离上下文
+     * @returns {Vector | undefined}
      */
     update(dt, sepCtx) {
         if (this._isStopped) return;
 
         // PORTAL 特殊处理（在常规 controller 之前）
-        if (this._handlePortal()) return;
+        if (this._handlePortal()) {
+            return this.entity.GetAbsOrigin();
+        }
 
         // 更新 maxSpeed（支持运行时改速度后生效）
         // controller → mode → motor
@@ -19718,6 +19759,7 @@ class Movement {
                 position: newPos,
                 angles: { pitch: 0, yaw: this._currentYaw, roll: 0 }
             });
+            return newPos;
         }
     }
 
@@ -19869,6 +19911,564 @@ class Movement {
 }
 
 /**
+ * @module 八叉树/空间索引
+ */
+
+/** @typedef {import("cs_script/point_script").Entity} Entity */
+/** @typedef {import("cs_script/point_script").Vector} Vector */
+
+/**
+ * @typedef {object} SpatialItem
+ * @property {Entity} entity
+ * @property {Vector} position
+ */
+
+/**
+ * @typedef {SpatialItem & { node: OctreeNode | null }} TrackedSpatialItem
+ */
+
+/**
+ * @typedef {object} Bounds
+ * @property {Vector} min
+ * @property {Vector} max
+ */
+
+/**
+ * @typedef {object} OctreeNode
+ * @property {Bounds} bounds
+ * @property {number} depth
+ * @property {TrackedSpatialItem[]} items
+ * @property {OctreeNode[] | null} children
+ */
+
+/**
+ * 3D 点索引八叉树。
+ *
+ * 职责：
+ * - 基于实体位置构建和增量维护树
+ * - 球形范围查询候选邻居
+ * - 暴露轻量统计，便于调试查询收益
+ */
+class SpatialOctree {
+    /**
+     * @param {{ maxItems?: number; maxDepth?: number; minNodeSize?: number; padding?: number }} [config]
+     */
+    constructor(config = {}) {
+        /**
+         * 每个节点的最大实体数量；超过时会尝试分裂。
+         */
+        this.maxItems = config.maxItems ?? 8;
+        /**
+         * 最大树深；超过时不再分裂。
+         */
+        this.maxDepth = config.maxDepth ?? 6;
+        /**
+         * 最小节点尺寸；分裂时如果子节点尺寸小于此值则不再分裂。
+         */
+        this.minNodeSize = config.minNodeSize ?? 64;
+        /**
+         * 根节点边界相对于包含所有实体的最小包围盒的额外扩展距离，避免频繁重建。
+         */
+        this.padding = config.padding ?? 1;
+
+        /** @type {OctreeNode | null} */
+        this._root = null;
+        /** @type {Map<Entity, TrackedSpatialItem>} */
+        this._items = new Map();
+        this._stats = this._createEmptyStats();
+    }
+
+    /** 清空索引。 */
+    clear() {
+        this._root = null;
+        this._items.clear();
+        this._stats = this._createEmptyStats();
+    }
+
+    /**
+     * @param {Entity} entity
+     * @returns {boolean}
+     */
+    has(entity) {
+        return this._items.has(entity);
+    }
+
+    /**
+     * 插入一个实体；若已存在则退化为 update。
+     * @param {Entity} entity
+     * @param {Vector} position
+     * @returns {boolean}
+     */
+    insert(entity, position) {
+        if (!entity || !this._isFiniteVector(position)) return false;
+        if (this._items.has(entity)) {
+            return this.update(entity, position);
+        }
+
+        /** @type {TrackedSpatialItem} */
+        const item = {
+            entity,
+            position: vec$1.clone(position),
+            node: null,
+        };
+
+        if (!this._root) {
+            const bounds = this._buildBoundsAroundPoint(item.position);
+            this._root = this._createNode(bounds, 0);
+            this._stats.rootSize = bounds.max.x - bounds.min.x;
+        }
+
+        this._items.set(entity, item);
+        this._stats.itemCount = this._items.size;
+
+        if (!this._containsPoint(this._root.bounds, item.position)) {
+            this._rebuildFromTrackedItems();
+            return true;
+        }
+
+        this._insertTrackedItem(this._root, item);
+        return true;
+    }
+
+    /**
+     * 更新一个实体的位置；若不存在则插入。
+     * @param {Entity} entity
+     * @param {Vector} position
+     * @returns {boolean}
+     */
+    update(entity, position) {
+        if (!entity || !this._isFiniteVector(position)) return false;
+        const item = this._items.get(entity);
+        if (!item) {
+            return this.insert(entity, position);
+        }
+
+        item.position = vec$1.clone(position);
+        if (!this._root) {
+            this._rebuildFromTrackedItems();
+            return true;
+        }
+        if (!this._containsPoint(this._root.bounds, item.position)) {
+            this._rebuildFromTrackedItems();
+            return true;
+        }
+        if (item.node && this._containsPoint(item.node.bounds, item.position)) {
+            return true;
+        }
+
+        this._detachTrackedItem(item);
+        this._insertTrackedItem(this._root, item);
+        return true;
+    }
+
+    /**
+     * 删除一个实体。
+     * @param {Entity} entity
+     * @returns {boolean}
+     */
+    remove(entity) {
+        const item = this._items.get(entity);
+        if (!item) return false;
+
+        this._detachTrackedItem(item);
+        this._items.delete(entity);
+        this._stats.itemCount = this._items.size;
+
+        if (this._items.size === 0) {
+            this._root = null;
+            this._stats.nodeCount = 0;
+            this._stats.maxDepth = 0;
+            this._stats.rootSize = 0;
+        }
+        return true;
+    }
+
+    /**
+     * 基于当前帧的实体快照重建索引。
+     * @param {SpatialItem[]} items
+     */
+    rebuild(items = []) {
+        /** @type {SpatialItem[]} */
+        const normalized = [];
+        for (let i = 0; i < items.length; i++) {
+            const item = items[i];
+            if (!item?.entity || !this._isFiniteVector(item.position)) continue;
+            if (typeof item.entity.IsValid === "function" && !item.entity.IsValid()) continue;
+            normalized.push({
+                entity: item.entity,
+                position: vec$1.clone(item.position),
+            });
+        }
+
+        this._rebuildFromSnapshots(normalized, false);
+    }
+
+    /**
+     * 球形范围查询。
+     * @param {Vector} center
+     * @param {number} radius
+     * @param {{ excludeEntity?: Entity | null }} [options]
+     * @returns {SpatialItem[]}
+     */
+    querySphere(center, radius, options = {}) {
+        if (!this._root || !this._isFiniteVector(center) || radius <= 0) {
+            this._stats.lastQueryHits = 0;
+            return [];
+        }
+
+        /** @type {SpatialItem[]} */
+        const results = [];
+        const radiusSq = radius * radius;
+        this._queryNode(this._root, center, radiusSq, options.excludeEntity ?? null, results);
+        this._stats.queryCount += 1;
+        this._stats.queryHitsTotal += results.length;
+        this._stats.lastQueryHits = results.length;
+        return results;
+    }
+
+    /**
+     * 获取轻量统计信息。
+     * @returns {{
+     *   itemCount: number;
+     *   nodeCount: number;
+     *   maxDepth: number;
+     *   rootSize: number;
+     *   queryCount: number;
+     *   queryHitsTotal: number;
+     *   lastQueryHits: number;
+     *   averageQueryHits: number;
+     * }}
+     */
+    getStats() {
+        const averageQueryHits = this._stats.queryCount > 0
+            ? this._stats.queryHitsTotal / this._stats.queryCount
+            : 0;
+        return {
+            ...this._stats,
+            averageQueryHits,
+        };
+    }
+
+    /**
+     * @returns {{
+     *   itemCount: number;
+     *   nodeCount: number;
+     *   maxDepth: number;
+     *   rootSize: number;
+     *   queryCount: number;
+     *   queryHitsTotal: number;
+     *   lastQueryHits: number;
+     * }}
+     */
+    _createEmptyStats() {
+        return {
+            itemCount: 0,
+            nodeCount: 0,
+            maxDepth: 0,
+            rootSize: 0,
+            queryCount: 0,
+            queryHitsTotal: 0,
+            lastQueryHits: 0,
+        };
+    }
+
+    /**
+     * @param {Vector} position
+     * @returns {Bounds}
+     */
+    _buildBoundsAroundPoint(position) {
+        const cubeSize = this.minNodeSize + this.padding * 2;
+        const half = cubeSize * 0.5;
+        return {
+            min: vec$1.get(position.x - half, position.y - half, position.z - half),
+            max: vec$1.get(position.x + half, position.y + half, position.z + half),
+        };
+    }
+
+    /**
+     * @param {SpatialItem[]} items
+     * @returns {Bounds}
+     */
+    _buildRootBounds(items) {
+        let minX = Infinity;
+        let minY = Infinity;
+        let minZ = Infinity;
+        let maxX = -Infinity;
+        let maxY = -Infinity;
+        let maxZ = -Infinity;
+
+        for (let i = 0; i < items.length; i++) {
+            const position = items[i].position;
+            if (position.x < minX) minX = position.x;
+            if (position.y < minY) minY = position.y;
+            if (position.z < minZ) minZ = position.z;
+            if (position.x > maxX) maxX = position.x;
+            if (position.y > maxY) maxY = position.y;
+            if (position.z > maxZ) maxZ = position.z;
+        }
+
+        const center = vec$1.get(
+            (minX + maxX) * 0.5,
+            (minY + maxY) * 0.5,
+            (minZ + maxZ) * 0.5
+        );
+        const extentX = maxX - minX;
+        const extentY = maxY - minY;
+        const extentZ = maxZ - minZ;
+        const cubeSize = Math.max(extentX, extentY, extentZ, this.minNodeSize) + this.padding * 2;
+        const half = cubeSize * 0.5;
+        return {
+            min: vec$1.get(center.x - half, center.y - half, center.z - half),
+            max: vec$1.get(center.x + half, center.y + half, center.z + half),
+        };
+    }
+
+    /**
+     * @param {Bounds} bounds
+     * @param {number} depth
+     * @returns {OctreeNode}
+     */
+    _createNode(bounds, depth) {
+        this._stats.nodeCount += 1;
+        if (depth > this._stats.maxDepth) {
+            this._stats.maxDepth = depth;
+        }
+        return {
+            bounds,
+            depth,
+            items: [],
+            children: null,
+        };
+    }
+
+    /**
+     * @param {OctreeNode} node
+     * @param {TrackedSpatialItem} item
+     */
+    _insertTrackedItem(node, item) {
+        if (node.children) {
+            const child = node.children[this._getChildIndex(node.bounds, item.position)];
+            if (child && this._containsPoint(child.bounds, item.position)) {
+                this._insertTrackedItem(child, item);
+                return;
+            }
+        }
+
+        node.items.push(item);
+        item.node = node;
+        if (!node.children && this._shouldSplit(node)) {
+            const retainedItems = node.items.slice();
+            node.items = [];
+            for (let i = 0; i < retainedItems.length; i++) {
+                retainedItems[i].node = null;
+            }
+            node.children = this._createChildren(node);
+            for (let i = 0; i < retainedItems.length; i++) {
+                this._insertTrackedItem(node, retainedItems[i]);
+            }
+        }
+    }
+
+    /**
+     * @param {TrackedSpatialItem} item
+     */
+    _detachTrackedItem(item) {
+        const node = item.node;
+        if (!node) return;
+        const index = node.items.indexOf(item);
+        if (index >= 0) {
+            node.items.splice(index, 1);
+        }
+        item.node = null;
+    }
+
+    /**
+     * @param {boolean} [preserveQueryStats=true]
+     */
+    _rebuildFromTrackedItems(preserveQueryStats = true) {
+        /** @type {SpatialItem[]} */
+        const snapshots = [];
+        for (const item of this._items.values()) {
+            snapshots.push({
+                entity: item.entity,
+                position: vec$1.clone(item.position),
+            });
+        }
+        this._rebuildFromSnapshots(snapshots, preserveQueryStats);
+    }
+
+    /**
+     * @param {SpatialItem[]} snapshots
+     * @param {boolean} preserveQueryStats
+     */
+    _rebuildFromSnapshots(snapshots, preserveQueryStats) {
+        const queryStats = preserveQueryStats
+            ? {
+                queryCount: this._stats.queryCount,
+                queryHitsTotal: this._stats.queryHitsTotal,
+                lastQueryHits: this._stats.lastQueryHits,
+            }
+            : null;
+
+        this.clear();
+        if (queryStats) {
+            this._stats.queryCount = queryStats.queryCount;
+            this._stats.queryHitsTotal = queryStats.queryHitsTotal;
+            this._stats.lastQueryHits = queryStats.lastQueryHits;
+        }
+        if (snapshots.length === 0) return;
+
+        const bounds = this._buildRootBounds(snapshots);
+        this._stats.rootSize = bounds.max.x - bounds.min.x;
+        this._root = this._createNode(bounds, 0);
+
+        for (let i = 0; i < snapshots.length; i++) {
+            const snapshot = snapshots[i];
+            /** @type {TrackedSpatialItem} */
+            const item = {
+                entity: snapshot.entity,
+                position: vec$1.clone(snapshot.position),
+                node: null,
+            };
+            this._items.set(item.entity, item);
+            this._insertTrackedItem(this._root, item);
+        }
+        this._stats.itemCount = this._items.size;
+    }
+
+    /**
+     * @param {OctreeNode} node
+     * @returns {boolean}
+     */
+    _shouldSplit(node) {
+        if (node.depth >= this.maxDepth) return false;
+        if (node.items.length <= this.maxItems) return false;
+        const size = node.bounds.max.x - node.bounds.min.x;
+        return size * 0.5 >= this.minNodeSize;
+    }
+
+    /**
+     * @param {OctreeNode} node
+     * @returns {OctreeNode[]}
+     */
+    _createChildren(node) {
+        const { min, max } = node.bounds;
+        const mid = vec$1.get(
+            (min.x + max.x) * 0.5,
+            (min.y + max.y) * 0.5,
+            (min.z + max.z) * 0.5
+        );
+
+        /** @type {OctreeNode[]} */
+        const children = new Array(8);
+        for (let zBit = 0; zBit < 2; zBit++) {
+            for (let yBit = 0; yBit < 2; yBit++) {
+                for (let xBit = 0; xBit < 2; xBit++) {
+                    const index = xBit | (yBit << 1) | (zBit << 2);
+                    const childMin = vec$1.get(
+                        xBit === 0 ? min.x : mid.x,
+                        yBit === 0 ? min.y : mid.y,
+                        zBit === 0 ? min.z : mid.z
+                    );
+                    const childMax = vec$1.get(
+                        xBit === 0 ? mid.x : max.x,
+                        yBit === 0 ? mid.y : max.y,
+                        zBit === 0 ? mid.z : max.z
+                    );
+                    children[index] = this._createNode({ min: childMin, max: childMax }, node.depth + 1);
+                }
+            }
+        }
+        return children;
+    }
+
+    /**
+     * @param {Bounds} bounds
+     * @param {Vector} position
+     * @returns {number}
+     */
+    _getChildIndex(bounds, position) {
+        const midX = (bounds.min.x + bounds.max.x) * 0.5;
+        const midY = (bounds.min.y + bounds.max.y) * 0.5;
+        const midZ = (bounds.min.z + bounds.max.z) * 0.5;
+        let index = 0;
+        if (position.x >= midX) index |= 1;
+        if (position.y >= midY) index |= 2;
+        if (position.z >= midZ) index |= 4;
+        return index;
+    }
+
+    /**
+     * @param {OctreeNode} node
+     * @param {Vector} center
+     * @param {number} radiusSq
+     * @param {Entity | null} excludeEntity
+     * @param {SpatialItem[]} results
+     */
+    _queryNode(node, center, radiusSq, excludeEntity, results) {
+        if (!this._sphereIntersectsBounds(center, radiusSq, node.bounds)) return;
+
+        for (let i = 0; i < node.items.length; i++) {
+            const item = node.items[i];
+            if (excludeEntity && item.entity === excludeEntity) continue;
+            if (vec$1.lengthsq(item.position, center) <= radiusSq) {
+                results.push(item);
+            }
+        }
+
+        if (!node.children) return;
+        for (let i = 0; i < node.children.length; i++) {
+            this._queryNode(node.children[i], center, radiusSq, excludeEntity, results);
+        }
+    }
+
+    /**
+     * @param {Vector} center
+     * @param {number} radiusSq
+     * @param {Bounds} bounds
+     * @returns {boolean}
+     */
+    _sphereIntersectsBounds(center, radiusSq, bounds) {
+        let dx = 0;
+        let dy = 0;
+        let dz = 0;
+
+        if (center.x < bounds.min.x) dx = bounds.min.x - center.x;
+        else if (center.x > bounds.max.x) dx = center.x - bounds.max.x;
+
+        if (center.y < bounds.min.y) dy = bounds.min.y - center.y;
+        else if (center.y > bounds.max.y) dy = center.y - bounds.max.y;
+
+        if (center.z < bounds.min.z) dz = bounds.min.z - center.z;
+        else if (center.z > bounds.max.z) dz = center.z - bounds.max.z;
+
+        return dx * dx + dy * dy + dz * dz <= radiusSq;
+    }
+
+    /**
+     * @param {Bounds} bounds
+     * @param {Vector} position
+     * @returns {boolean}
+     */
+    _containsPoint(bounds, position) {
+        return position.x >= bounds.min.x && position.x <= bounds.max.x &&
+            position.y >= bounds.min.y && position.y <= bounds.max.y &&
+            position.z >= bounds.min.z && position.z <= bounds.max.z;
+    }
+
+    /**
+     * @param {Vector} position
+     * @returns {boolean}
+     */
+    _isFiniteVector(position) {
+        return !!position &&
+            Number.isFinite(position.x) &&
+            Number.isFinite(position.y) &&
+            Number.isFinite(position.z);
+    }
+}
+
+/**
  * @module 实体移动/移动管理器
  */
 /**
@@ -19881,6 +20481,23 @@ class Movement {
 
 /** @typedef {import("cs_script/point_script").Entity} Entity */
 /** @typedef {import("cs_script/point_script").Vector} Vector */
+
+/**
+ * @typedef {object} SeparationFrameContext
+ * @property {Entity[]} breakableEntities
+ * @property {Map<Entity, Entity>} modelToBreakable
+ */
+
+const EMPTY_FRAME_CONTEXT = {
+    breakableEntities: [],
+    modelToBreakable: new Map(),
+};
+
+const EMPTY_SEPARATION_CONTEXT = {
+    entities: [],
+    octree: null,
+    selfBreakable: null,
+};
 
 /**
  * @typedef {object} MovementEntry
@@ -19907,9 +20524,14 @@ class MovementManager {
     constructor() {
         /** @type {Map<Entity, MovementEntry>} */
         this._entries = new Map();
+        /** @type {Map<Entity, Entity>} */
+        this._modelToBreakable = new Map();
+        /** @type {Entity[]} */
+        this._breakableIgnoreEntities = [];
+        this._separationOctree = new SpatialOctree();
 
         /** 路径调度最小堆，按上次更新时间排序。 */
-        this._pathHeap = new _MinHeap(1000);
+        this._pathHeap = new _MinHeap(256);
         /**
          * 寻路函数，由 main 通过 initPathScheduler 注入。
          * @type {((start: Vector, end: Vector) => {pos: Vector, mode: number}[] | null) | null}
@@ -19991,6 +20613,11 @@ class MovementManager {
         const entry = this._entries.get(key);
         if (!entry) return;
         entry.movement.stop();
+        const breakable = this._modelToBreakable.get(key);
+        if (breakable) {
+            this._separationOctree.remove(breakable);
+            this._modelToBreakable.delete(key);
+        }
         this._entries.delete(key);
         this._pathHeap.remove(key);
         eventBus.emit(event.Movement.Out.OnRemoved, {
@@ -20039,13 +20666,13 @@ class MovementManager {
      * 3. 批量 movement.update
      * @param {number} now 当前游戏时间
      * @param {number} dt 帧间隔
-     * @param {Vector[]} separationPositions
-     * @param {Entity[]} breakableEntities 当前全部怪物 breakable 列表，传给 move_probe 作为忽略实体
+     * @param {SeparationFrameContext} separationFrameContext 当前帧分离查询上下文
      */
-    tick(now,dt, separationPositions, breakableEntities = []) {
+    tick(now,dt, separationFrameContext = EMPTY_FRAME_CONTEXT) {
         this._consumeRequests();
+        this._syncSeparationFrame(separationFrameContext);
         this._tickPathRefresh(now);
-        this._updateAll(dt, separationPositions, breakableEntities);
+        this._updateAll(dt);
     }
 
     // ═══════════════════════════════════════════════
@@ -20152,7 +20779,7 @@ class MovementManager {
             const current = this._pathHeap.pop();
             if (!current.node) break;
 
-            if (current.node === first || now - current.cost <= 0.5) {
+            if (current.node === first || now - current.cost <= 3) {
                 this._pathHeap.push(current.node, current.cost);
                 break;
             }
@@ -20201,21 +20828,69 @@ class MovementManager {
         return true;
     }
 
+    /**
+     * 同步本帧活跃怪物的 breakable 集合，并维护增量空间索引。
+     * @param {SeparationFrameContext} separationFrameContext
+     */
+    _syncSeparationFrame(separationFrameContext = EMPTY_FRAME_CONTEXT) {
+        this._breakableIgnoreEntities = separationFrameContext.breakableEntities;
+        const nextModelToBreakable = separationFrameContext.modelToBreakable;
+
+        for (const [model, breakable] of this._modelToBreakable) {
+            const nextBreakable = nextModelToBreakable.get(model);
+            if (nextBreakable === breakable && breakable?.IsValid?.()) continue;
+            this._separationOctree.remove(breakable);
+            this._modelToBreakable.delete(model);
+        }
+
+        for (const [model, breakable] of nextModelToBreakable) {
+            if (!model?.IsValid?.() || !breakable?.IsValid?.()) continue;
+
+            const prevBreakable = this._modelToBreakable.get(model);
+            if (prevBreakable && prevBreakable !== breakable) {
+                this._separationOctree.remove(prevBreakable);
+            }
+
+            this._modelToBreakable.set(model, breakable);
+
+            if (!this._separationOctree.has(breakable)) {
+                const breakablePos = breakable.GetAbsOrigin();
+                if (breakablePos) {
+                    this._separationOctree.insert(breakable, breakablePos);
+                }
+                continue;
+            }
+
+            if (!this._entries.has(model)) {
+                const breakablePos = breakable.GetAbsOrigin();
+                if (breakablePos) {
+                    this._separationOctree.update(breakable, breakablePos);
+                }
+            }
+        }
+    }
+
     // ═══════════════════════════════════════════════
     // 内部：批量更新
     // ═══════════════════════════════════════════════
 
     /**
      * @param {number} dt
-     * @param {Vector[]} separationPositions
-     * @param {Entity[]} breakableEntities
      */
-    _updateAll(dt, separationPositions, breakableEntities) {
+    _updateAll(dt) {
         for (const [key, entry] of this._entries) {
+            const selfBreakable = this._modelToBreakable.get(key) ?? null;
             const sepCtx = entry.useNPCSeparation
-                ? { entities: breakableEntities, positions: separationPositions }
-                : { entities: [], positions: []};
-            entry.movement.update(dt, sepCtx);
+                ? {
+                    entities: this._breakableIgnoreEntities,
+                    octree: this._separationOctree,
+                    selfBreakable,
+                }
+                : EMPTY_SEPARATION_CONTEXT;
+            const newPos = entry.movement.update(dt, sepCtx);
+            if (selfBreakable?.IsValid?.() && newPos) {
+                this._separationOctree.update(selfBreakable, newPos);
+            }
         }
     }
 
@@ -20231,6 +20906,9 @@ class MovementManager {
             entry.movement.stop();
         }
         this._entries.clear();
+        this._modelToBreakable.clear();
+        this._breakableIgnoreEntities = [];
+        this._separationOctree.clear();
         this._pathHeap.clear();
         this._pendingRequests.length = 0;
     }
@@ -20362,8 +21040,6 @@ class ContextManager {
         this.activeMonsters = [];
         /** @type {import("cs_script/point_script").Entity[]} */
         this.monsterEntities = [];
-        /** @type {import("cs_script/point_script").Vector[]} */
-        this.separationPositions = [];
         this.resetTickContext();
     }
 
@@ -20372,14 +21048,12 @@ class ContextManager {
      * @param {{
      *   activeMonsters?: import("../monster/monster/monster").Monster[];
      *   monsterEntities?: import("cs_script/point_script").Entity[];
-     *   separationPositions?: import("cs_script/point_script").Vector[];
      * }} [nextContext]
      */
     updateTickContext(nextContext = {})
     {
         this.activeMonsters = Array.isArray(nextContext.activeMonsters) ? [...nextContext.activeMonsters] : [];
         this.monsterEntities = Array.isArray(nextContext.monsterEntities) ? [...nextContext.monsterEntities] : [];
-        this.separationPositions = Array.isArray(nextContext.separationPositions) ? [...nextContext.separationPositions] : [];
     }
 
     resetTickContext()
@@ -20388,8 +21062,6 @@ class ContextManager {
         this.activeMonsters = [];
         /** @type {import("cs_script/point_script").Entity[]} */
         this.monsterEntities = [];
-        /** @type {import("cs_script/point_script").Vector[]} */
-        this.separationPositions = [];
     }
 }
 
@@ -20863,6 +21535,7 @@ class AreaEffectManager {
  * @module 主入口
  */
 
+const ticks=1/64;
 // ═══════════════════════════════════════════════
 // 1. 服务器初始化
 // ═══════════════════════════════════════════════
@@ -21255,30 +21928,47 @@ Instance.SetThink(() => {
     if (isGamePlaying) {
         skillManager.tick();
         const activeMonsters = monsterManager.getActiveMonsters();
-        const monsterEntities = activeMonsters
-            .map((monster) => monster.model)
-            .filter((entity) => entity != null);
-        const monsterBreakableEntities = activeMonsters
-            .map((monster) => monster.breakable)
-            .filter((entity) => entity != null);
-        const separationPositions = monsterEntities
-            .map((entity) => entity.GetAbsOrigin())
-            .filter((position) => position != null);
+        /** @type {import("cs_script/point_script").Entity[]} */
+        const monsterEntities = [];
+        /** @type {import("cs_script/point_script").Entity[]} */
+        const monsterBreakableEntities = [];
+        /** @type {Map<import("cs_script/point_script").Entity, import("cs_script/point_script").Entity>} */
+        const modelToBreakable = new Map();
+
+        for (let i = 0; i < activeMonsters.length; i++) {
+            const monster = activeMonsters[i];
+            const model = monster.model;
+            const breakable = monster.breakable;
+
+            if (model?.IsValid?.()) {
+                monsterEntities.push(model);
+            }
+
+            if (!breakable?.IsValid?.()) continue;
+
+            monsterBreakableEntities.push(breakable);
+            if (model?.IsValid?.()) {
+                modelToBreakable.set(model, breakable);
+            }
+        }
+
         tempContext.updateTickContext({
             activeMonsters,
             monsterEntities,
-            separationPositions,
         });
-        movementManager.tick(now, dt, tempContext.separationPositions, monsterBreakableEntities);
-        const am=Array.from(movementManager.getAllStates());
-        for (let i =0;i<am.length;i++){
-            const a=am[i];
-            Instance.DebugScreenText({
-                text: `mode: ${a[1].mode}`, 
-                x: 500,
-                y: 200+i*20,
-                duration: 1/64});
-        }
+        movementManager.tick(now, dt, {
+            breakableEntities: monsterBreakableEntities,
+            modelToBreakable,
+        });
+        //const am=Array.from(movementManager.getAllStates());
+        //for (let i =0;i<am.length;i++){
+        //    const a=am[i];
+        //    Instance.DebugScreenText({
+        //        text: `mode: ${a[1].mode}`, 
+        //        x: 500,
+        //        y: 200+i*20,
+        //        duration: 1/64});
+        //}
 
         monsterManager.syncMovementStates(movementManager.getAllStates());
         areaEffectManager.tick(now, {
@@ -21308,9 +21998,9 @@ Instance.SetThink(() => {
     }
 
     // ── 5.3 玩家状态 HUD 同步 ──
-    Instance.SetNextThink(now + 1 / 64);
+    Instance.SetNextThink(now + ticks);
 });
-Instance.SetNextThink(Instance.GetGameTime() + 1 / 64);
+Instance.SetNextThink(Instance.GetGameTime() + ticks);
 
 Instance.Msg("=== PvE Release 已启动 ===");
 

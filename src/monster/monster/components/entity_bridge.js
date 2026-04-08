@@ -66,11 +66,11 @@ export class MonsterEntityBridge {
             });
         }
 
-        if (this.monster.model) {
-            if (this.monster.model instanceof BaseModelEntity) {
-                this.monster.model.Glow();
-            }
-        }
+        //if (this.monster.model) {
+        //    if (this.monster.model instanceof BaseModelEntity) {
+        //        this.monster.model.Glow();
+        //    }
+        //}
     }
 
     /**
