@@ -19359,7 +19359,7 @@ class MoveWalk extends MoveMode {
         const pos = ctx.getPos();
 
         // 路径推进
-        ctx.pathFollower.advanceIfReached(pos);
+        ctx.pathFollower.advanceIfReached(pos,200);
         const goal = ctx.pathFollower.getMoveGoal();
 
         // 路径节点驱动的模式切换请求
