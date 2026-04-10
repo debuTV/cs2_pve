@@ -142,7 +142,7 @@ export class MonsterManager {
     }
 
     /**
-     * @param {Map<Entity, {mode: string, onGround: boolean, currentGoalMode: number|null}>} movementStates
+     * @param {Map<Entity, string>} movementStates
      */
     syncMovementStates(movementStates) {
         for (const monster of this.monsters.values()) {
@@ -151,7 +151,7 @@ export class MonsterManager {
             if (!model) continue;
             const snapshot = movementStates.get(model);
             if (!snapshot) continue;
-            monster.updateMovementSnapshot(snapshot);
+            monster.updateMovementMovemode(snapshot);
         }
     }
 

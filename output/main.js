@@ -1471,7 +1471,7 @@ class MonsterBrainState {
     evaluateIntent() {
         if (!this.monster.target) return MonsterState.IDLE;
         const distsq = this.monster.distanceTosq(this.monster.target);
-        if (this.monster.movementStateSnapshot.mode === "ladder") return MonsterState.CHASE;
+        if (this.monster.movementStateMovemode === "ladder") return MonsterState.CHASE;
         if (this.monster.skillsManager.hasRequestedSkill()) return MonsterState.SKILL;
         if (distsq <= this.monster.attackdist*this.monster.attackdist && this.monster.attackCooldown <= 0) return MonsterState.ATTACK;
         return MonsterState.CHASE;
@@ -2872,7 +2872,7 @@ class MonsterSkillsManager {
      * @param {MonsterSkill} skill
      */
     requestSkill(skill) {
-        if (this.monster.movementStateSnapshot.mode === "ladder") {
+        if (this.monster.movementStateMovemode === "ladder") {
             this._requestedSkill = null;
             return false;
         }
@@ -2882,7 +2882,7 @@ class MonsterSkillsManager {
     }
 
     hasRequestedSkill() {
-        if (this.monster.movementStateSnapshot.mode === "ladder") {
+        if (this.monster.movementStateMovemode === "ladder") {
             this._requestedSkill = null;
             return false;
         }
@@ -2890,7 +2890,7 @@ class MonsterSkillsManager {
     }
 
     triggerRequestedSkill() {
-        if (this.monster.movementStateSnapshot.mode === "ladder") {
+        if (this.monster.movementStateMovemode === "ladder") {
             this._requestedSkill = null;
             return;
         }
@@ -3516,12 +3516,8 @@ class Monster {
         this._runtimeReleased = false;
         this._deathFinalized = false;
 
-        /** @type {{ mode: string; onGround: boolean; currentGoalMode: number | null; }} */
-        this.movementStateSnapshot = {
-            mode: "walk",
-            onGround: true,
-            currentGoalMode: null,
-        };
+        /** @type {string} */
+        this.movementStateMovemode ="walk";
 
         this.initSkills(typeConfig.skill_pool);
         this.movementPath.init(typeConfig);
@@ -3809,10 +3805,9 @@ class Monster {
     }
 
     /**
-     * @param {Entity[]} allmpos
      * @param {CSPlayerPawn[]} allppos
      */
-    tick(allmpos, allppos) {
+    tick(allppos) {
         if (!this.model || !this.breakable?.IsValid()) return;
         if (this.state === MonsterState.DEAD) return;
 
@@ -3825,11 +3820,11 @@ class Monster {
         }
 
         if (dt > 0) {
-            this.emitBuffEvent(MonsterBuffEvents.Tick, { dt, allmpos });
+            this.emitBuffEvent(MonsterBuffEvents.Tick, { dt });
         }
         if (this.state === MonsterState.DEAD) return;
 
-        this.emitEvent({ type: MonsterBuffEvents.Tick, dt, allmpos });
+        this.emitEvent({ type: MonsterBuffEvents.Tick, dt });
         this.skillsManager.tickRunningSkills();
 
         if (now - this.lastTargetUpdate > 3.0 || !this.target) {
@@ -3968,10 +3963,10 @@ class Monster {
     }
 
     /**
-     * @param {{ mode: string; onGround: boolean; currentGoalMode: number | null; }} snapshot
+     * @param {string} movemode
      */
-    updateMovementSnapshot(snapshot) {
-        this.movementStateSnapshot = snapshot;
+    updateMovementMovemode(movemode) {
+        this.movementStateMovemode = movemode;
     }
 }
 
@@ -7942,18 +7937,16 @@ class MonsterManager {
      * 移动的实际推进由 main 在 tick 后统一执行。
      *
      * 返回的 tickContext 是内部复用对象，调用方只读。
-     * @param {Entity[]} allmEntities 
      * @param {CSPlayerPawn[]} allppos
      */
-    tick(allmEntities,allppos)
+    tick(allppos)
     {
-        Instance.GetGameTime();
         for (const [id, monster] of this.monsters) {
             if (monster.state === MonsterState.DEAD && !monster.model && !monster.breakable) {
                 this.monsters.delete(id);
                 continue;
             }
-            monster.tick(allmEntities,allppos);
+            monster.tick(allppos);
             if (monster.state === MonsterState.DEAD && !monster.model && !monster.breakable) {
                 this.monsters.delete(id);
             }
@@ -7994,7 +7987,7 @@ class MonsterManager {
     }
 
     /**
-     * @param {Map<Entity, {mode: string, onGround: boolean, currentGoalMode: number|null}>} movementStates
+     * @param {Map<Entity, string>} movementStates
      */
     syncMovementStates(movementStates) {
         for (const monster of this.monsters.values()) {
@@ -8003,7 +7996,7 @@ class MonsterManager {
             if (!model) continue;
             const snapshot = movementStates.get(model);
             if (!snapshot) continue;
-            monster.updateMovementSnapshot(snapshot);
+            monster.updateMovementMovemode(snapshot);
         }
     }
 
@@ -19870,12 +19863,7 @@ class Movement {
 
     /** 获取当前状态快照 */
     getState() {
-        const currentGoal = this._pathFollower.getMoveGoal();
-        return {
-            mode: this._controller.currentName,
-            onGround: this._motor.isOnGround(),
-            currentGoalMode: currentGoal?.mode ?? null
-        };
+        return this._controller.currentName;
     }
 
     /** 路径是否走完 */
@@ -20507,7 +20495,7 @@ class MovementManager {
     /**
      * 获取所有实体的移动状态摘要。
      * 用于将 movement 层状态回写给 monster 侧。
-     * @returns {Map<Entity, {mode: string, onGround: boolean, currentGoalMode: number|null}>}
+     * @returns {Map<Entity, string>}
      */
     getAllStates() {
         const result = new Map();
@@ -20693,10 +20681,10 @@ class MovementManager {
     _canRefreshPath(entry) {
         if (!entry.usePathRefresh) return false;
         if (!entry.targetEntity && !entry.targetPosition) return false;
-        const s = entry.movement.getState();
-        if (s.currentGoalMode === PathState.JUMP ||
-            s.currentGoalMode === PathState.LADDER ||
-            s.currentGoalMode === PathState.PORTAL) return false;
+        const s = entry.movement._pathFollower.getMoveGoal()?.mode;
+        if (s === PathState.JUMP ||
+            s === PathState.LADDER ||
+            s === PathState.PORTAL) return false;
         return true;
     }
 
@@ -21791,10 +21779,6 @@ Instance.SetThink(() => {
     const alivePawns = alivePlayers
         .map((player) => player.entityBridge.pawn)
         .filter((pawn) => pawn != null);
-    const currentMonsters = monsterManager.getActiveMonsters();
-    const currentMonsterEntities = currentMonsters
-        .map((monster) => monster.model)
-        .filter((entity) => entity != null);
 
     // ── 5.1 输入 / 玩家 / 波次 / Buff ──
     inputManager.tick();
@@ -21803,7 +21787,7 @@ Instance.SetThink(() => {
         waveManager.tick();
     }
     if (isGamePlaying) {
-        monsterManager.tick(currentMonsterEntities, alivePawns);
+        monsterManager.tick(alivePawns);
     }
     if (isGamePlaying) {
         skillManager.tick();

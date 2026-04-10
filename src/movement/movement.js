@@ -270,12 +270,7 @@ export class Movement {
 
     /** 获取当前状态快照 */
     getState() {
-        const currentGoal = this._pathFollower.getMoveGoal();
-        return {
-            mode: this._controller.currentName,
-            onGround: this._motor.isOnGround(),
-            currentGoalMode: currentGoal?.mode ?? null
-        };
+        return this._controller.currentName;
     }
 
     /** 路径是否走完 */

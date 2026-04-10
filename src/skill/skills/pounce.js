@@ -48,7 +48,7 @@ export class PounceSkill extends SkillTemplate {
         const monster = this.monster;
         if (!this.running || !monster) return;
 
-        if (monster.movementStateSnapshot.onGround) {
+        if (monster.movementStateMovemode==="walk") {
             this.running = false;
             monster.onOccupationEnd("pounce");
         }

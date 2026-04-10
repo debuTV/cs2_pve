@@ -166,7 +166,7 @@ export class MovementManager {
     /**
      * 获取所有实体的移动状态摘要。
      * 用于将 movement 层状态回写给 monster 侧。
-     * @returns {Map<Entity, {mode: string, onGround: boolean, currentGoalMode: number|null}>}
+     * @returns {Map<Entity, string>}
      */
     getAllStates() {
         const result = new Map();
@@ -352,10 +352,10 @@ export class MovementManager {
     _canRefreshPath(entry) {
         if (!entry.usePathRefresh) return false;
         if (!entry.targetEntity && !entry.targetPosition) return false;
-        const s = entry.movement.getState();
-        if (s.currentGoalMode === PathState.JUMP ||
-            s.currentGoalMode === PathState.LADDER ||
-            s.currentGoalMode === PathState.PORTAL) return false;
+        const s = entry.movement._pathFollower.getMoveGoal()?.mode;
+        if (s === PathState.JUMP ||
+            s === PathState.LADDER ||
+            s === PathState.PORTAL) return false;
         return true;
     }
 

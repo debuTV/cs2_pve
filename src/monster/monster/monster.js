@@ -96,12 +96,8 @@ export class Monster {
         this._runtimeReleased = false;
         this._deathFinalized = false;
 
-        /** @type {{ mode: string; onGround: boolean; currentGoalMode: number | null; }} */
-        this.movementStateSnapshot = {
-            mode: "walk",
-            onGround: true,
-            currentGoalMode: null,
-        };
+        /** @type {string} */
+        this.movementStateMovemode ="walk";
 
         this.initSkills(typeConfig.skill_pool);
         this.movementPath.init(typeConfig);
@@ -547,9 +543,9 @@ export class Monster {
     }
 
     /**
-     * @param {{ mode: string; onGround: boolean; currentGoalMode: number | null; }} snapshot
+     * @param {string} movemode
      */
-    updateMovementSnapshot(snapshot) {
-        this.movementStateSnapshot = snapshot;
+    updateMovementMovemode(movemode) {
+        this.movementStateMovemode = movemode;
     }
 }

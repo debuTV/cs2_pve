@@ -51,7 +51,7 @@ export class MonsterBrainState {
     evaluateIntent() {
         if (!this.monster.target) return MonsterState.IDLE;
         const distsq = this.monster.distanceTosq(this.monster.target);
-        if (this.monster.movementStateSnapshot.mode === "ladder") return MonsterState.CHASE;
+        if (this.monster.movementStateMovemode === "ladder") return MonsterState.CHASE;
         if (this.monster.skillsManager.hasRequestedSkill()) return MonsterState.SKILL;
         if (distsq <= this.monster.attackdist*this.monster.attackdist && this.monster.attackCooldown <= 0) return MonsterState.ATTACK;
         return MonsterState.CHASE;

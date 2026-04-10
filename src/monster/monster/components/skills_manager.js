@@ -64,7 +64,7 @@ export class MonsterSkillsManager {
      * @param {MonsterSkill} skill
      */
     requestSkill(skill) {
-        if (this.monster.movementStateSnapshot.mode === "ladder") {
+        if (this.monster.movementStateMovemode === "ladder") {
             this._requestedSkill = null;
             return false;
         }
@@ -74,7 +74,7 @@ export class MonsterSkillsManager {
     }
 
     hasRequestedSkill() {
-        if (this.monster.movementStateSnapshot.mode === "ladder") {
+        if (this.monster.movementStateMovemode === "ladder") {
             this._requestedSkill = null;
             return false;
         }
@@ -82,7 +82,7 @@ export class MonsterSkillsManager {
     }
 
     triggerRequestedSkill() {
-        if (this.monster.movementStateSnapshot.mode === "ladder") {
+        if (this.monster.movementStateMovemode === "ladder") {
             this._requestedSkill = null;
             return;
         }
