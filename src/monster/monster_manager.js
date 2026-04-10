@@ -91,18 +91,16 @@ export class MonsterManager {
      * 移动的实际推进由 main 在 tick 后统一执行。
      *
      * 返回的 tickContext 是内部复用对象，调用方只读。
-     * @param {Entity[]} allmEntities 
      * @param {CSPlayerPawn[]} allppos
      */
-    tick(allmEntities,allppos)
+    tick(allppos)
     {
-        const now=Instance.GetGameTime();
         for (const [id, monster] of this.monsters) {
             if (monster.state === MonsterState.DEAD && !monster.model && !monster.breakable) {
                 this.monsters.delete(id);
                 continue;
             }
-            monster.tick(allmEntities,allppos);
+            monster.tick(allppos);
             if (monster.state === MonsterState.DEAD && !monster.model && !monster.breakable) {
                 this.monsters.delete(id);
             }

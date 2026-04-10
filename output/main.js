@@ -898,11 +898,11 @@ const WaveState = {
 const wavesConfig=[
         { 
             name: "训练波", 
-            totalMonsters: 200, 
+            totalMonsters: 5, 
             reward: 500, 
             spawnInterval: 0.1, 
             preparationTime: 0, //波次开始到第一个怪物出现时间，这段时间可以用来发消息
-            aliveMonster:120, //同时存在的怪物数量
+            aliveMonster:1, //同时存在的怪物数量
             monster_spawn_points_name:["monster_spawnpoint"],//这一波生成点
             monster_breakablemins:{x:-30,y:-30,z:0},//最大怪物的breakable的mins
             monster_breakablemaxs:{x:30,y:30,z:75},//最大怪物的breakable的maxs
@@ -18675,10 +18675,10 @@ class NavMesh {
     findPath(start, end) {
         //Instance.DebugLine({start,end,duration:1,color:{r:0,g:255,b:0}});
         const polyPath=this.astar.findPath(start,end);
-        //this.debugTools.debugDrawPolyPath(polyPath.path,1);
+        //this.debugTools.debugDrawPolyPath(polyPath.path,0.5);
         //if (!polyPath || polyPath.path.length === 0) return [];
         const funnelPath = this.funnel.build(polyPath.path, polyPath.start, polyPath.end);
-        //this.debugTools.debugDrawfunnelPath(funnelPath,0.5);
+        this.debugTools.debugDrawfunnelPath(funnelPath,0.5);
         return funnelPath;
         //if (!ans || ans.length === 0) return [];
         //多边形总数：649跳点数：82
@@ -18847,7 +18847,7 @@ class MoveProbe {
 /**
  * @typedef {object} SeparationContext
  * @property {Entity[]} entities
- * @property {import("../octree/octree").SpatialOctree | null} octree
+ * @property {import("../spatialHash/spatial_hash").SpatialHashGrid | null} spatialIndex
  * @property {Entity | null} selfBreakable
  */
 
@@ -18924,22 +18924,15 @@ class Motor {
      * @returns {Vector}
      */
     moveAir(pos, wishDir, wishSpeed, dt, sepCtx) {
-        // 空中弱方向控制
-        if (vec$1.length2Dsq(wishDir) > 0.1) {
-            const wishDir2D = vec$1.normalize2D(wishDir);
-            const airAccel = 10;
-            const currentSpeed = vec$1.dot2D(this.velocity, wishDir2D);
-            const addSpeed = wishSpeed - currentSpeed;
-            if (addSpeed > 0) {
-                const accelSpeed = Math.min(airAccel * dt * wishSpeed, addSpeed);
-                this.velocity.x += accelSpeed * wishDir2D.x;
-                this.velocity.y += accelSpeed * wishDir2D.y;
-            }
+        // 空中方向控制：直接把水平速度对齐到目标速度
+        if (wishSpeed > 0) {
+            this.velocity.x = wishDir.x * wishSpeed;
+            this.velocity.y = wishDir.y * wishSpeed;
         }
         // 重力
         this.velocity.z = Math.max(-this.gravity, this.velocity.z - this.gravity * dt);
         // 分离
-        this.velocity = vec$1.add(this.velocity, this._computeSeparation(pos, sepCtx));
+        //this.velocity = vec.add(this.velocity, this._computeSeparation(pos, sepCtx));
 
         const move = vec$1.scale(this.velocity, dt);
         const result = this._airSlideMove(pos, move, sepCtx.entities);
@@ -19076,13 +19069,13 @@ class Motor {
     }
 
     /**
-     * NPC-NPC 分离速度（基于八叉树查询 breakable 邻居）
+     * NPC-NPC 分离速度（基于空间索引查询 breakable 邻居）
      * @param {Vector} pos 当前怪物位置
      * @param {SeparationContext} sepCtx 分离上下文
      * @returns {Vector}
      */
     _computeSeparation(pos, sepCtx) {
-        if (!sepCtx.octree) return vec$1.get(0, 0, 0);
+        if (!sepCtx.spatialIndex) return vec$1.get(0, 0, 0);
         const radius = separationRadius;
         const maxStrength = separationMaxStrength;
         const maxStrengthSq = maxStrength * maxStrength;
@@ -19090,21 +19083,18 @@ class Motor {
         const radiusSq = radius * radius;
         const falloffRangeSq = Math.max(1e-6, radiusSq - minRadiusSq);
         const minDistSq = 16;
-        const neighbors = sepCtx.octree.querySphere(pos, radius, {
-            excludeEntity: sepCtx.selfBreakable,
-        });
-        if (neighbors.length === 0) return vec$1.get(0, 0, 0);
 
         let sep = vec$1.get(0, 0, 0);
+        let hitCount = 0;
 
-        for (let i = 0; i < neighbors.length; i++) {
-            const otherPos = neighbors[i].position;
+        const accumulateNeighbor = (/** @type {{ entity?: import("cs_script/point_script").Entity; position: any; }} */ neighbor) => {
+            const otherPos = neighbor.position;
             let delta = vec$1.sub(pos, otherPos);
             const dist2Dsq = vec$1.length2Dsq(delta);
-            if (dist2Dsq < minDistSq || vec$1.lengthsq(delta) > radiusSq) continue;
+            if (dist2Dsq < minDistSq || vec$1.lengthsq(delta) > radiusSq) return;
             delta.z = 0;
             const l1 = Math.abs(delta.x) + Math.abs(delta.y);
-            if (l1 < 1e-6) continue;
+            if (l1 < 1e-6) return;
             const dir = vec$1.scale(delta, 1 / l1);
             let strength = 1.0;
             if (dist2Dsq > minRadiusSq) {
@@ -19112,7 +19102,24 @@ class Motor {
                 strength = 1 - t * t * (3 - 2 * t);
             }
             sep = vec$1.add(sep, vec$1.scale(dir, strength * maxStrength));
+            hitCount += 1;
+        };
+
+        if (typeof sepCtx.spatialIndex.forEachInSphere === "function") {
+            sepCtx.spatialIndex.forEachInSphere(pos, radius, accumulateNeighbor, {
+                excludeEntity: sepCtx.selfBreakable,
+            });
+        } else {
+            const neighbors = sepCtx.spatialIndex.querySphere(pos, radius, {
+                excludeEntity: sepCtx.selfBreakable,
+            });
+            for (let i = 0; i < neighbors.length; i++) {
+                accumulateNeighbor(neighbors[i]);
+            }
         }
+
+        if (hitCount === 0) return vec$1.get(0, 0, 0);
+
         const lenSq = vec$1.length2Dsq(sep);
         if (lenSq > maxStrengthSq) sep = vec$1.scale(sep, maxStrengthSq / lenSq);
         return sep;
@@ -19333,11 +19340,11 @@ class MoveMode {
     /**
      * @param {LocoContext} ctx
      * @param {number} dt
-        * @param {{
-        *   entities: Entity[];
-        *   octree: import("../octree/octree").SpatialOctree | null;
-        *   selfBreakable: Entity | null;
-        * }} sepCtx
+     * @param {{
+     *   entities: Entity[];
+     *   spatialIndex: import("../spatialHash/spatial_hash").SpatialHashGrid | null;
+     *   selfBreakable: Entity | null;
+     * }} sepCtx
      * @returns {Vector}
      */
     update(ctx, dt, sepCtx) {return {x:0,y:0,z:0};}
@@ -19348,23 +19355,23 @@ class MoveWalk extends MoveMode {
     /**
      * @param {LocoContext} ctx
      * @param {number} dt
-        * @param {{
-        *   entities: Entity[];
-        *   octree: import("../octree/octree").SpatialOctree | null;
-        *   selfBreakable: Entity | null;
-        * }} sepCtx
+     * @param {{
+     *   entities: Entity[];
+     *   spatialIndex: import("../spatialHash/spatial_hash").SpatialHashGrid | null;
+     *   selfBreakable: Entity | null;
+     * }} sepCtx
      * @return {Vector}
      */
     update(ctx, dt, sepCtx) {
         const pos = ctx.getPos();
 
         // 路径推进
-        ctx.pathFollower.advanceIfReached(pos,200);
+        ctx.pathFollower.advanceIfReached(pos);
         const goal = ctx.pathFollower.getMoveGoal();
 
         // 路径节点驱动的模式切换请求
         if (goal?.mode === PathState.JUMP) {
-            ctx.motor.velocity.z = 500;
+            ctx.motor.velocity.z = 400;
             ctx.requestModeSwitch("air");
             return pos;
         }
@@ -19395,11 +19402,11 @@ class MoveAir extends MoveMode {
     /**
      * @param {LocoContext} ctx
      * @param {number} dt
-        * @param {{
-        *   entities: Entity[];
-        *   octree: import("../octree/octree").SpatialOctree | null;
-        *   selfBreakable: Entity | null;
-        * }} sepCtx
+     * @param {{
+     *   entities: Entity[];
+     *   spatialIndex: import("../spatialHash/spatial_hash").SpatialHashGrid | null;
+     *   selfBreakable: Entity | null;
+     * }} sepCtx
      * @return {Vector}
      */
     update(ctx, dt, sepCtx) {
@@ -19412,7 +19419,7 @@ class MoveAir extends MoveMode {
         const newPos = ctx.motor.moveAir(pos, ctx.wishDir, ctx.wishSpeed, dt, sepCtx);
 
         // 落地 → 请求切换回 walk
-        if (ctx.motor.isOnGround()) {
+        if (ctx.motor.velocity.z<30&&ctx.motor.isOnGround()) {
             ctx.motor.velocity.z = 0;
             ctx.requestModeSwitch("walk");
         }
@@ -19426,11 +19433,11 @@ class MoveFly extends MoveMode {
     /**
      * @param {LocoContext} ctx
      * @param {number} dt
-        * @param {{
-        *   entities: Entity[];
-        *   octree: import("../octree/octree").SpatialOctree | null;
-        *   selfBreakable: Entity | null;
-        * }} sepCtx
+     * @param {{
+     *   entities: Entity[];
+     *   spatialIndex: import("../spatialHash/spatial_hash").SpatialHashGrid | null;
+     *   selfBreakable: Entity | null;
+     * }} sepCtx
      * @return {Vector}
      */
     update(ctx, dt, sepCtx) {
@@ -19459,11 +19466,11 @@ class MoveLadder extends MoveMode {
     /**
      * @param {LocoContext} ctx
      * @param {number} dt
-        * @param {{
-        *   entities: Entity[];
-        *   octree: import("../octree/octree").SpatialOctree | null;
-        *   selfBreakable: Entity | null;
-        * }} sepCtx
+     * @param {{
+     *   entities: Entity[];
+     *   spatialIndex: import("../spatialHash/spatial_hash").SpatialHashGrid | null;
+     *   selfBreakable: Entity | null;
+     * }} sepCtx
      * @return {Vector}
      */
     update(ctx, dt, sepCtx) {
@@ -19475,7 +19482,7 @@ class MoveLadder extends MoveMode {
             return pos;
         }
         if (goal.mode !== PathState.LADDER) {
-            ctx.motor.velocity.z = 200;
+            ctx.motor.velocity.z = 400;
             ctx.requestModeSwitch("air");
             return pos;
         }
@@ -19508,7 +19515,7 @@ function computeWish(ctx, goal) {
             return;
         }
         ctx.wishDir = vec$1.normalize(toGoal);
-        ctx.wishSpeed = 800;
+        ctx.wishSpeed = 400;
     } else {
         if (dist <= arriveDistance * arriveDistance) {
             ctx.wishDir = vec$1.get(0, 0, 0);
@@ -19584,11 +19591,11 @@ class MovementController {
 
     /**
      * @param {number} dt
-        * @param {{
-        *   entities: Entity[];
-        *   octree: import("../octree/octree").SpatialOctree | null;
-        *   selfBreakable: Entity | null;
-        * }} sepCtx
+     * @param {{
+     *   entities: Entity[];
+     *   spatialIndex: import("../spatialHash/spatial_hash").SpatialHashGrid | null;
+     *   selfBreakable: Entity | null;
+     * }} sepCtx
      * @returns {import("cs_script/point_script").Vector | undefined}
      */
     update(dt, sepCtx) {
@@ -19726,16 +19733,16 @@ class Movement {
         }
     }
 
-    /**
-     * 每帧更新（唯一驱动入口）
-     * @param {number} dt         帧间隔（秒）
-     * @param {{
-     *   entities: Entity[];
-     *   octree: import("../octree/octree").SpatialOctree | null;
-     *   selfBreakable: Entity | null;
-     * }} sepCtx 分离上下文
-     * @returns {Vector | undefined}
-     */
+     /**
+      * 每帧更新（唯一驱动入口）
+      * @param {number} dt         帧间隔（秒）
+      * @param {{
+      *   entities: Entity[];
+      *   spatialIndex: import("../spatialHash/spatial_hash").SpatialHashGrid | null;
+      *   selfBreakable: Entity | null;
+      * }} sepCtx 分离上下文
+      * @returns {Vector | undefined}
+      */
     update(dt, sepCtx) {
         if (this._isStopped) return;
 
@@ -19911,11 +19918,20 @@ class Movement {
 }
 
 /**
- * @module 八叉树/空间索引
+ * @module 空间哈希/空间索引
  */
 
 /** @typedef {import("cs_script/point_script").Entity} Entity */
 /** @typedef {import("cs_script/point_script").Vector} Vector */
+
+// XY 使用 16bit 无符号槽位，Z 使用 17bit 无符号槽位，总计 49bit，
+// 可以在 JS 的安全整数范围内无冲突地打包成 number key。
+const XY_CELL_BIAS = 32768;
+const XY_CELL_RANGE = XY_CELL_BIAS * 2;
+const Z_CELL_BIAS = 65536;
+const Z_CELL_RANGE = Z_CELL_BIAS * 2;
+const CELL_Y_STRIDE = Z_CELL_RANGE;
+const CELL_X_STRIDE = XY_CELL_RANGE * Z_CELL_RANGE;
 
 /**
  * @typedef {object} SpatialItem
@@ -19924,55 +19940,41 @@ class Movement {
  */
 
 /**
- * @typedef {SpatialItem & { node: OctreeNode | null }} TrackedSpatialItem
+ * @typedef {SpatialItem & {
+ *   cellKey: number;
+ *   cellX: number;
+ *   cellY: number;
+ *   cellZ: number;
+ *   bucketIndex: number;
+ * }} TrackedSpatialItem
  */
 
 /**
- * @typedef {object} Bounds
- * @property {Vector} min
- * @property {Vector} max
- */
-
-/**
- * @typedef {object} OctreeNode
- * @property {Bounds} bounds
- * @property {number} depth
- * @property {TrackedSpatialItem[]} items
- * @property {OctreeNode[] | null} children
- */
-
-/**
- * 3D 点索引八叉树。
+ * 3D 点索引空间哈希网格。
  *
  * 职责：
- * - 基于实体位置构建和增量维护树
+ * - 基于实体位置构建和增量维护哈希桶
  * - 球形范围查询候选邻居
  * - 暴露轻量统计，便于调试查询收益
  */
-class SpatialOctree {
+class SpatialHashGrid {
     /**
-     * @param {{ maxItems?: number; maxDepth?: number; minNodeSize?: number; padding?: number }} [config]
+     * @param {{ cellSize?: number; minNodeSize?: number; padding?: number }} [config]
      */
     constructor(config = {}) {
+        const legacyMinNodeSize = config.minNodeSize ?? 64;
         /**
-         * 每个节点的最大实体数量；超过时会尝试分裂。
+         * 哈希网格边长。
+         * 默认沿用旧 minNodeSize 的一半，使默认值为 32，贴近当前分离查询半径。
          */
-        this.maxItems = config.maxItems ?? 8;
+        this.cellSize = Math.max(1, config.cellSize ?? Math.max(16, legacyMinNodeSize * 0.5));
         /**
-         * 最大树深；超过时不再分裂。
+         * 保留旧配置字段，避免外部传参报废；空间哈希本身不依赖该值。
          */
-        this.maxDepth = config.maxDepth ?? 6;
-        /**
-         * 最小节点尺寸；分裂时如果子节点尺寸小于此值则不再分裂。
-         */
-        this.minNodeSize = config.minNodeSize ?? 64;
-        /**
-         * 根节点边界相对于包含所有实体的最小包围盒的额外扩展距离，避免频繁重建。
-         */
-        this.padding = config.padding ?? 1;
+        this.padding = config.padding ?? 0;
 
-        /** @type {OctreeNode | null} */
-        this._root = null;
+        /** @type {Map<number, TrackedSpatialItem[]>} */
+        this._cells = new Map();
         /** @type {Map<Entity, TrackedSpatialItem>} */
         this._items = new Map();
         this._stats = this._createEmptyStats();
@@ -19980,7 +19982,7 @@ class SpatialOctree {
 
     /** 清空索引。 */
     clear() {
-        this._root = null;
+        this._cells.clear();
         this._items.clear();
         this._stats = this._createEmptyStats();
     }
@@ -20009,24 +20011,17 @@ class SpatialOctree {
         const item = {
             entity,
             position: vec$1.clone(position),
-            node: null,
+            cellKey: -1,
+            cellX: 0,
+            cellY: 0,
+            cellZ: 0,
+            bucketIndex: -1,
         };
 
-        if (!this._root) {
-            const bounds = this._buildBoundsAroundPoint(item.position);
-            this._root = this._createNode(bounds, 0);
-            this._stats.rootSize = bounds.max.x - bounds.min.x;
-        }
-
         this._items.set(entity, item);
+        this._insertIntoCell(item);
         this._stats.itemCount = this._items.size;
-
-        if (!this._containsPoint(this._root.bounds, item.position)) {
-            this._rebuildFromTrackedItems();
-            return true;
-        }
-
-        this._insertTrackedItem(this._root, item);
+        this._stats.nodeCount = this._cells.size;
         return true;
     }
 
@@ -20043,21 +20038,20 @@ class SpatialOctree {
             return this.insert(entity, position);
         }
 
-        item.position = vec$1.clone(position);
-        if (!this._root) {
-            this._rebuildFromTrackedItems();
-            return true;
-        }
-        if (!this._containsPoint(this._root.bounds, item.position)) {
-            this._rebuildFromTrackedItems();
-            return true;
-        }
-        if (item.node && this._containsPoint(item.node.bounds, item.position)) {
+        item.position.x = position.x;
+        item.position.y = position.y;
+        item.position.z = position.z;
+
+        const cellX = this._getCellCoord(position.x);
+        const cellY = this._getCellCoord(position.y);
+        const cellZ = this._getCellCoord(position.z);
+        if (item.cellX === cellX && item.cellY === cellY && item.cellZ === cellZ) {
             return true;
         }
 
         this._detachTrackedItem(item);
-        this._insertTrackedItem(this._root, item);
+        this._insertIntoCell(item, cellX, cellY, cellZ);
+        this._stats.nodeCount = this._cells.size;
         return true;
     }
 
@@ -20073,10 +20067,8 @@ class SpatialOctree {
         this._detachTrackedItem(item);
         this._items.delete(entity);
         this._stats.itemCount = this._items.size;
-
+        this._stats.nodeCount = this._cells.size;
         if (this._items.size === 0) {
-            this._root = null;
-            this._stats.nodeCount = 0;
             this._stats.maxDepth = 0;
             this._stats.rootSize = 0;
         }
@@ -20088,19 +20080,13 @@ class SpatialOctree {
      * @param {SpatialItem[]} items
      */
     rebuild(items = []) {
-        /** @type {SpatialItem[]} */
-        const normalized = [];
+        this.clear();
         for (let i = 0; i < items.length; i++) {
             const item = items[i];
             if (!item?.entity || !this._isFiniteVector(item.position)) continue;
             if (typeof item.entity.IsValid === "function" && !item.entity.IsValid()) continue;
-            normalized.push({
-                entity: item.entity,
-                position: vec$1.clone(item.position),
-            });
+            this.insert(item.entity, item.position);
         }
-
-        this._rebuildFromSnapshots(normalized, false);
     }
 
     /**
@@ -20111,23 +20097,64 @@ class SpatialOctree {
      * @returns {SpatialItem[]}
      */
     querySphere(center, radius, options = {}) {
-        if (!this._root || !this._isFiniteVector(center) || radius <= 0) {
-            this._stats.lastQueryHits = 0;
-            return [];
-        }
-
         /** @type {SpatialItem[]} */
         const results = [];
-        const radiusSq = radius * radius;
-        this._queryNode(this._root, center, radiusSq, options.excludeEntity ?? null, results);
-        this._stats.queryCount += 1;
-        this._stats.queryHitsTotal += results.length;
-        this._stats.lastQueryHits = results.length;
+        this.forEachInSphere(center, radius, (item) => {
+            results.push(item);
+        }, options);
         return results;
     }
 
     /**
+     * 零额外结果数组分配的球形范围遍历。
+     * @param {Vector} center
+     * @param {number} radius
+     * @param {(item: SpatialItem) => void} visitor
+     * @param {{ excludeEntity?: Entity | null }} [options]
+     * @returns {number}
+     */
+    forEachInSphere(center, radius, visitor, options = {}) {
+        if (typeof visitor !== "function" || !this._isFiniteVector(center) || radius <= 0 || this._items.size === 0) {
+            this._stats.lastQueryHits = 0;
+            return 0;
+        }
+
+        const radiusSq = radius * radius;
+        const minCellX = this._getCellCoord(center.x - radius);
+        const maxCellX = this._getCellCoord(center.x + radius);
+        const minCellY = this._getCellCoord(center.y - radius);
+        const maxCellY = this._getCellCoord(center.y + radius);
+        const minCellZ = this._getCellCoord(center.z - radius);
+        const maxCellZ = this._getCellCoord(center.z + radius);
+        const excludeEntity = options.excludeEntity ?? null;
+
+        let hits = 0;
+        for (let cellZ = minCellZ; cellZ <= maxCellZ; cellZ++) {
+            for (let cellY = minCellY; cellY <= maxCellY; cellY++) {
+                for (let cellX = minCellX; cellX <= maxCellX; cellX++) {
+                    const bucket = this._cells.get(this._getCellKey(cellX, cellY, cellZ));
+                    if (!bucket) continue;
+
+                    for (let i = 0; i < bucket.length; i++) {
+                        const item = bucket[i];
+                        if (excludeEntity && item.entity === excludeEntity) continue;
+                        if (vec$1.lengthsq(item.position, center) > radiusSq) continue;
+                        visitor(item);
+                        hits += 1;
+                    }
+                }
+            }
+        }
+
+        this._stats.queryCount += 1;
+        this._stats.queryHitsTotal += hits;
+        this._stats.lastQueryHits = hits;
+        return hits;
+    }
+
+    /**
      * 获取轻量统计信息。
+     * nodeCount 现在表示非空哈希桶数量；maxDepth 仅为兼容保留字段，固定为 0。
      * @returns {{
      *   itemCount: number;
      *   nodeCount: number;
@@ -20137,15 +20164,20 @@ class SpatialOctree {
      *   queryHitsTotal: number;
      *   lastQueryHits: number;
      *   averageQueryHits: number;
+     *   cellSize: number;
+     *   maxBucketLoad: number;
      * }}
      */
     getStats() {
+        const structureStats = this._collectStructureStats();
         const averageQueryHits = this._stats.queryCount > 0
             ? this._stats.queryHitsTotal / this._stats.queryCount
             : 0;
         return {
             ...this._stats,
+            ...structureStats,
             averageQueryHits,
+            cellSize: this.cellSize,
         };
     }
 
@@ -20158,6 +20190,7 @@ class SpatialOctree {
      *   queryCount: number;
      *   queryHitsTotal: number;
      *   lastQueryHits: number;
+     *   maxBucketLoad: number;
      * }}
      */
     _createEmptyStats() {
@@ -20169,36 +20202,92 @@ class SpatialOctree {
             queryCount: 0,
             queryHitsTotal: 0,
             lastQueryHits: 0,
+            maxBucketLoad: 0,
         };
     }
 
     /**
-     * @param {Vector} position
-     * @returns {Bounds}
+     * @param {TrackedSpatialItem} item
+     * @param {number} [cellX]
+     * @param {number} [cellY]
+     * @param {number} [cellZ]
      */
-    _buildBoundsAroundPoint(position) {
-        const cubeSize = this.minNodeSize + this.padding * 2;
-        const half = cubeSize * 0.5;
-        return {
-            min: vec$1.get(position.x - half, position.y - half, position.z - half),
-            max: vec$1.get(position.x + half, position.y + half, position.z + half),
-        };
+    _insertIntoCell(item, cellX = this._getCellCoord(item.position.x), cellY = this._getCellCoord(item.position.y), cellZ = this._getCellCoord(item.position.z)) {
+        const cellKey = this._getCellKey(cellX, cellY, cellZ);
+        let bucket = this._cells.get(cellKey);
+        if (!bucket) {
+            bucket = [];
+            this._cells.set(cellKey, bucket);
+        }
+
+        item.cellKey = cellKey;
+        item.cellX = cellX;
+        item.cellY = cellY;
+        item.cellZ = cellZ;
+        item.bucketIndex = bucket.length;
+        bucket.push(item);
     }
 
     /**
-     * @param {SpatialItem[]} items
-     * @returns {Bounds}
+     * @param {TrackedSpatialItem} item
      */
-    _buildRootBounds(items) {
+    _detachTrackedItem(item) {
+        if (item.cellKey < 0) return;
+
+        const bucket = this._cells.get(item.cellKey);
+        if (!bucket) {
+            item.cellKey = -1;
+            item.bucketIndex = -1;
+            return;
+        }
+
+        let index = item.bucketIndex;
+        if (index < 0 || index >= bucket.length || bucket[index] !== item) {
+            index = bucket.indexOf(item);
+        }
+        if (index < 0) {
+            item.cellKey = -1;
+            item.bucketIndex = -1;
+            return;
+        }
+
+        const lastIndex = bucket.length - 1;
+        if (index !== lastIndex) {
+            const swapped = bucket[lastIndex];
+            bucket[index] = swapped;
+            swapped.bucketIndex = index;
+        }
+        bucket.pop();
+
+        if (bucket.length === 0) {
+            this._cells.delete(item.cellKey);
+        }
+
+        item.cellKey = -1;
+        item.bucketIndex = -1;
+    }
+
+    /**
+     * @returns {{ nodeCount: number; maxDepth: number; rootSize: number; maxBucketLoad: number }}
+     */
+    _collectStructureStats() {
+        if (this._items.size === 0) {
+            return {
+                nodeCount: 0,
+                maxDepth: 0,
+                rootSize: 0,
+                maxBucketLoad: 0,
+            };
+        }
+
         let minX = Infinity;
         let minY = Infinity;
         let minZ = Infinity;
         let maxX = -Infinity;
         let maxY = -Infinity;
         let maxZ = -Infinity;
-
-        for (let i = 0; i < items.length; i++) {
-            const position = items[i].position;
+        for (const item of this._items.values()) {
+            const position = item.position;
             if (position.x < minX) minX = position.x;
             if (position.y < minY) minY = position.y;
             if (position.z < minZ) minZ = position.z;
@@ -20207,253 +20296,40 @@ class SpatialOctree {
             if (position.z > maxZ) maxZ = position.z;
         }
 
-        const center = vec$1.get(
-            (minX + maxX) * 0.5,
-            (minY + maxY) * 0.5,
-            (minZ + maxZ) * 0.5
-        );
-        const extentX = maxX - minX;
-        const extentY = maxY - minY;
-        const extentZ = maxZ - minZ;
-        const cubeSize = Math.max(extentX, extentY, extentZ, this.minNodeSize) + this.padding * 2;
-        const half = cubeSize * 0.5;
+        let maxBucketLoad = 0;
+        for (const bucket of this._cells.values()) {
+            if (bucket.length > maxBucketLoad) {
+                maxBucketLoad = bucket.length;
+            }
+        }
+
         return {
-            min: vec$1.get(center.x - half, center.y - half, center.z - half),
-            max: vec$1.get(center.x + half, center.y + half, center.z + half),
+            nodeCount: this._cells.size,
+            maxDepth: 0,
+            rootSize: Math.max(maxX - minX, maxY - minY, maxZ - minZ),
+            maxBucketLoad,
         };
     }
 
     /**
-     * @param {Bounds} bounds
-     * @param {number} depth
-     * @returns {OctreeNode}
-     */
-    _createNode(bounds, depth) {
-        this._stats.nodeCount += 1;
-        if (depth > this._stats.maxDepth) {
-            this._stats.maxDepth = depth;
-        }
-        return {
-            bounds,
-            depth,
-            items: [],
-            children: null,
-        };
-    }
-
-    /**
-     * @param {OctreeNode} node
-     * @param {TrackedSpatialItem} item
-     */
-    _insertTrackedItem(node, item) {
-        if (node.children) {
-            const child = node.children[this._getChildIndex(node.bounds, item.position)];
-            if (child && this._containsPoint(child.bounds, item.position)) {
-                this._insertTrackedItem(child, item);
-                return;
-            }
-        }
-
-        node.items.push(item);
-        item.node = node;
-        if (!node.children && this._shouldSplit(node)) {
-            const retainedItems = node.items.slice();
-            node.items = [];
-            for (let i = 0; i < retainedItems.length; i++) {
-                retainedItems[i].node = null;
-            }
-            node.children = this._createChildren(node);
-            for (let i = 0; i < retainedItems.length; i++) {
-                this._insertTrackedItem(node, retainedItems[i]);
-            }
-        }
-    }
-
-    /**
-     * @param {TrackedSpatialItem} item
-     */
-    _detachTrackedItem(item) {
-        const node = item.node;
-        if (!node) return;
-        const index = node.items.indexOf(item);
-        if (index >= 0) {
-            node.items.splice(index, 1);
-        }
-        item.node = null;
-    }
-
-    /**
-     * @param {boolean} [preserveQueryStats=true]
-     */
-    _rebuildFromTrackedItems(preserveQueryStats = true) {
-        /** @type {SpatialItem[]} */
-        const snapshots = [];
-        for (const item of this._items.values()) {
-            snapshots.push({
-                entity: item.entity,
-                position: vec$1.clone(item.position),
-            });
-        }
-        this._rebuildFromSnapshots(snapshots, preserveQueryStats);
-    }
-
-    /**
-     * @param {SpatialItem[]} snapshots
-     * @param {boolean} preserveQueryStats
-     */
-    _rebuildFromSnapshots(snapshots, preserveQueryStats) {
-        const queryStats = preserveQueryStats
-            ? {
-                queryCount: this._stats.queryCount,
-                queryHitsTotal: this._stats.queryHitsTotal,
-                lastQueryHits: this._stats.lastQueryHits,
-            }
-            : null;
-
-        this.clear();
-        if (queryStats) {
-            this._stats.queryCount = queryStats.queryCount;
-            this._stats.queryHitsTotal = queryStats.queryHitsTotal;
-            this._stats.lastQueryHits = queryStats.lastQueryHits;
-        }
-        if (snapshots.length === 0) return;
-
-        const bounds = this._buildRootBounds(snapshots);
-        this._stats.rootSize = bounds.max.x - bounds.min.x;
-        this._root = this._createNode(bounds, 0);
-
-        for (let i = 0; i < snapshots.length; i++) {
-            const snapshot = snapshots[i];
-            /** @type {TrackedSpatialItem} */
-            const item = {
-                entity: snapshot.entity,
-                position: vec$1.clone(snapshot.position),
-                node: null,
-            };
-            this._items.set(item.entity, item);
-            this._insertTrackedItem(this._root, item);
-        }
-        this._stats.itemCount = this._items.size;
-    }
-
-    /**
-     * @param {OctreeNode} node
-     * @returns {boolean}
-     */
-    _shouldSplit(node) {
-        if (node.depth >= this.maxDepth) return false;
-        if (node.items.length <= this.maxItems) return false;
-        const size = node.bounds.max.x - node.bounds.min.x;
-        return size * 0.5 >= this.minNodeSize;
-    }
-
-    /**
-     * @param {OctreeNode} node
-     * @returns {OctreeNode[]}
-     */
-    _createChildren(node) {
-        const { min, max } = node.bounds;
-        const mid = vec$1.get(
-            (min.x + max.x) * 0.5,
-            (min.y + max.y) * 0.5,
-            (min.z + max.z) * 0.5
-        );
-
-        /** @type {OctreeNode[]} */
-        const children = new Array(8);
-        for (let zBit = 0; zBit < 2; zBit++) {
-            for (let yBit = 0; yBit < 2; yBit++) {
-                for (let xBit = 0; xBit < 2; xBit++) {
-                    const index = xBit | (yBit << 1) | (zBit << 2);
-                    const childMin = vec$1.get(
-                        xBit === 0 ? min.x : mid.x,
-                        yBit === 0 ? min.y : mid.y,
-                        zBit === 0 ? min.z : mid.z
-                    );
-                    const childMax = vec$1.get(
-                        xBit === 0 ? mid.x : max.x,
-                        yBit === 0 ? mid.y : max.y,
-                        zBit === 0 ? mid.z : max.z
-                    );
-                    children[index] = this._createNode({ min: childMin, max: childMax }, node.depth + 1);
-                }
-            }
-        }
-        return children;
-    }
-
-    /**
-     * @param {Bounds} bounds
-     * @param {Vector} position
+     * @param {number} value
      * @returns {number}
      */
-    _getChildIndex(bounds, position) {
-        const midX = (bounds.min.x + bounds.max.x) * 0.5;
-        const midY = (bounds.min.y + bounds.max.y) * 0.5;
-        const midZ = (bounds.min.z + bounds.max.z) * 0.5;
-        let index = 0;
-        if (position.x >= midX) index |= 1;
-        if (position.y >= midY) index |= 2;
-        if (position.z >= midZ) index |= 4;
-        return index;
+    _getCellCoord(value) {
+        return Math.floor(value / this.cellSize);
     }
 
     /**
-     * @param {OctreeNode} node
-     * @param {Vector} center
-     * @param {number} radiusSq
-     * @param {Entity | null} excludeEntity
-     * @param {SpatialItem[]} results
+     * @param {number} cellX
+     * @param {number} cellY
+     * @param {number} cellZ
+     * @returns {number}
      */
-    _queryNode(node, center, radiusSq, excludeEntity, results) {
-        if (!this._sphereIntersectsBounds(center, radiusSq, node.bounds)) return;
-
-        for (let i = 0; i < node.items.length; i++) {
-            const item = node.items[i];
-            if (excludeEntity && item.entity === excludeEntity) continue;
-            if (vec$1.lengthsq(item.position, center) <= radiusSq) {
-                results.push(item);
-            }
-        }
-
-        if (!node.children) return;
-        for (let i = 0; i < node.children.length; i++) {
-            this._queryNode(node.children[i], center, radiusSq, excludeEntity, results);
-        }
-    }
-
-    /**
-     * @param {Vector} center
-     * @param {number} radiusSq
-     * @param {Bounds} bounds
-     * @returns {boolean}
-     */
-    _sphereIntersectsBounds(center, radiusSq, bounds) {
-        let dx = 0;
-        let dy = 0;
-        let dz = 0;
-
-        if (center.x < bounds.min.x) dx = bounds.min.x - center.x;
-        else if (center.x > bounds.max.x) dx = center.x - bounds.max.x;
-
-        if (center.y < bounds.min.y) dy = bounds.min.y - center.y;
-        else if (center.y > bounds.max.y) dy = center.y - bounds.max.y;
-
-        if (center.z < bounds.min.z) dz = bounds.min.z - center.z;
-        else if (center.z > bounds.max.z) dz = center.z - bounds.max.z;
-
-        return dx * dx + dy * dy + dz * dz <= radiusSq;
-    }
-
-    /**
-     * @param {Bounds} bounds
-     * @param {Vector} position
-     * @returns {boolean}
-     */
-    _containsPoint(bounds, position) {
-        return position.x >= bounds.min.x && position.x <= bounds.max.x &&
-            position.y >= bounds.min.y && position.y <= bounds.max.y &&
-            position.z >= bounds.min.z && position.z <= bounds.max.z;
+    _getCellKey(cellX, cellY, cellZ) {
+        const packedX = cellX + XY_CELL_BIAS;
+        const packedY = cellY + XY_CELL_BIAS;
+        const packedZ = cellZ + Z_CELL_BIAS;
+        return packedX * CELL_X_STRIDE + packedY * CELL_Y_STRIDE + packedZ;
     }
 
     /**
@@ -20482,20 +20358,9 @@ class SpatialOctree {
 /** @typedef {import("cs_script/point_script").Entity} Entity */
 /** @typedef {import("cs_script/point_script").Vector} Vector */
 
-/**
- * @typedef {object} SeparationFrameContext
- * @property {Entity[]} breakableEntities
- * @property {Map<Entity, Entity>} modelToBreakable
- */
-
-const EMPTY_FRAME_CONTEXT = {
-    breakableEntities: [],
-    modelToBreakable: new Map(),
-};
-
 const EMPTY_SEPARATION_CONTEXT = {
     entities: [],
-    octree: null,
+    spatialIndex: null,
     selfBreakable: null,
 };
 
@@ -20528,7 +20393,9 @@ class MovementManager {
         this._modelToBreakable = new Map();
         /** @type {Entity[]} */
         this._breakableIgnoreEntities = [];
-        this._separationOctree = new SpatialOctree();
+        /** @type {Map<Entity, number>} */
+        this._breakableIgnoreEntityIndexes = new Map();
+        this._separationSpatialHash = new SpatialHashGrid();
 
         /** 路径调度最小堆，按上次更新时间排序。 */
         this._pathHeap = new _MinHeap(256);
@@ -20552,6 +20419,12 @@ class MovementManager {
             eventBus.on(event.Movement.In.RemoveRequest, (req = {}) => {
                 req.type = MovementRequestType$1.Remove;
                 this.submitRequest(req);
+            }),
+            eventBus.on(event.Monster.Out.OnMonsterSpawn, (/** @type {import("../monster/monster_const").OnMonsterSpawn} */ payload) => {
+                this._trackMonsterBreakable(payload.monster);
+            }),
+            eventBus.on(event.Monster.Out.OnMonsterDeath, (/** @type {import("../monster/monster_const").OnMonsterDeath} */ payload) => {
+                this._dropEntityBreakable(payload.monster?.model ?? null, payload.monster?.breakable ?? null);
             }),
         ];
     }
@@ -20615,7 +20488,8 @@ class MovementManager {
         entry.movement.stop();
         const breakable = this._modelToBreakable.get(key);
         if (breakable) {
-            this._separationOctree.remove(breakable);
+            this._removeBreakableIgnoreEntity(breakable);
+            this._separationSpatialHash.remove(breakable);
             this._modelToBreakable.delete(key);
         }
         this._entries.delete(key);
@@ -20666,11 +20540,9 @@ class MovementManager {
      * 3. 批量 movement.update
      * @param {number} now 当前游戏时间
      * @param {number} dt 帧间隔
-     * @param {SeparationFrameContext} separationFrameContext 当前帧分离查询上下文
      */
-    tick(now,dt, separationFrameContext = EMPTY_FRAME_CONTEXT) {
+    tick(now,dt) {
         this._consumeRequests();
-        this._syncSeparationFrame(separationFrameContext);
         this._tickPathRefresh(now);
         this._updateAll(dt);
     }
@@ -20779,7 +20651,7 @@ class MovementManager {
             const current = this._pathHeap.pop();
             if (!current.node) break;
 
-            if (current.node === first || now - current.cost <= 3) {
+            if (current.node === first || now - current.cost <= 0.2) {
                 this._pathHeap.push(current.node, current.cost);
                 break;
             }
@@ -20829,45 +20701,89 @@ class MovementManager {
     }
 
     /**
-     * 同步本帧活跃怪物的 breakable 集合，并维护增量空间索引。
-     * @param {SeparationFrameContext} separationFrameContext
+     * 基于怪物生命周期缓存 model -> breakable 映射，避免 main 每帧重建。
+     * @param {import("../monster/monster/monster").Monster | null | undefined} monster
      */
-    _syncSeparationFrame(separationFrameContext = EMPTY_FRAME_CONTEXT) {
-        this._breakableIgnoreEntities = separationFrameContext.breakableEntities;
-        const nextModelToBreakable = separationFrameContext.modelToBreakable;
+    _trackMonsterBreakable(monster) {
+        const model = monster?.model;
+        const breakable = monster?.breakable;
+        if (!model?.IsValid?.() || !breakable?.IsValid?.()) return false;
+        return this._trackEntityBreakable(model, breakable);
+    }
 
-        for (const [model, breakable] of this._modelToBreakable) {
-            const nextBreakable = nextModelToBreakable.get(model);
-            if (nextBreakable === breakable && breakable?.IsValid?.()) continue;
-            this._separationOctree.remove(breakable);
+    /**
+     * @param {Entity} model
+     * @param {Entity} breakable
+     */
+    _trackEntityBreakable(model, breakable) {
+        if (!model?.IsValid?.() || !breakable?.IsValid?.()) return false;
+
+        const prevBreakable = this._modelToBreakable.get(model);
+        if (prevBreakable && prevBreakable !== breakable) {
+            this._removeBreakableIgnoreEntity(prevBreakable);
+            this._separationSpatialHash.remove(prevBreakable);
+        }
+
+        this._modelToBreakable.set(model, breakable);
+        this._addBreakableIgnoreEntity(breakable);
+
+        const breakablePos = breakable.GetAbsOrigin();
+        if (!breakablePos) return true;
+
+        if (this._separationSpatialHash.has(breakable)) {
+            this._separationSpatialHash.update(breakable, breakablePos);
+        } else {
+            this._separationSpatialHash.insert(breakable, breakablePos);
+        }
+        return true;
+    }
+
+    /**
+     * @param {Entity | null | undefined} model
+     * @param {Entity | null | undefined} breakable
+     */
+    _dropEntityBreakable(model, breakable = null) {
+        const trackedBreakable = model ? (this._modelToBreakable.get(model) ?? null) : null;
+        const nextBreakable = trackedBreakable ?? breakable;
+        if (!nextBreakable) return false;
+
+        if (model && trackedBreakable) {
             this._modelToBreakable.delete(model);
         }
 
-        for (const [model, breakable] of nextModelToBreakable) {
-            if (!model?.IsValid?.() || !breakable?.IsValid?.()) continue;
+        this._removeBreakableIgnoreEntity(nextBreakable);
+        this._separationSpatialHash.remove(nextBreakable);
+        return true;
+    }
 
-            const prevBreakable = this._modelToBreakable.get(model);
-            if (prevBreakable && prevBreakable !== breakable) {
-                this._separationOctree.remove(prevBreakable);
-            }
+    /**
+     * @param {Entity} breakable
+     */
+    _addBreakableIgnoreEntity(breakable) {
+        if (!breakable?.IsValid?.() || this._breakableIgnoreEntityIndexes.has(breakable)) return false;
+        this._breakableIgnoreEntityIndexes.set(breakable, this._breakableIgnoreEntities.length);
+        this._breakableIgnoreEntities.push(breakable);
+        return true;
+    }
 
-            this._modelToBreakable.set(model, breakable);
+    /**
+     * @param {Entity} breakable
+     */
+    _removeBreakableIgnoreEntity(breakable) {
+        const index = this._breakableIgnoreEntityIndexes.get(breakable);
+        if (index === undefined) return false;
 
-            if (!this._separationOctree.has(breakable)) {
-                const breakablePos = breakable.GetAbsOrigin();
-                if (breakablePos) {
-                    this._separationOctree.insert(breakable, breakablePos);
-                }
-                continue;
-            }
+        const lastIndex = this._breakableIgnoreEntities.length - 1;
+        const lastBreakable = this._breakableIgnoreEntities[lastIndex];
 
-            if (!this._entries.has(model)) {
-                const breakablePos = breakable.GetAbsOrigin();
-                if (breakablePos) {
-                    this._separationOctree.update(breakable, breakablePos);
-                }
-            }
+        this._breakableIgnoreEntities[index] = lastBreakable;
+        this._breakableIgnoreEntities.pop();
+        this._breakableIgnoreEntityIndexes.delete(breakable);
+
+        if (lastBreakable && lastBreakable !== breakable) {
+            this._breakableIgnoreEntityIndexes.set(lastBreakable, index);
         }
+        return true;
     }
 
     // ═══════════════════════════════════════════════
@@ -20883,13 +20799,13 @@ class MovementManager {
             const sepCtx = entry.useNPCSeparation
                 ? {
                     entities: this._breakableIgnoreEntities,
-                    octree: this._separationOctree,
+                    spatialIndex: this._separationSpatialHash,
                     selfBreakable,
                 }
                 : EMPTY_SEPARATION_CONTEXT;
             const newPos = entry.movement.update(dt, sepCtx);
             if (selfBreakable?.IsValid?.() && newPos) {
-                this._separationOctree.update(selfBreakable, newPos);
+                this._separationSpatialHash.update(selfBreakable, newPos);
             }
         }
     }
@@ -20908,7 +20824,8 @@ class MovementManager {
         this._entries.clear();
         this._modelToBreakable.clear();
         this._breakableIgnoreEntities = [];
-        this._separationOctree.clear();
+        this._breakableIgnoreEntityIndexes.clear();
+        this._separationSpatialHash.clear();
         this._pathHeap.clear();
         this._pendingRequests.length = 0;
     }
@@ -21027,41 +20944,6 @@ class _MinHeap {
         this.nodes[a] = this.nodes[b]; this.nodes[b] = na;
         this.index.set(na, b);
         this.index.set(this.nodes[a], a);
-    }
-}
-
-/**
- * 维护主循环共享的临时上下文快照。
- */
-class ContextManager {
-    constructor()
-    {
-        /** @type {import("../monster/monster/monster").Monster[]} */
-        this.activeMonsters = [];
-        /** @type {import("cs_script/point_script").Entity[]} */
-        this.monsterEntities = [];
-        this.resetTickContext();
-    }
-
-    /**
-     * 更新本 tick 用到的怪物相关临时快照。
-     * @param {{
-     *   activeMonsters?: import("../monster/monster/monster").Monster[];
-     *   monsterEntities?: import("cs_script/point_script").Entity[];
-     * }} [nextContext]
-     */
-    updateTickContext(nextContext = {})
-    {
-        this.activeMonsters = Array.isArray(nextContext.activeMonsters) ? [...nextContext.activeMonsters] : [];
-        this.monsterEntities = Array.isArray(nextContext.monsterEntities) ? [...nextContext.monsterEntities] : [];
-    }
-
-    resetTickContext()
-    {
-        /** @type {import("../monster/monster/monster").Monster[]} */
-        this.activeMonsters = [];
-        /** @type {import("cs_script/point_script").Entity[]} */
-        this.monsterEntities = [];
     }
 }
 
@@ -21595,7 +21477,6 @@ movementManager.initPathScheduler((start, end) => navMesh.findPath(start, end));
 const buffManager = new BuffManager();
 const particleManager = new ParticleManager();
 const areaEffectManager = new AreaEffectManager();
-const tempContext = new ContextManager();
 
 function cleanupFinishedMatch() {
     shopManager.closeAll();
@@ -21610,7 +21491,6 @@ function cleanupFinishedMatch() {
     areaEffectManager.cleanup();
     particleManager.cleanup();
     buffManager.clearAll();
-    tempContext.resetTickContext();
 }
 
 // ═══════════════════════════════════════════════
@@ -21928,57 +21808,15 @@ Instance.SetThink(() => {
     if (isGamePlaying) {
         skillManager.tick();
         const activeMonsters = monsterManager.getActiveMonsters();
-        /** @type {import("cs_script/point_script").Entity[]} */
-        const monsterEntities = [];
-        /** @type {import("cs_script/point_script").Entity[]} */
-        const monsterBreakableEntities = [];
-        /** @type {Map<import("cs_script/point_script").Entity, import("cs_script/point_script").Entity>} */
-        const modelToBreakable = new Map();
-
-        for (let i = 0; i < activeMonsters.length; i++) {
-            const monster = activeMonsters[i];
-            const model = monster.model;
-            const breakable = monster.breakable;
-
-            if (model?.IsValid?.()) {
-                monsterEntities.push(model);
-            }
-
-            if (!breakable?.IsValid?.()) continue;
-
-            monsterBreakableEntities.push(breakable);
-            if (model?.IsValid?.()) {
-                modelToBreakable.set(model, breakable);
-            }
-        }
-
-        tempContext.updateTickContext({
-            activeMonsters,
-            monsterEntities,
-        });
-        movementManager.tick(now, dt, {
-            breakableEntities: monsterBreakableEntities,
-            modelToBreakable,
-        });
-        //const am=Array.from(movementManager.getAllStates());
-        //for (let i =0;i<am.length;i++){
-        //    const a=am[i];
-        //    Instance.DebugScreenText({
-        //        text: `mode: ${a[1].mode}`, 
-        //        x: 500,
-        //        y: 200+i*20,
-        //        duration: 1/64});
-        //}
+        movementManager.tick(now, dt);
 
         monsterManager.syncMovementStates(movementManager.getAllStates());
         areaEffectManager.tick(now, {
             players: alivePlayers,
-            monsters: tempContext.activeMonsters,
+            monsters: activeMonsters,
         });
         particleManager.tickAll(now);
         buffManager.tick();
-    } else {
-        tempContext.resetTickContext();
     }
     if (isGamePlaying) {
         navMesh.tick(alivePawns[0]?.GetAbsOrigin?.());

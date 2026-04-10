@@ -133,16 +133,16 @@ export class Movement {
         }
     }
 
-    /**
-     * 每帧更新（唯一驱动入口）
-     * @param {number} dt         帧间隔（秒）
-     * @param {{
-     *   entities: Entity[];
-     *   octree: import("../octree/octree").SpatialOctree | null;
-     *   selfBreakable: Entity | null;
-     * }} sepCtx 分离上下文
-     * @returns {Vector | undefined}
-     */
+     /**
+      * 每帧更新（唯一驱动入口）
+      * @param {number} dt         帧间隔（秒）
+      * @param {{
+      *   entities: Entity[];
+      *   spatialIndex: import("../spatialHash/spatial_hash").SpatialHashGrid | null;
+      *   selfBreakable: Entity | null;
+      * }} sepCtx 分离上下文
+      * @returns {Vector | undefined}
+      */
     update(dt, sepCtx) {
         if (this._isStopped) return;
 

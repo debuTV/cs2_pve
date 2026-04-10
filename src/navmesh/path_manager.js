@@ -372,10 +372,10 @@ export class NavMesh {
     findPath(start, end) {
         //Instance.DebugLine({start,end,duration:1,color:{r:0,g:255,b:0}});
         const polyPath=this.astar.findPath(start,end);
-        //this.debugTools.debugDrawPolyPath(polyPath.path,1);
+        //this.debugTools.debugDrawPolyPath(polyPath.path,0.5);
         //if (!polyPath || polyPath.path.length === 0) return [];
         const funnelPath = this.funnel.build(polyPath.path, polyPath.start, polyPath.end);
-        //this.debugTools.debugDrawfunnelPath(funnelPath,0.5);
+        this.debugTools.debugDrawfunnelPath(funnelPath,0.5);
         if(ADJUST_HEIGHT)
         {
             const ans=this.heightfixer.fixHeight(funnelPath,polyPath.path);

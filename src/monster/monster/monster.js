@@ -389,10 +389,9 @@ export class Monster {
     }
 
     /**
-     * @param {Entity[]} allmpos
      * @param {CSPlayerPawn[]} allppos
      */
-    tick(allmpos, allppos) {
+    tick(allppos) {
         if (!this.model || !this.breakable?.IsValid()) return;
         if (this.state === MonsterState.DEAD) return;
 
@@ -405,11 +404,11 @@ export class Monster {
         }
 
         if (dt > 0) {
-            this.emitBuffEvent(MonsterBuffEvents.Tick, { dt, allmpos });
+            this.emitBuffEvent(MonsterBuffEvents.Tick, { dt });
         }
         if (this.state === MonsterState.DEAD) return;
 
-        this.emitEvent({ type: MonsterBuffEvents.Tick, dt, allmpos });
+        this.emitEvent({ type: MonsterBuffEvents.Tick, dt });
         this.skillsManager.tickRunningSkills();
 
         if (now - this.lastTargetUpdate > 3.0 || !this.target) {

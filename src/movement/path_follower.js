@@ -2,7 +2,7 @@
  * @module 实体移动/路径跟随器
  */
 import { vec } from "../util/vector";
-import { goalTolerance } from "./movement_const";
+import { goalTolerance, PathState } from "./movement_const";
 
 /**
  * 路径游标：维护 {pos, mode}[] 路径数组与当前 cursor，

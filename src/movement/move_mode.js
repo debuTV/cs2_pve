@@ -31,11 +31,11 @@ export class MoveMode {
     /**
      * @param {LocoContext} ctx
      * @param {number} dt
-        * @param {{
-        *   entities: Entity[];
-        *   octree: import("../octree/octree").SpatialOctree | null;
-        *   selfBreakable: Entity | null;
-        * }} sepCtx
+     * @param {{
+     *   entities: Entity[];
+     *   spatialIndex: import("../spatialHash/spatial_hash").SpatialHashGrid | null;
+     *   selfBreakable: Entity | null;
+     * }} sepCtx
      * @returns {Vector}
      */
     update(ctx, dt, sepCtx) {return {x:0,y:0,z:0};}
@@ -46,23 +46,23 @@ export class MoveWalk extends MoveMode {
     /**
      * @param {LocoContext} ctx
      * @param {number} dt
-        * @param {{
-        *   entities: Entity[];
-        *   octree: import("../octree/octree").SpatialOctree | null;
-        *   selfBreakable: Entity | null;
-        * }} sepCtx
+     * @param {{
+     *   entities: Entity[];
+     *   spatialIndex: import("../spatialHash/spatial_hash").SpatialHashGrid | null;
+     *   selfBreakable: Entity | null;
+     * }} sepCtx
      * @return {Vector}
      */
     update(ctx, dt, sepCtx) {
         const pos = ctx.getPos();
 
         // 路径推进
-        ctx.pathFollower.advanceIfReached(pos,200);
+        ctx.pathFollower.advanceIfReached(pos);
         const goal = ctx.pathFollower.getMoveGoal();
 
         // 路径节点驱动的模式切换请求
         if (goal?.mode === PathState.JUMP) {
-            ctx.motor.velocity.z = 500;
+            ctx.motor.velocity.z = 400;
             ctx.requestModeSwitch("air");
             return pos;
         }
@@ -93,11 +93,11 @@ export class MoveAir extends MoveMode {
     /**
      * @param {LocoContext} ctx
      * @param {number} dt
-        * @param {{
-        *   entities: Entity[];
-        *   octree: import("../octree/octree").SpatialOctree | null;
-        *   selfBreakable: Entity | null;
-        * }} sepCtx
+     * @param {{
+     *   entities: Entity[];
+     *   spatialIndex: import("../spatialHash/spatial_hash").SpatialHashGrid | null;
+     *   selfBreakable: Entity | null;
+     * }} sepCtx
      * @return {Vector}
      */
     update(ctx, dt, sepCtx) {
@@ -110,7 +110,7 @@ export class MoveAir extends MoveMode {
         const newPos = ctx.motor.moveAir(pos, ctx.wishDir, ctx.wishSpeed, dt, sepCtx);
 
         // 落地 → 请求切换回 walk
-        if (ctx.motor.isOnGround()) {
+        if (ctx.motor.velocity.z<30&&ctx.motor.isOnGround()) {
             ctx.motor.velocity.z = 0;
             ctx.requestModeSwitch("walk");
         }
@@ -124,11 +124,11 @@ export class MoveFly extends MoveMode {
     /**
      * @param {LocoContext} ctx
      * @param {number} dt
-        * @param {{
-        *   entities: Entity[];
-        *   octree: import("../octree/octree").SpatialOctree | null;
-        *   selfBreakable: Entity | null;
-        * }} sepCtx
+     * @param {{
+     *   entities: Entity[];
+     *   spatialIndex: import("../spatialHash/spatial_hash").SpatialHashGrid | null;
+     *   selfBreakable: Entity | null;
+     * }} sepCtx
      * @return {Vector}
      */
     update(ctx, dt, sepCtx) {
@@ -157,11 +157,11 @@ export class MoveLadder extends MoveMode {
     /**
      * @param {LocoContext} ctx
      * @param {number} dt
-        * @param {{
-        *   entities: Entity[];
-        *   octree: import("../octree/octree").SpatialOctree | null;
-        *   selfBreakable: Entity | null;
-        * }} sepCtx
+     * @param {{
+     *   entities: Entity[];
+     *   spatialIndex: import("../spatialHash/spatial_hash").SpatialHashGrid | null;
+     *   selfBreakable: Entity | null;
+     * }} sepCtx
      * @return {Vector}
      */
     update(ctx, dt, sepCtx) {
@@ -173,7 +173,7 @@ export class MoveLadder extends MoveMode {
             return pos;
         }
         if (goal.mode !== PathState.LADDER) {
-            ctx.motor.velocity.z = 200;
+            ctx.motor.velocity.z = 400;
             ctx.requestModeSwitch("air");
             return pos;
         }
@@ -206,7 +206,7 @@ function computeWish(ctx, goal) {
             return;
         }
         ctx.wishDir = vec.normalize(toGoal);
-        ctx.wishSpeed = 800;
+        ctx.wishSpeed = 400;
     } else {
         if (dist <= arriveDistance * arriveDistance) {
             ctx.wishDir = vec.get(0, 0, 0);

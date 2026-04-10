@@ -22,7 +22,7 @@ import {
 /**
  * @typedef {object} SeparationContext
  * @property {Entity[]} entities
- * @property {import("../octree/octree").SpatialOctree | null} octree
+ * @property {import("../spatialHash/spatial_hash").SpatialHashGrid | null} spatialIndex
  * @property {Entity | null} selfBreakable
  */
 
@@ -99,22 +99,15 @@ export class Motor {
      * @returns {Vector}
      */
     moveAir(pos, wishDir, wishSpeed, dt, sepCtx) {
-        // 空中弱方向控制
-        if (vec.length2Dsq(wishDir) > 0.1) {
-            const wishDir2D = vec.normalize2D(wishDir);
-            const airAccel = 10;
-            const currentSpeed = vec.dot2D(this.velocity, wishDir2D);
-            const addSpeed = wishSpeed - currentSpeed;
-            if (addSpeed > 0) {
-                const accelSpeed = Math.min(airAccel * dt * wishSpeed, addSpeed);
-                this.velocity.x += accelSpeed * wishDir2D.x;
-                this.velocity.y += accelSpeed * wishDir2D.y;
-            }
+        // 空中方向控制：直接把水平速度对齐到目标速度
+        if (wishSpeed > 0) {
+            this.velocity.x = wishDir.x * wishSpeed;
+            this.velocity.y = wishDir.y * wishSpeed;
         }
         // 重力
         this.velocity.z = Math.max(-this.gravity, this.velocity.z - this.gravity * dt);
         // 分离
-        this.velocity = vec.add(this.velocity, this._computeSeparation(pos, sepCtx));
+        //this.velocity = vec.add(this.velocity, this._computeSeparation(pos, sepCtx));
 
         const move = vec.scale(this.velocity, dt);
         const result = this._airSlideMove(pos, move, sepCtx.entities);
@@ -251,13 +244,13 @@ export class Motor {
     }
 
     /**
-     * NPC-NPC 分离速度（基于八叉树查询 breakable 邻居）
+     * NPC-NPC 分离速度（基于空间索引查询 breakable 邻居）
      * @param {Vector} pos 当前怪物位置
      * @param {SeparationContext} sepCtx 分离上下文
      * @returns {Vector}
      */
     _computeSeparation(pos, sepCtx) {
-        if (!sepCtx.octree) return vec.get(0, 0, 0);
+        if (!sepCtx.spatialIndex) return vec.get(0, 0, 0);
         const radius = separationRadius;
         const maxStrength = separationMaxStrength;
         const maxStrengthSq = maxStrength * maxStrength;
@@ -265,21 +258,18 @@ export class Motor {
         const radiusSq = radius * radius;
         const falloffRangeSq = Math.max(1e-6, radiusSq - minRadiusSq);
         const minDistSq = 16;
-        const neighbors = sepCtx.octree.querySphere(pos, radius, {
-            excludeEntity: sepCtx.selfBreakable,
-        });
-        if (neighbors.length === 0) return vec.get(0, 0, 0);
 
         let sep = vec.get(0, 0, 0);
+        let hitCount = 0;
 
-        for (let i = 0; i < neighbors.length; i++) {
-            const otherPos = neighbors[i].position;
+        const accumulateNeighbor = (/** @type {{ entity?: import("cs_script/point_script").Entity; position: any; }} */ neighbor) => {
+            const otherPos = neighbor.position;
             let delta = vec.sub(pos, otherPos);
             const dist2Dsq = vec.length2Dsq(delta);
-            if (dist2Dsq < minDistSq || vec.lengthsq(delta) > radiusSq) continue;
+            if (dist2Dsq < minDistSq || vec.lengthsq(delta) > radiusSq) return;
             delta.z = 0;
             const l1 = Math.abs(delta.x) + Math.abs(delta.y);
-            if (l1 < 1e-6) continue;
+            if (l1 < 1e-6) return;
             const dir = vec.scale(delta, 1 / l1);
             let strength = 1.0;
             if (dist2Dsq > minRadiusSq) {
@@ -287,7 +277,24 @@ export class Motor {
                 strength = 1 - t * t * (3 - 2 * t);
             }
             sep = vec.add(sep, vec.scale(dir, strength * maxStrength));
+            hitCount += 1;
+        };
+
+        if (typeof sepCtx.spatialIndex.forEachInSphere === "function") {
+            sepCtx.spatialIndex.forEachInSphere(pos, radius, accumulateNeighbor, {
+                excludeEntity: sepCtx.selfBreakable,
+            });
+        } else {
+            const neighbors = sepCtx.spatialIndex.querySphere(pos, radius, {
+                excludeEntity: sepCtx.selfBreakable,
+            });
+            for (let i = 0; i < neighbors.length; i++) {
+                accumulateNeighbor(neighbors[i]);
+            }
         }
+
+        if (hitCount === 0) return vec.get(0, 0, 0);
+
         const lenSq = vec.length2Dsq(sep);
         if (lenSq > maxStrengthSq) sep = vec.scale(sep, maxStrengthSq / lenSq);
         return sep;

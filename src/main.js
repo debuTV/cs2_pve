@@ -39,7 +39,6 @@ import { BuffManager } from "./buff/buff_manager";
 import { ParticleManager } from "./particle/particle_manager";
 import { NavMesh } from "./navmesh/path_manager";
 import { MovementManager } from "./movement/movement_manager";
-import { ContextManager } from "./tempContext/tempContext_manager";
 import { AreaEffectManager } from "./areaEffects/area_manager";
 const ticks=1/64;
 // ═══════════════════════════════════════════════
@@ -101,7 +100,6 @@ movementManager.initPathScheduler((start, end) => navMesh.findPath(start, end));
 const buffManager = new BuffManager();
 const particleManager = new ParticleManager();
 const areaEffectManager = new AreaEffectManager();
-const tempContext = new ContextManager();
 
 function cleanupFinishedMatch() {
     shopManager.closeAll();
@@ -116,7 +114,6 @@ function cleanupFinishedMatch() {
     areaEffectManager.cleanup();
     particleManager.cleanup();
     buffManager.clearAll();
-    tempContext.resetTickContext();
 }
 
 // ═══════════════════════════════════════════════
@@ -427,10 +424,6 @@ Instance.SetThink(() => {
     const alivePawns = alivePlayers
         .map((player) => player.entityBridge.pawn)
         .filter((pawn) => pawn != null);
-    const currentMonsters = monsterManager.getActiveMonsters();
-    const currentMonsterEntities = currentMonsters
-        .map((monster) => monster.model)
-        .filter((entity) => entity != null);
 
     // ── 5.1 输入 / 玩家 / 波次 / Buff ──
     inputManager.tick();
@@ -439,62 +432,20 @@ Instance.SetThink(() => {
         waveManager.tick();
     }
     if (isGamePlaying) {
-        monsterManager.tick(currentMonsterEntities, alivePawns);
+        monsterManager.tick(alivePawns);
     }
     if (isGamePlaying) {
         skillManager.tick();
         const activeMonsters = monsterManager.getActiveMonsters();
-        /** @type {import("cs_script/point_script").Entity[]} */
-        const monsterEntities = [];
-        /** @type {import("cs_script/point_script").Entity[]} */
-        const monsterBreakableEntities = [];
-        /** @type {Map<import("cs_script/point_script").Entity, import("cs_script/point_script").Entity>} */
-        const modelToBreakable = new Map();
-
-        for (let i = 0; i < activeMonsters.length; i++) {
-            const monster = activeMonsters[i];
-            const model = monster.model;
-            const breakable = monster.breakable;
-
-            if (model?.IsValid?.()) {
-                monsterEntities.push(model);
-            }
-
-            if (!breakable?.IsValid?.()) continue;
-
-            monsterBreakableEntities.push(breakable);
-            if (model?.IsValid?.()) {
-                modelToBreakable.set(model, breakable);
-            }
-        }
-
-        tempContext.updateTickContext({
-            activeMonsters,
-            monsterEntities,
-        });
-        movementManager.tick(now, dt, {
-            breakableEntities: monsterBreakableEntities,
-            modelToBreakable,
-        });
-        //const am=Array.from(movementManager.getAllStates());
-        //for (let i =0;i<am.length;i++){
-        //    const a=am[i];
-        //    Instance.DebugScreenText({
-        //        text: `mode: ${a[1].mode}`, 
-        //        x: 500,
-        //        y: 200+i*20,
-        //        duration: 1/64});
-        //}
+        movementManager.tick(now, dt);
 
         monsterManager.syncMovementStates(movementManager.getAllStates());
         areaEffectManager.tick(now, {
             players: alivePlayers,
-            monsters: tempContext.activeMonsters,
+            monsters: activeMonsters,
         });
         particleManager.tickAll(now);
         buffManager.tick();
-    } else {
-        tempContext.resetTickContext();
     }
     if (isGamePlaying) {
         navMesh.tick(alivePawns[0]?.GetAbsOrigin?.());
