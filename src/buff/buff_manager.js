@@ -2,7 +2,7 @@ import { Player } from "../player/player/player";
 import { Monster } from "../monster/monster/monster";
 import { BuffTemplate } from "./buff_template";
 import { BuffFactory } from "./buff_factory";
-import { eventBus } from "../eventBus/event_bus";
+import { eventBus } from "../util/event_bus";
 import { event } from "../util/definition";
 import { buffconfig } from "./buff_const";
 /**

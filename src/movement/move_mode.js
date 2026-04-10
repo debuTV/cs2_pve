@@ -33,7 +33,7 @@ export class MoveMode {
      * @param {number} dt
      * @param {{
      *   entities: Entity[];
-     *   spatialIndex: import("../spatialHash/spatial_hash").SpatialHashGrid | null;
+    *   spatialIndex: import("../util/spatial_hash").SpatialHashGrid | null;
      *   selfBreakable: Entity | null;
      * }} sepCtx
      * @returns {Vector}
@@ -48,7 +48,7 @@ export class MoveWalk extends MoveMode {
      * @param {number} dt
      * @param {{
      *   entities: Entity[];
-     *   spatialIndex: import("../spatialHash/spatial_hash").SpatialHashGrid | null;
+    *   spatialIndex: import("../util/spatial_hash").SpatialHashGrid | null;
      *   selfBreakable: Entity | null;
      * }} sepCtx
      * @return {Vector}
@@ -95,7 +95,7 @@ export class MoveAir extends MoveMode {
      * @param {number} dt
      * @param {{
      *   entities: Entity[];
-     *   spatialIndex: import("../spatialHash/spatial_hash").SpatialHashGrid | null;
+    *   spatialIndex: import("../util/spatial_hash").SpatialHashGrid | null;
      *   selfBreakable: Entity | null;
      * }} sepCtx
      * @return {Vector}
@@ -126,7 +126,7 @@ export class MoveFly extends MoveMode {
      * @param {number} dt
      * @param {{
      *   entities: Entity[];
-     *   spatialIndex: import("../spatialHash/spatial_hash").SpatialHashGrid | null;
+    *   spatialIndex: import("../util/spatial_hash").SpatialHashGrid | null;
      *   selfBreakable: Entity | null;
      * }} sepCtx
      * @return {Vector}
@@ -159,7 +159,7 @@ export class MoveLadder extends MoveMode {
      * @param {number} dt
      * @param {{
      *   entities: Entity[];
-     *   spatialIndex: import("../spatialHash/spatial_hash").SpatialHashGrid | null;
+    *   spatialIndex: import("../util/spatial_hash").SpatialHashGrid | null;
      *   selfBreakable: Entity | null;
      * }} sepCtx
      * @return {Vector}

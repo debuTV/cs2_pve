@@ -1866,7 +1866,7 @@ class PounceSkill extends SkillTemplate {
         const monster = this.monster;
         if (!this.running || !monster) return;
 
-        if (monster.movementStateSnapshot.onGround) {
+        if (monster.movementStateMovemode==="walk") {
             this.running = false;
             monster.onOccupationEnd("pounce");
         }
@@ -8815,7 +8815,7 @@ class ParticleManager {
      * 每帧调用，驱动所有活跃粒子的生命周期。
      * @param {number} now  当前游戏时间（Instance.GetGameTime()）
      */
-    tickAll(now) {
+    tick(now) {
         for (const particle of this.activeParticles.values()) {
             if (particle) {
                 particle.tick(now);
@@ -18840,7 +18840,7 @@ class MoveProbe {
 /**
  * @typedef {object} SeparationContext
  * @property {Entity[]} entities
- * @property {import("../spatialHash/spatial_hash").SpatialHashGrid | null} spatialIndex
+ * @property {import("../util/spatial_hash").SpatialHashGrid | null} spatialIndex
  * @property {Entity | null} selfBreakable
  */
 
@@ -19335,7 +19335,7 @@ class MoveMode {
      * @param {number} dt
      * @param {{
      *   entities: Entity[];
-     *   spatialIndex: import("../spatialHash/spatial_hash").SpatialHashGrid | null;
+    *   spatialIndex: import("../util/spatial_hash").SpatialHashGrid | null;
      *   selfBreakable: Entity | null;
      * }} sepCtx
      * @returns {Vector}
@@ -19350,7 +19350,7 @@ class MoveWalk extends MoveMode {
      * @param {number} dt
      * @param {{
      *   entities: Entity[];
-     *   spatialIndex: import("../spatialHash/spatial_hash").SpatialHashGrid | null;
+    *   spatialIndex: import("../util/spatial_hash").SpatialHashGrid | null;
      *   selfBreakable: Entity | null;
      * }} sepCtx
      * @return {Vector}
@@ -19397,7 +19397,7 @@ class MoveAir extends MoveMode {
      * @param {number} dt
      * @param {{
      *   entities: Entity[];
-     *   spatialIndex: import("../spatialHash/spatial_hash").SpatialHashGrid | null;
+    *   spatialIndex: import("../util/spatial_hash").SpatialHashGrid | null;
      *   selfBreakable: Entity | null;
      * }} sepCtx
      * @return {Vector}
@@ -19428,7 +19428,7 @@ class MoveFly extends MoveMode {
      * @param {number} dt
      * @param {{
      *   entities: Entity[];
-     *   spatialIndex: import("../spatialHash/spatial_hash").SpatialHashGrid | null;
+    *   spatialIndex: import("../util/spatial_hash").SpatialHashGrid | null;
      *   selfBreakable: Entity | null;
      * }} sepCtx
      * @return {Vector}
@@ -19461,7 +19461,7 @@ class MoveLadder extends MoveMode {
      * @param {number} dt
      * @param {{
      *   entities: Entity[];
-     *   spatialIndex: import("../spatialHash/spatial_hash").SpatialHashGrid | null;
+    *   spatialIndex: import("../util/spatial_hash").SpatialHashGrid | null;
      *   selfBreakable: Entity | null;
      * }} sepCtx
      * @return {Vector}
@@ -19586,7 +19586,7 @@ class MovementController {
      * @param {number} dt
      * @param {{
      *   entities: Entity[];
-     *   spatialIndex: import("../spatialHash/spatial_hash").SpatialHashGrid | null;
+    *   spatialIndex: import("../util/spatial_hash").SpatialHashGrid | null;
      *   selfBreakable: Entity | null;
      * }} sepCtx
      * @returns {import("cs_script/point_script").Vector | undefined}
@@ -19731,7 +19731,7 @@ class Movement {
       * @param {number} dt         帧间隔（秒）
       * @param {{
       *   entities: Entity[];
-      *   spatialIndex: import("../spatialHash/spatial_hash").SpatialHashGrid | null;
+    *   spatialIndex: import("../util/spatial_hash").SpatialHashGrid | null;
       *   selfBreakable: Entity | null;
       * }} sepCtx 分离上下文
       * @returns {Vector | undefined}
@@ -21799,11 +21799,8 @@ Instance.SetThink(() => {
             players: alivePlayers,
             monsters: activeMonsters,
         });
-        particleManager.tickAll(now);
+        particleManager.tick(now);
         buffManager.tick();
-    }
-    if (isGamePlaying) {
-        navMesh.tick(alivePawns[0]?.GetAbsOrigin?.());
     }
 
     // ── 5.2 其他模块 tick ──

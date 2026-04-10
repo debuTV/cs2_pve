@@ -2,7 +2,7 @@
  * @module 玩家系统/玩家管理器
  */
 import { CSPlayerController, CSPlayerPawn, Instance } from "cs_script/point_script";
-import { eventBus } from "../eventBus/event_bus";
+import { eventBus } from "../util/event_bus";
 import { event } from "../util/definition";
 import { Player } from "./player/player";
 import { getPlayerProfessionConfig, getPlayerProfessionIds, PlayerState } from "./player_const";

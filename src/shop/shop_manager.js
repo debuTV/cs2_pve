@@ -2,7 +2,7 @@
  * @module 商店系统/商店管理器
  */
 import { Instance } from "cs_script/point_script";
-import { eventBus } from "../eventBus/event_bus";
+import { eventBus } from "../util/event_bus";
 import { event } from "../util/definition";
 import { ShopSession } from "./shop_session";
 import { BASE_SHOP_ITEMS ,RAW_KEY_TO_ACTION} from "./shop_const";

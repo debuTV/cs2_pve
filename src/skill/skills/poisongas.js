@@ -1,7 +1,7 @@
 /**
  * @module 怪物系统/怪物技能/毒气
  */
-import { eventBus } from "../../eventBus/event_bus";
+import { eventBus } from "../../util/event_bus";
 import { event } from "../../util/definition";
 import { SkillEvents } from "../skill_const";
 import { SkillTemplate } from "../skill_template";

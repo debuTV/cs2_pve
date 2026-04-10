@@ -2,7 +2,7 @@ import { Player } from "../player/player/player";
 import { Monster } from "../monster/monster/monster";
 import { SkillFactory } from "./skill_factory";
 import { SkillTemplate } from "./skill_template";
-import { eventBus } from "../eventBus/event_bus";
+import { eventBus } from "../util/event_bus";
 import { event } from "../util/definition";
 /**
  * 技能管理器。

@@ -3,7 +3,7 @@
  */
 
 import { GameState } from "./game_const";
-import { eventBus } from "../eventBus/event_bus";
+import { eventBus } from "../util/event_bus";
 import { event } from "../util/definition";
 
 /**

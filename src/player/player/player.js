@@ -1,7 +1,7 @@
 /**
  * @module 玩家系统/玩家/玩家实体
  */
-import { eventBus } from "../../eventBus/event_bus";
+import { eventBus } from "../../util/event_bus";
 import { PlayerBuffEvents } from "../../buff/buff_const";
 import { SkillEvents } from "../../skill/skill_const";
 import { event as eventDefs } from "../../util/definition";

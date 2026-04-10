@@ -4,7 +4,7 @@
 import { Instance } from "cs_script/point_script";
 import { vec } from "../util/vector";
 import { event } from "../util/definition";
-import { eventBus } from "../eventBus/event_bus";
+import { eventBus } from "../util/event_bus";
 import { areaEffectStatics, Target } from "./area_const";
 
 /**

@@ -1,5 +1,5 @@
 import { Instance } from "cs_script/point_script";
-import { eventBus } from "../eventBus/event_bus";
+import { eventBus } from "../util/event_bus";
 import { event } from "../util/definition";
 
 export class BuffTemplate{

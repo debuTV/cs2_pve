@@ -21,7 +21,7 @@
  */
 
 import { Instance } from "cs_script/point_script";
-import { eventBus } from "./eventBus/event_bus";
+import { eventBus } from "./util/event_bus";
 import { event, MovementRequestType } from "./util/definition";
 
 // ——— 各模块独立导入 ———
@@ -444,11 +444,8 @@ Instance.SetThink(() => {
             players: alivePlayers,
             monsters: activeMonsters,
         });
-        particleManager.tickAll(now);
+        particleManager.tick(now);
         buffManager.tick();
-    }
-    if (isGamePlaying) {
-        navMesh.tick(alivePawns[0]?.GetAbsOrigin?.());
     }
 
     // ── 5.2 其他模块 tick ──

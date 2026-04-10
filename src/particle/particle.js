@@ -2,7 +2,7 @@
  * @module 粒子系统/单个粒子
  */
 import { Instance, PointTemplate } from "cs_script/point_script";
-import { eventBus } from "../eventBus/event_bus";
+import { eventBus } from "../util/event_bus";
 import { event } from "../util/definition";
 
 export class Particle {

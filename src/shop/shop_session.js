@@ -2,7 +2,7 @@
  * @module 商店系统/商店会话
  */
 import { Instance } from "cs_script/point_script";
-import { eventBus } from "../eventBus/event_bus";
+import { eventBus } from "../util/event_bus";
 import { event } from "../util/definition";
 import { CHANNAL } from "../hud/hud_const";
 import { ShopState, ShopResult, SHOP_ITEMS_PER_PAGE, RAW_KEY_TO_ACTION } from "./shop_const";

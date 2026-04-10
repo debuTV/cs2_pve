@@ -1,7 +1,7 @@
 /**
  * @module 输入系统/输入管理器
  */
-import { eventBus } from "../eventBus/event_bus";
+import { eventBus } from "../util/event_bus";
 import { event } from "../util/definition";
 import { InputDetector } from "./input_const";
 

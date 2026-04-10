@@ -8,7 +8,7 @@ import { MonsterBrainState } from "./components/brain_state";
 import { MonsterSkillsManager } from "./components/skills_manager";
 import { MonsterMovementPathAdapter } from "./components/movement_path_adapter";
 import { MonsterAnimator } from "./components/animation";
-import { eventBus } from "../../eventBus/event_bus";
+import { eventBus } from "../../util/event_bus";
 import { vec } from "../../util/vector";
 import { event, MovementRequestType } from "../../util/definition";
 import { MonsterBuffEvents, MonsterState } from "../monster_const";

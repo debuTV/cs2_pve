@@ -138,7 +138,7 @@ export class Movement {
       * @param {number} dt         帧间隔（秒）
       * @param {{
       *   entities: Entity[];
-      *   spatialIndex: import("../spatialHash/spatial_hash").SpatialHashGrid | null;
+    *   spatialIndex: import("../util/spatial_hash").SpatialHashGrid | null;
       *   selfBreakable: Entity | null;
       * }} sepCtx 分离上下文
       * @returns {Vector | undefined}

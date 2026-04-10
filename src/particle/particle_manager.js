@@ -2,7 +2,7 @@
  * @module 粒子系统/粒子管理器
  */
 import { Instance } from "cs_script/point_script";
-import { eventBus } from "../eventBus/event_bus";
+import { eventBus } from "../util/event_bus";
 import { event } from "../util/definition";
 import { particleConfigs } from "./particle_const";
 import { Particle } from "./particle";
@@ -76,7 +76,7 @@ export class ParticleManager {
      * 每帧调用，驱动所有活跃粒子的生命周期。
      * @param {number} now  当前游戏时间（Instance.GetGameTime()）
      */
-    tickAll(now) {
+    tick(now) {
         for (const particle of this.activeParticles.values()) {
             if (particle) {
                 particle.tick(now);

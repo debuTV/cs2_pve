@@ -65,7 +65,7 @@ export class MovementController {
      * @param {number} dt
      * @param {{
      *   entities: Entity[];
-     *   spatialIndex: import("../spatialHash/spatial_hash").SpatialHashGrid | null;
+    *   spatialIndex: import("../util/spatial_hash").SpatialHashGrid | null;
      *   selfBreakable: Entity | null;
      * }} sepCtx
      * @returns {import("cs_script/point_script").Vector | undefined}

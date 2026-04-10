@@ -22,7 +22,7 @@ import {
 /**
  * @typedef {object} SeparationContext
  * @property {Entity[]} entities
- * @property {import("../spatialHash/spatial_hash").SpatialHashGrid | null} spatialIndex
+ * @property {import("../util/spatial_hash").SpatialHashGrid | null} spatialIndex
  * @property {Entity | null} selfBreakable
  */
 

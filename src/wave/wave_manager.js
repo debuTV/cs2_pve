@@ -2,7 +2,7 @@
  * @module 波次系统/波次管理器
  */
 
-import { eventBus } from "../eventBus/event_bus";
+import { eventBus } from "../util/event_bus";
 import { event } from "../util/definition";
 import { WaveState,wavesConfig } from "./wave_const";
 

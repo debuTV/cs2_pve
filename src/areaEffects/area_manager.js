@@ -2,7 +2,7 @@
  * @module 区域效果/区域效果管理器
  */
 import { AreaEffect } from "./effect_service";
-import { eventBus } from "../eventBus/event_bus";
+import { eventBus } from "../util/event_bus";
 import { event } from "../util/definition";
 /**
  * 区域效果管理器级别的服务。

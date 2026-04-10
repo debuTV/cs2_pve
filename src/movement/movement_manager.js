@@ -10,9 +10,9 @@
  */
 import { Movement } from "./movement";
 import { PathState } from "./movement_const";
-import { eventBus } from "../eventBus/event_bus";
+import { eventBus } from "../util/event_bus";
 import { event, MovementRequestType } from "../util/definition";
-import { SpatialHashGrid } from "../spatialHash/spatial_hash";
+import { SpatialHashGrid } from "../util/spatial_hash";
 
 /** @typedef {import("cs_script/point_script").Entity} Entity */
 /** @typedef {import("cs_script/point_script").Vector} Vector */

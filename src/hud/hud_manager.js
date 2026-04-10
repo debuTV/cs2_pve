@@ -2,7 +2,7 @@
  * @module HUD系统/HUD管理器
  */
 import { Instance, PointTemplate } from "cs_script/point_script";
-import { eventBus } from "../eventBus/event_bus";
+import { eventBus } from "../util/event_bus";
 import { event } from "../util/definition";
 import { CHANNAL, CHANNEL_PRIORITY, HUD_ENTITY_PREFIX, HUD_FACE_ATTACH, HUD_TEMPLATE_NAME } from "./hud_const";
 /**

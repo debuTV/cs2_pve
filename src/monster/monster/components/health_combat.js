@@ -2,7 +2,7 @@
  * @module 怪物系统/怪物组件/生命与战斗
  */
 import { BaseModelEntity, CSPlayerPawn, Instance } from "cs_script/point_script";
-import { eventBus } from "../../../eventBus/event_bus";
+import { eventBus } from "../../../util/event_bus";
 import { event } from "../../../util/definition";
 import { MonsterBuffEvents, MonsterState } from "../../monster_const";
 

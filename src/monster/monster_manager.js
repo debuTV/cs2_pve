@@ -2,7 +2,7 @@
  * @module 怪物系统/怪物管理器
  */
 import { CSPlayerPawn, Entity, Instance} from "cs_script/point_script";
-import { eventBus } from "../eventBus/event_bus";
+import { eventBus } from "../util/event_bus";
 import { event } from "../util/definition";
 import { Monster } from "./monster/monster";
 import { MonsterState, spawnPointsDistance,targetTeam,MonsterType } from "./monster_const";
