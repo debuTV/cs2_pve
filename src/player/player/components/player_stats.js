@@ -1,7 +1,7 @@
 /**
  * @module 玩家系统/玩家/组件/玩家数值
  */
-import { PlayerBuffEvents } from "../../../buff/buff_const";
+import { PlayerRuntimeEvents } from "../../../util/runtime_events.js";
 import { LEVEL_CONFIGS, LevelUpHealPolicy } from "../../player_const";
 
 const MAX_LEVEL = Math.max(LEVEL_CONFIGS.length, 1);
@@ -247,7 +247,7 @@ export class PlayerStats {
      */
     getAttackDamage(baseDamage) {
         const event = this._rollAttackDamage(baseDamage);
-        this.player.emitBuffEvent(PlayerBuffEvents.Attack, event);
+        this.player.emitRuntimeEvent(PlayerRuntimeEvents.Attack, event);
         event.damage = Math.max(0, Math.round(event.damage));
         return event.damage;
     }
@@ -381,7 +381,7 @@ export class PlayerStats {
      * @returns {void}
      */
     _recomputeBuffModifiers() {
-        this.player.emitBuffEvent(PlayerBuffEvents.Recompute, { recompute: true });
+        this.player.emitRuntimeEvent(PlayerRuntimeEvents.Recompute, { recompute: true });
         this.setHealth(this.health);
         this.setArmor(this.armor);
     }

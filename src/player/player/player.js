@@ -2,9 +2,8 @@
  * @module 玩家系统/玩家/玩家实体
  */
 import { eventBus } from "../../util/event_bus";
-import { PlayerBuffEvents } from "../../buff/buff_const";
-import { SkillEvents } from "../../skill/skill_const";
 import { event as eventDefs } from "../../util/definition";
+import { PlayerRuntimeEvents } from "../../util/runtime_events.js";
 import { PlayerEntityBridge } from "./components/entity_bridge";
 import { PlayerStats } from "./components/player_stats";
 import { PlayerHealthCombat } from "./components/health_combat";
@@ -315,6 +314,7 @@ export class Player {
      * @param {any} params 事件参数
      */
     emitBuffEvent(eventName, params) {
+        let handled = false;
         for (const id of this.buffMap.values()) {
             /** @type {import("../../buff/buff_const").BuffEmitRequest} */
             const emitRequest = {
@@ -324,7 +324,10 @@ export class Player {
                 result: { result: false },
             };
             eventBus.emit(eventDefs.Buff.In.BuffEmitRequest, emitRequest);
+            const emitResult = /** @type {{ result?: boolean }} */ (emitRequest.result);
+            handled = emitResult.result === true || handled;
         }
+        return handled;
     }
 
     /**
@@ -333,7 +336,7 @@ export class Player {
      */
     handleInputKey(key) {
         if (this.state !== PlayerState.ALIVE) return false;
-        return this.emitSkillEvent(SkillEvents.Input, { key });
+        return this.emitRuntimeEvent(PlayerRuntimeEvents.Input, { key });
     }
 
     /**
@@ -354,6 +357,18 @@ export class Player {
         };
         eventBus.emit(eventDefs.Skill.In.SkillEmitRequest, emitRequest);
         return emitRequest.result;
+    }
+
+    /**
+     * 向玩家宿主内的 buff 与 skill 同时广播统一运行时事件。
+     * @param {string} eventName
+        * @param {import("../../util/runtime_events.js").RuntimeEventPayload} [params]
+     * @returns {boolean}
+     */
+    emitRuntimeEvent(eventName, params = {}) {
+        const buffHandled = this.emitBuffEvent(eventName, params);
+        const skillHandled = this.emitSkillEvent(eventName, params);
+        return buffHandled || skillHandled;
     }
 
     /**
@@ -543,7 +558,7 @@ export class Player {
         if (this.state === nextState) return true;
         const oldState = this.state;
         this.state = nextState;
-        this.emitBuffEvent(PlayerBuffEvents.StateChange, { oldState, nextState });
+        this.emitRuntimeEvent(PlayerRuntimeEvents.StateChange, { oldState, nextState });
         return true;
     }
     // ——— Tick ———
@@ -553,9 +568,7 @@ export class Player {
     tick() {
         if (this.state !== PlayerState.ALIVE) return;
 
-        // 1. buff 计时 & 过期清理
-        this.emitBuffEvent(PlayerBuffEvents.Tick, {});
-        this.emitSkillEvent(SkillEvents.Tick, {});
+        this.emitRuntimeEvent(PlayerRuntimeEvents.Tick, {});
     }
 
     // ——— 查询 ———

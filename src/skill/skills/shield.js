@@ -2,7 +2,7 @@
  * @module 怪物系统/怪物技能/护盾
  */
 import { BaseModelEntity, Instance } from "cs_script/point_script";
-import { SkillEvents } from "../skill_const";
+import { MonsterRuntimeEvents } from "../../util/runtime_events.js";
 import { SkillTemplate } from "../skill_template";
 
 export class ShieldSkill extends SkillTemplate {
@@ -19,10 +19,10 @@ export class ShieldSkill extends SkillTemplate {
         this.shield = 0;
         this.animation = params.animation ?? null;
 
-        const userEvents = params.events ?? [SkillEvents.Spawn, SkillEvents.Tick];
-        this.events = userEvents.includes(SkillEvents.Spawn)
+        const userEvents = params.events ?? [MonsterRuntimeEvents.Spawn, MonsterRuntimeEvents.Tick];
+        this.events = userEvents.includes(MonsterRuntimeEvents.Spawn)
             ? userEvents
-            : [SkillEvents.Spawn, ...userEvents];
+            : [MonsterRuntimeEvents.Spawn, ...userEvents];
 
         this._initialized = false;
         this._modFn = null;
@@ -43,7 +43,7 @@ export class ShieldSkill extends SkillTemplate {
         if (!this.events.includes(event.type)) return false;
 
         const monster = this.monster;
-        if (event.type === SkillEvents.Spawn) {
+        if (event.type === MonsterRuntimeEvents.Spawn) {
             if (this.player || !monster) return false;
             if (!this._initialized) {
                 this._initialized = true;

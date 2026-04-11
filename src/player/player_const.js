@@ -69,28 +69,29 @@ export const PlayerState = {
  */
 
 /** 默认职业。 */
-export const DEFAULT_PLAYER_PROFESSION = "guardian";
+export const DEFAULT_PLAYER_PROFESSION = "medic";
 
 /** @type {Record<string, PlayerProfessionConfig>} */
 export const PLAYER_PROFESSIONS = {
     guardian: {
         id: "guardian",
         displayName: "守护者",
-        skillTypeId: "player_guard",
+        skillTypeId: "fire",
         skillParams: {
-            inputKey: "InspectWeapon",
             cooldown: 8,
-            armor: 25,
+            zoneRadius: 150,
+            zoneDuration: 5,
         },
     },
     medic: {
         id: "medic",
         displayName: "医疗兵",
-        skillTypeId: "player_mend",
+        skillTypeId: "player_mend_field",
         skillParams: {
             inputKey: "InspectWeapon",
-            cooldown: 8,
-            heal: 35,
+            cooldown: 10,
+            zoneRadius: 150,
+            zoneDuration: 5,
         },
     },
     vanguard: {

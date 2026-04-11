@@ -1,7 +1,7 @@
 /**
  * @module 怪物系统/怪物技能/产卵
  */
-import { SkillEvents } from "../skill_const";
+import { MonsterRuntimeEvents } from "../../util/runtime_events.js";
 import { SkillTemplate } from "../skill_template";
 
 export class SpawnSkill extends SkillTemplate {
@@ -26,7 +26,7 @@ export class SpawnSkill extends SkillTemplate {
         super(player, monster, "spawn", id, params);
         this.animation = params.animation ?? null;
 
-        const configuredEvents = params.events ?? (params.event ? [params.event] : [SkillEvents.Die]);
+        const configuredEvents = params.events ?? (params.event ? [params.event] : [MonsterRuntimeEvents.Die]);
         this.events = Array.isArray(configuredEvents) ? configuredEvents : [configuredEvents];
         this.count = Math.max(1, params.count ?? 1);
         this.typeName = params.typeName ?? monster?.type ?? "";

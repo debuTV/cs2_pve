@@ -1,4 +1,5 @@
 import { BuffTemplate } from "../buff_template";
+import { PlayerRuntimeEvents } from "../../util/runtime_events.js";
 
 export class AttackUpBuff extends BuffTemplate {
     /**
@@ -17,7 +18,7 @@ export class AttackUpBuff extends BuffTemplate {
      * @param {string} eventName
      */
     OnBuffEmit(eventName) {
-        if (eventName !== "OnRecompute") {
+        if (eventName !== PlayerRuntimeEvents.Recompute) {
             return { result: false };
         }
         if (this.targetType !== "player") {

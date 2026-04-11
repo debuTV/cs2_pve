@@ -11,7 +11,8 @@ import { MonsterAnimator } from "./components/animation";
 import { eventBus } from "../../util/event_bus";
 import { vec } from "../../util/vector";
 import { event, MovementRequestType } from "../../util/definition";
-import { MonsterBuffEvents, MonsterState } from "../monster_const";
+import { MonsterState } from "../monster_const";
+import { MonsterRuntimeEvents } from "../../util/runtime_events.js";
 
 /** @typedef {import("../../skill/skill_template").SkillTemplate} MonsterSkill */
 /** @typedef {import("../../util/definition").MovementRequest} MovementRequest */
@@ -25,7 +26,7 @@ import { MonsterBuffEvents, MonsterState } from "../monster_const";
  *   context: Record<string, any> | null;
  * }} MonsterBuffRuntime
  */
-/** @typedef {{ type: string, [key: string]: any }} MonsterRuntimeEvent */
+/** @typedef {import("../../util/runtime_events.js").RuntimeEvent} MonsterRuntimeEvent */
 
 export class Monster {
     /**
@@ -35,7 +36,6 @@ export class Monster {
      */
     constructor(id, position, typeConfig) {
         this.id = id;
-
         /** @type {Entity | null} */
         this.model = null;
         /** @type {Entity | null} */
@@ -106,7 +106,7 @@ export class Monster {
     }
 
     init() {
-        this.emitEvent({ type: MonsterBuffEvents.Spawn });
+        this.emitRuntimeEvent(MonsterRuntimeEvents.Spawn, { state: this.state });
     }
 
     /**
@@ -249,7 +249,7 @@ export class Monster {
     finalizeDeath(removeModelAfterDeathAnimation = true) {
         if (this._deathFinalized) return false;
         this._deathFinalized = true;
-        this.emitEvent({ type: MonsterBuffEvents.ModelRemove });
+        this.emitRuntimeEvent(MonsterRuntimeEvents.ModelRemove, { state: MonsterState.DEAD });
         this._releaseRuntime();
         this.entityBridge.removeAfterDeath(removeModelAfterDeathAnimation);
         this.model = null;
@@ -263,6 +263,7 @@ export class Monster {
      * @param {any} params
      */
     emitBuffEvent(eventName, params) {
+        let handled = false;
         for (const id of this.buffMap.values()) {
             /** @type {import("../../buff/buff_const").BuffEmitRequest} */
             const emitRequest = {
@@ -272,7 +273,30 @@ export class Monster {
                 result: { result: false },
             };
             eventBus.emit(event.Buff.In.BuffEmitRequest, emitRequest);
+            const emitResult = /** @type {{ result?: boolean }} */ (emitRequest.result);
+            handled = emitResult.result === true || handled;
         }
+        return handled;
+    }
+
+    /**
+     * @param {string} eventName
+     * @param {import("../../util/runtime_events.js").RuntimeEventPayload} [params]
+     * @returns {boolean}
+     */
+    emitSkillEvent(eventName, params = {}) {
+        return this.skillsManager.emitEvent({ type: eventName, ...params });
+    }
+
+    /**
+     * @param {string} eventName
+     * @param {Record<string, any>} [params]
+     * @returns {boolean}
+     */
+    emitRuntimeEvent(eventName, params = {}) {
+        const buffHandled = this.emitBuffEvent(eventName, params);
+        const skillHandled = this.emitSkillEvent(eventName, params);
+        return buffHandled || skillHandled;
     }
 
     /**
@@ -295,7 +319,7 @@ export class Monster {
     recomputeDerivedStats() {
         this.damage = this.baseDamage;
         this.speed = this.baseSpeed;
-        this.emitBuffEvent("OnRecompute", { recompute: true });
+        this.emitRuntimeEvent(MonsterRuntimeEvents.Recompute, { recompute: true });
         this.movementPath.refreshMovement();
     }
 
@@ -399,12 +423,9 @@ export class Monster {
             this.attackCooldown -= dt;
         }
 
-        if (dt > 0) {
-            this.emitBuffEvent(MonsterBuffEvents.Tick, { dt });
-        }
+        this.emitRuntimeEvent(MonsterRuntimeEvents.Tick, { dt });
         if (this.state === MonsterState.DEAD) return;
 
-        this.emitEvent({ type: MonsterBuffEvents.Tick, dt });
         this.skillsManager.tickRunningSkills();
 
         if (now - this.lastTargetUpdate > 3.0 || !this.target) {
@@ -438,7 +459,9 @@ export class Monster {
      * @param {MonsterRuntimeEvent} event
      */
     emitEvent(event) {
-        this.skillsManager.emitEvent(event);
+        if (!event || typeof event.type !== "string") return false;
+        const { type, ...payload } = event;
+        return this.emitRuntimeEvent(type, payload);
     }
 
     /**
@@ -475,7 +498,7 @@ export class Monster {
 
         const prevState = this.state;
         this.state = nextState;
-        this.emitBuffEvent("OnStateChange", { oldState: prevState, nextState });
+        this.emitRuntimeEvent(MonsterRuntimeEvents.StateChange, { oldState: prevState, nextState });
         this.animation.enter(nextState);
 
         if (nextState === MonsterState.CHASE || nextState === MonsterState.ATTACK) {

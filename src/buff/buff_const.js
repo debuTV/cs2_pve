@@ -15,20 +15,6 @@ export const BuffPolarity = {
 };
 
 /**
- * 玩家侧 Buff 运行时事件名。
- * 统一放在 Buff 常量模块，避免 Player 再维护一层薄包装组件。
- */
-export const PlayerBuffEvents = {
-	Spawn: "OnSpawn",
-	Recompute: "OnRecompute",
-	Die: "OnDeath",
-	StateChange: "OnStateChange",
-	BeforeTakeDamage: "OnDamage",
-	Attack: "OnAttack",
-	Tick: "OnTick",
-};
-
-/**
  * @typedef {Object} BuffConfig
  * @property {string} configid Buff 配置 id
  * @property {string} typeid Buff 种类
@@ -74,13 +60,22 @@ export const PlayerBuffEvents = {
 // Buff 构建参数的唯一来源。运行时只按 configid 查这里的预设，不接受外部附加参数。
 /**@type {Record<string, BuffConfig>} */
 export const buffconfig={
-	poison:{
-		configid:"poison",
-		typeid:"poison",
+	burn:{
+		configid:"burn",
+		typeid:"burn",
 		params:{
 			duration:1,
 			tickInterval:0.5,
 			dps:8,
+		}
+	},
+	regeneration:{
+		configid:"regeneration",
+		typeid:"regeneration",
+		params:{
+			duration:1,
+			tickInterval:0.5,
+			healPerTick:5,
 		}
 	},
 	attack_up:{

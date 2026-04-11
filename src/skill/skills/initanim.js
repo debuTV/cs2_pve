@@ -1,15 +1,13 @@
 /**
  * @module 怪物系统/怪物技能/初始动画
  */
-import { Monster } from "../../monster/monster/monster";
-import { Player } from "../../player/player/player";
-import { SkillEvents } from "../skill_const";
+import { MonsterRuntimeEvents } from "../../util/runtime_events.js";
 import { SkillTemplate } from "../skill_template";
 
 export class InitAnimSkill extends SkillTemplate {
     /**
-     * @param {Player|null} player
-     * @param {Monster|null} monster
+    * @param {import("../../player/player/player.js").Player|null} player
+    * @param {import("../../monster/monster/monster.js").Monster|null} monster
      * @param {number} id
      * @param {{
      *   cooldown?: number;
@@ -20,10 +18,10 @@ export class InitAnimSkill extends SkillTemplate {
     constructor(player, monster, id, params = {}) {
         super(player, monster, "initanim", id, params);
         this.animation = params.animation ?? null;
-        this.events = params.events ?? [SkillEvents.Spawn];
+        this.events = params.events ?? [MonsterRuntimeEvents.Spawn];
     }
     /**
-     * @param {any} event
+        * @param {import("../../util/runtime_events.js").RuntimeEvent} event
      */
     canTrigger(event) {
         if (!this.events.includes(event.type)) return false;

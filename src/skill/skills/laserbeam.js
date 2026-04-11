@@ -2,15 +2,13 @@
  * @module 怪物系统/怪物技能/激光
  */
 import { Instance } from "cs_script/point_script";
-import { SkillEvents } from "../skill_const";
 import { SkillTemplate } from "../skill_template";
-import { Player } from "../../player/player/player";
-import { Monster } from "../../monster/monster/monster";
+import { MonsterRuntimeEvents } from "../../util/runtime_events.js";
 
 export class LaserBeamSkill extends SkillTemplate {
     /**
-     * @param {Player|null} player
-     * @param {Monster|null} monster
+    * @param {import("../../player/player/player.js").Player|null} player
+    * @param {import("../../monster/monster/monster.js").Monster|null} monster
      * @param {number} id
      * @param {{
      *   cooldown?: number;
@@ -29,7 +27,7 @@ export class LaserBeamSkill extends SkillTemplate {
     constructor(player, monster, id, params = {}) {
         super(player, monster, "laserbeam", id, params);
         this.animation = params.animation ?? null;
-        this.events = params.events ?? [SkillEvents.Tick];
+        this.events = params.events ?? [MonsterRuntimeEvents.Tick];
         this.distance = params.distance ?? 500;
         this.duration = params.duration ?? 0;
         this.damagePerSecond = params.damagePerSecond ?? 20;
@@ -42,7 +40,7 @@ export class LaserBeamSkill extends SkillTemplate {
         this._nextDamageAt = 0;
     }
     /**
-     * @param {any} event
+        * @param {import("../../util/runtime_events.js").RuntimeEvent} event
      */
     canTrigger(event) {
         if (!this.events.includes(event.type)) return false;

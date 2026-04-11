@@ -2,7 +2,7 @@
  * @module 怪物系统/怪物技能/急速
  */
 import { BaseModelEntity } from "cs_script/point_script";
-import { SkillEvents } from "../skill_const";
+import { MonsterRuntimeEvents } from "../../util/runtime_events.js";
 import { SkillTemplate } from "../skill_template";
 
 export class SpeedBoostSkill extends SkillTemplate {
@@ -23,7 +23,7 @@ export class SpeedBoostSkill extends SkillTemplate {
     constructor(player, monster, id, params = {}) {
         super(player, monster, "speedboost", id, params);
         this.animation = params.animation ?? null;
-        this.events = params.events ?? [SkillEvents.Tick];
+        this.events = params.events ?? [MonsterRuntimeEvents.Tick];
         this.glow = params.glow ?? null;
     }
 

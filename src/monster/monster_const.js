@@ -73,36 +73,6 @@ export const MonsterState = {
     DEAD: 4//死亡
 };
 /**
- * 怪物事件类型常量。
- *
- * 收录怪物技能内部事件名称字符串。
- * 使用统一常量替代散落的字符串，防止拼写错误导致事件丢失。
- *
- * 事件按职责分为四组：
- * - **生命周期**：生成（Spawn）、死亡（Die）、模型移除（ModelRemove）。
- * - **战斗**：受伤（TakeDamage）、攻击命中（AttackTrue）、攻击未命中（AttackFalse）。
- * - **AI**：每帧心跳（Tick）、目标更新（TargetUpdate）。
- * - **技能**：技能施放（SkillCast）。
- *
- */
-export const MonsterBuffEvents = {
-    // 生命周期
-    Spawn:        "OnSpawn",
-    Die:          "OnDie",
-    ModelRemove:  "OnModelRemove",
-    // 战斗
-    BeforeTakeDamage: "BeforeTakeDamage", // 受伤前事件，允许修改伤害
-    TakeDamage:   "OnTakeDamage",        // 受伤后事件，提供最终伤害值
-    AttackTrue:   "OnAttackTrue",
-    AttackFalse:  "OnAttackFalse",
-    // AI
-    Tick:         "OnTick",
-    TargetUpdate: "OnupdateTarget",
-    // 技能施放（领域总线键）
-    SkillCast:    "OnSkillCast",
-};
-
-/**
  * @typedef {object} OnMonsterSpawn
  * @property {import("./monster/monster").Monster} monster
  */
@@ -179,6 +149,11 @@ export const MonsterType={
             attackCooldown:0.1,
             movementmode:"walk",
             skill_pool:[
+                {
+                    id:"sound",
+                    chance: 1,
+                    params:{ cooldown:5, templateName:"headcrab_classic_sound", eventSoundMap:{ OnSpawn:"Headcrab.Classic.Spawn", OnTakeDamage:"Headcrab.Classic.Hurt" } }
+                },
                 //// 示例：同类型技能重复（分别叠加不同属性）
                 //{
                 //    id:"corestats",

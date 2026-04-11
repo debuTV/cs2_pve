@@ -1,3 +1,4 @@
+import { Instance } from "cs_script/point_script";
 import { Player } from "../player/player/player";
 import { Monster } from "../monster/monster/monster";
 import { SkillFactory } from "./skill_factory";
@@ -112,6 +113,33 @@ export class SkillManager {
         }
     }
 
+    /**
+     * @param {number} skillId
+     * @param {Player|Monster|null} [target]
+     * @returns {{ id: number; typeId: string; cooldown: number; remainingCooldown: number; isReady: boolean; isConsumed: boolean; } | null}
+     */
+    getSkillSummary(skillId, target = null)
+    {
+        const skill = this.SkillMap.get(skillId);
+        if (skill === undefined) return null;
+        if (!this._matchTarget(skill, target)) return null;
+
+        const neverTriggered = skill.lastTriggerTime === -999;
+        const isConsumed = skill.cooldown === -1 && !neverTriggered;
+        const remainingCooldown = skill.cooldown > 0
+            ? Math.max(0, skill.cooldown - (Instance.GetGameTime() - skill.lastTriggerTime))
+            : 0;
+
+        return {
+            id: skill.id,
+            typeId: skill.typeId,
+            cooldown: skill.cooldown,
+            remainingCooldown,
+            isReady: !isConsumed && remainingCooldown <= 0,
+            isConsumed,
+        };
+    }
+
     clearAll()
     {
         for(const skill of this.SkillMap.values())
@@ -123,7 +151,7 @@ export class SkillManager {
     /**
      * @param {number} skillId
      * @param {string} event 
-     * @param {import("./skill_const").EmitEventPayload} payload
+        * @param {import("../util/runtime_events.js").RuntimeEventPayload} payload
      * @param {Player|Monster|null} [target]
      * @returns {boolean}
      */

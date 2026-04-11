@@ -1,4 +1,5 @@
 import { BuffTemplate } from "../buff_template";
+import { MonsterRuntimeEvents } from "../../util/runtime_events.js";
 
 export class SpeedUpBuff extends BuffTemplate {
     /**
@@ -18,7 +19,7 @@ export class SpeedUpBuff extends BuffTemplate {
      * @param {string} eventName
      */
     OnBuffEmit(eventName) {
-        if (eventName !== "OnRecompute") {
+        if (eventName !== MonsterRuntimeEvents.Recompute) {
             return { result: false };
         }
         if (this.targetType !== "monster") {

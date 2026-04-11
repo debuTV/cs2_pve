@@ -32,17 +32,19 @@ export class MonsterSkillsManager {
     addSkill(skill) {
         skill.id = this.monster.skills.length;
         this.monster.skills.push(skill);
+        skill.onSkillAdd();
     }
 
     /**
-     * @param {import("../../../skill/skill_const").EmitEventPayload & { type: string }} event
+        * @param {import("../../../util/runtime_events.js").RuntimeEvent} event
      */
     emitEvent(event) {
         for (const skill of this.monster.skills) {
             if (!skill.canTrigger(event)) continue;
             skill._request();
-            break;
+            return true;
         }
+        return false;
     }
 
     tickRunningSkills() {

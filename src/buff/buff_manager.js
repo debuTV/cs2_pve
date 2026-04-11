@@ -1,3 +1,4 @@
+import { Instance } from "cs_script/point_script";
 import { Player } from "../player/player/player";
 import { Monster } from "../monster/monster/monster";
 import { BuffTemplate } from "./buff_template";
@@ -117,5 +118,33 @@ export class BuffManager {
             buff.stop();
         }
         this.buffMap.clear();
+    }
+
+    /**
+     * @param {Player|Monster} target
+     * @returns {{ id: number; typeId: string; remaining: number; }[]}
+     */
+    getActiveBuffSummaries(target)
+    {
+        if (!target) return [];
+
+        const now = Instance.GetGameTime();
+        /** @type {{ id: number; typeId: string; remaining: number; }[]} */
+        const summaries = [];
+
+        for (const buff of this.buffMap.values())
+        {
+            if (!buff.use || buff.target !== target) continue;
+
+            const remaining = buff.duration >= 0? Math.max(0, buff.duration - (now - buff.startTime)): -1;
+
+            summaries.push({
+                id: buff.id,
+                typeId: buff.typeId,
+                remaining,
+            });
+        }
+
+        return summaries;
     }
 }

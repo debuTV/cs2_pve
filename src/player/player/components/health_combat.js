@@ -2,9 +2,8 @@
  * @module 玩家系统/玩家/组件/战斗组件
  */
 import { Instance } from "cs_script/point_script";
-import { PlayerBuffEvents } from "../../../buff/buff_const";
-import { SkillEvents } from "../../../skill/skill_const";
 import { PlayerState } from "../../player_const";
+import { PlayerRuntimeEvents } from "../../../util/runtime_events.js";
 
 /**
  * 玩家战斗组件 — 受伤、治疗与死亡判定。
@@ -43,13 +42,27 @@ export class PlayerHealthCombat {
         // 从引擎同步当前值
         this._syncFromEngine();
 
+        const previousHealth = this.player.stats.health;
+        const previousArmor = this.player.stats.armor;
+
         // buff 修饰器链
         const ctx = { damage, attacker };
-        // 触发前置事件，允许 buff 修改伤害,例如减伤、增伤、护甲一类的效果
-        this.player.emitBuffEvent(PlayerBuffEvents.BeforeTakeDamage, ctx);
+        this.player.emitRuntimeEvent(PlayerRuntimeEvents.BeforeTakeDamage, ctx);
         damage = ctx.damage;
 
-        if (damage <= 0) return false;
+        if (damage <= 0) {
+            this.player.emitRuntimeEvent(PlayerRuntimeEvents.TakeDamage, {
+                ...ctx,
+                damage: 0,
+                value: 0,
+                health: this.player.stats.health,
+                previousHealth,
+                currentHealth: this.player.stats.health,
+                previousArmor,
+                currentArmor: this.player.stats.armor,
+            });
+            return false;
+        }
         // 优先扣护甲
         const armor = this.player.stats.armor;
         const damageToArmor = Math.min(armor, damage);
@@ -61,6 +74,17 @@ export class PlayerHealthCombat {
         // 扣血后同步
         this.player.stats.setHealth(this.player.stats.health - damageToHealth);
         this.player.entityBridge.syncHealth(this.player.stats.health);
+
+        this.player.emitRuntimeEvent(PlayerRuntimeEvents.TakeDamage, {
+            ...ctx,
+            damage,
+            value: damage,
+            health: this.player.stats.health,
+            previousHealth,
+            currentHealth: this.player.stats.health,
+            previousArmor,
+            currentArmor: this.player.stats.armor,
+        });
 
         Instance.Msg(`玩家 ${this.player.entityBridge.getPlayerName()} 受到 ${damage} 伤害 (生命: ${this.player.stats.health}, 护甲: ${this.player.stats.armor})`);
 
@@ -83,6 +107,18 @@ export class PlayerHealthCombat {
         if (this.player.state === PlayerState.DEAD) return true;
 
         this._syncFromEngine();
+
+        this.player.emitRuntimeEvent(PlayerRuntimeEvents.TakeDamage, {
+            damage,
+            value: damage,
+            health: this.player.stats.health,
+            attacker,
+            source: inflictor ?? null,
+            previousHealth: this.player.stats.health + Math.max(0, damage),
+            currentHealth: this.player.stats.health,
+            previousArmor: this.player.stats.armor,
+            currentArmor: this.player.stats.armor,
+        });
 
         Instance.Msg(`玩家 ${this.player.entityBridge.getPlayerName()} 受到 ${damage} 伤害 (生命: ${this.player.stats.health}, 护甲: ${this.player.stats.armor})`);
 
@@ -141,9 +177,7 @@ export class PlayerHealthCombat {
 
         this.player.applyStateTransition(PlayerState.DEAD);
 
-        // 清理临时战斗 buff
-        this.player.emitBuffEvent(PlayerBuffEvents.Die, { killer });
-        this.player.emitSkillEvent(SkillEvents.Die, { killer });
+        this.player.emitRuntimeEvent(PlayerRuntimeEvents.Die, { killer });
         this.player.stopInputTracking();
 
         // 切换到观察者

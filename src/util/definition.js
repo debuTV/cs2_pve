@@ -191,10 +191,6 @@ export const event={
         In:{
             CreateRequest:"Particle_OnCreateRequest",    //粒子特效创建请求
             StopRequest:"Particle_OnStopRequest",        //粒子特效停止请求
-        },
-        Out:{
-            OnCreated:"Particle_OnCreated",    //粒子特效创建成功后
-            OnStopped:"Particle_OnStopped",    //粒子特效停止后
         }
     },
     Player:{

@@ -452,11 +452,22 @@ Instance.SetThink(() => {
     shopManager.tick();
     if (gameManager.gameState === GameState.PLAYING) {
         const waveProgress = waveManager.getProgress();
+        const playerRuntimeSummary = new Map(
+            alivePlayers.map((player) => [
+                player.slot,
+                {
+                    buffs: buffManager.getActiveBuffSummaries(player),
+                    skill: player.skillId != null
+                        ? skillManager.getSkillSummary(player.skillId, player)
+                        : null,
+                },
+            ])
+        );
         hudManager.tick(alivePlayers.map(p => p.getSummary()), {
             remainingMonsters: monsterManager.getRemainingMonsters(waveProgress.wave?.totalMonsters),
             currentWave: waveProgress.current,
             totalWaves: waveProgress.total,
-        });
+        }, playerRuntimeSummary);
     } else if (gameManager.gameState === GameState.WON || gameManager.gameState === GameState.LOST) {
         hudManager.clearAllSessions();
     }

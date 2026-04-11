@@ -32,14 +32,6 @@ export class ParticleManager {
             eventBus.on(event.Particle.In.StopRequest, (/**@type {import("../particle/particle_const").ParticleStopRequest}*/ payload) => {
                 const particle=this.activeParticles.get(payload.particleId);
                 payload.result=particle?.stop()??false;
-                if (payload.result && particle) {
-                    /** @type {import("../particle/particle_const").OnParticleStopped} */
-                    const stoppedPayload = {
-                        particleId: payload.particleId,
-                        particleName: particle.config.id,
-                    };
-                    eventBus.emit(event.Particle.Out.OnStopped, stoppedPayload);
-                }
                 this.activeParticles.delete(payload.particleId);
             })
         ];
@@ -60,15 +52,6 @@ export class ParticleManager {
         const p = new Particle(this._nextParticleId++,config, particleCreateRequest);
         if (!p.start(particleCreateRequest.position)) return -1;
         this.activeParticles.set(p.id, p);
-
-        /** @type {import("../particle/particle_const").OnParticleCreated} */
-        const createdPayload = {
-            particleId: p.id,
-            particleName: particleCreateRequest.particleName,
-            position: { ...particleCreateRequest.position },
-            lifetime: particleCreateRequest.lifetime ?? -1,
-        };
-        eventBus.emit(event.Particle.Out.OnCreated, createdPayload);
         return p.id;
     }
 

@@ -1,7 +1,7 @@
 /**
  * @module 怪物系统/怪物技能/重击
  */
-import { SkillEvents } from "../skill_const";
+import { MonsterRuntimeEvents } from "../../util/runtime_events.js";
 import { SkillTemplate } from "../skill_template";
 
 export class PowerAttackSkill extends SkillTemplate {
@@ -21,7 +21,7 @@ export class PowerAttackSkill extends SkillTemplate {
     constructor(player, monster, id, params = {}) {
         super(player, monster, "powerattack", id, params);
         this.animation = params.animation ?? null;
-        this.events = params.events ?? [SkillEvents.AttackTrue];
+        this.events = params.events ?? [MonsterRuntimeEvents.AttackTrue];
         this.buffTypeId = "knockup";
         this.buffParams = {
             impulse: params.impulse ?? 300,

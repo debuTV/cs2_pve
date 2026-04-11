@@ -91,8 +91,9 @@ export class HudManager {
      * 每 tick 刷新全部可见 HUD 的贴脸位置。
      * @param {{ id: number; name: string; slot: number; level: number; money: number; health: number; maxHealth: number; armor: number; attack: number; critChance: number; critMultiplier: number; kills: number; score: number; lastMonsterDamage: number; exp: number; expNeeded: number; pawn: import("cs_script/point_script").CSPlayerPawn | null; }[]} [allAlivePlayersSummary=[]]
      * @param {{ remainingMonsters?: number; currentWave?: number; totalWaves?: number; }} [waveSummary={}]
+     * @param {Map<number, { buffs?: { id: number; typeId: string; remaining: number; }[]; skill?: { id: number; typeId: string; cooldown: number; remainingCooldown: number; isReady: boolean; isConsumed: boolean; } | null; }>} [runtimeSummaryBySlot=new Map()]
      */
-    tick(allAlivePlayersSummary=[], waveSummary={}) {
+    tick(allAlivePlayersSummary=[], waveSummary={}, runtimeSummaryBySlot=new Map()) {
         const remainingMonsters = Math.max(0, Math.round(waveSummary.remainingMonsters ?? 0));
         const currentWave = Math.max(0, Math.round(waveSummary.currentWave ?? 0));
         const totalWaves = Math.max(0, Math.round(waveSummary.totalWaves ?? 0));
@@ -101,7 +102,10 @@ export class HudManager {
         for (const s of allAlivePlayersSummary) {
             if(!s.pawn)continue;
             const remainingExp = Math.max(0, s.expNeeded - s.exp);
-            const text = `Lv.${s.level} \nHP:${s.health}/${s.maxHealth} \n护甲:${s.armor}\nMoney:$${s.money} \n升级还需:${remainingExp}EXP\n伤害:${s.lastMonsterDamage} \n剩余怪物:${remainingMonsters} \n波次:${waveLabel}`;
+            const runtimeSummary = runtimeSummaryBySlot.get(s.slot);
+            const buffLabel = this._formatBuffLabel(runtimeSummary?.buffs ?? []);
+            const skillLabel = this._formatSkillCooldownLabel(runtimeSummary?.skill ?? null);
+            const text = `Lv.${s.level} \nHP:${s.health}/${s.maxHealth} \n护甲:${s.armor}\nMoney:$${s.money} \n升级还需:${remainingExp}EXP\n伤害:${s.lastMonsterDamage} \nBuff:${buffLabel}\n技能CD:${skillLabel}\n剩余怪物:${remainingMonsters} \n波次:${waveLabel}`;
             this.showHud({ slot: s.slot, pawn: s.pawn, text, channel: CHANNAL.STATUS, result: true });
         }
         for (const [, session] of this._sessions) {
@@ -259,8 +263,62 @@ export class HudManager {
             }
         }
 
-        if (session.entity?.IsValid()) {
-            Instance.EntFireAtTarget({target: session.entity,input: session.use?"Enable":"Disable",});
+        const entity = session.entity;
+        if (entity?.IsValid()) {
+            Instance.EntFireAtTarget({ target: entity, input: session.use ? "Enable" : "Disable" });
+        }
+    }
+
+
+    /**
+     * @param {{ id: number; typeId: string; remaining: number; }[]} buffSummaries
+     * @returns {string}
+     */
+    _formatBuffLabel(buffSummaries) {
+        if (buffSummaries.length === 0) return "无";
+
+        const labels = buffSummaries.slice(0, 2).map((buffSummary) => this._formatSingleBuffLabel(buffSummary));
+        if (buffSummaries.length > 2) {
+            labels.push(`+${buffSummaries.length - 2}`);
+        }
+        return labels.join(", ");
+    }
+
+    /**
+     * @param {{ id: number; typeId: string; remaining: number; }} buffSummary
+     * @returns {string}
+     */
+    _formatSingleBuffLabel(buffSummary) {
+        const displayName = this._getEffectDisplayName(buffSummary.typeId);
+        if (buffSummary.remaining >= 0) {
+            return `${displayName}(${buffSummary.remaining.toFixed(1)}s)`;
+        }
+        return `${displayName}`;
+    }
+
+    /**
+     * @param {{ id: number; typeId: string; cooldown: number; remainingCooldown: number; isReady: boolean; isConsumed: boolean; } | null} skillSummary
+     * @returns {string}
+     */
+    _formatSkillCooldownLabel(skillSummary) {
+        if (!skillSummary) return "无";
+        const displayName = this._getEffectDisplayName(skillSummary.typeId);
+        if (skillSummary.isConsumed) return `${displayName}(已使用)`;
+        if (!skillSummary.isReady) return `${displayName}(${skillSummary.remainingCooldown.toFixed(1)}s)`;
+        return `${displayName}(就绪)`;
+    }
+
+    /**
+     * @param {string | null | undefined} typeId
+     * @returns {string}
+     */
+    _getEffectDisplayName(typeId) {
+        switch (typeId) {
+            case "fire":
+            case "burn":
+                return "燃烧";
+            default:
+                return typeId ?? "未知";
         }
     }
 

@@ -36,13 +36,15 @@ export class AreaEffectManager {
     /**
      * 创建一个新的区域效果。
      * @param {import("./area_const").AreaEffectCreateRequest} desc
-     * @returns {boolean} 是否成功创建
+     * @returns {number} 成功时返回区域效果实例 id，失败返回 -1
      */
     create(desc) {
         const effect = new AreaEffect(desc);
-        effect.start();
+        if (!effect.start()) {
+            return -1;
+        }
         this._effects.set(effect.id, effect);
-        return true;
+        return effect.id;
     }
 
     /**

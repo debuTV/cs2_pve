@@ -1,7 +1,7 @@
 /**
  * @module 怪物系统/怪物技能/投掷石头
  */
-import { SkillEvents } from "../skill_const";
+import { MonsterRuntimeEvents } from "../../util/runtime_events.js";
 import { SkillTemplate } from "../skill_template";
 
 export class ThrowStoneSkill extends SkillTemplate {
@@ -25,7 +25,7 @@ export class ThrowStoneSkill extends SkillTemplate {
     constructor(player, monster, id, params = {}) {
         super(player, monster, "throwstone", id, params);
         this.animation = params.animation ?? null;
-        this.events = params.events ?? [SkillEvents.Tick];
+        this.events = params.events ?? [MonsterRuntimeEvents.Tick];
         this.distanceMin = params.distanceMin ?? 0;
         this.distanceMax = params.distanceMax ?? 600;
         this.damage = params.damage ?? 10;

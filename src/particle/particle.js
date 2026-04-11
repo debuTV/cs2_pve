@@ -1,7 +1,7 @@
 /**
  * @module 粒子系统/单个粒子
  */
-import { Instance, PointTemplate } from "cs_script/point_script";
+import { Entity, Instance, PointTemplate } from "cs_script/point_script";
 import { eventBus } from "../util/event_bus";
 import { event } from "../util/definition";
 
@@ -23,7 +23,8 @@ export class Particle {
         this._particleEntity = null;
         /** @type {boolean} 粒子当前是否处于存活状态 */
         this._alive = false;
-
+        /** @type {Entity | null} */
+        this.parentEntity = options.parentEntity??null;
         /** 活动时间（秒），-1 = 无限期，仅外部 stop */
         this.lifetime = options.lifetime;
         /** 创建时的游戏时间戳 */
@@ -60,6 +61,14 @@ export class Particle {
 
         this._startTime = Instance.GetGameTime();
         this._alive = true;
+        if (this.parentEntity?.IsValid?.()) {
+            Instance.EntFireAtTarget({
+                target: this._particleEntity,
+                input: "Followentity",
+                value: "!activator",
+                activator: this.parentEntity,
+            });
+        }
         return true;
     }
 
@@ -75,7 +84,12 @@ export class Particle {
             return;
         }
 
-        if (this.lifetime != null && now - this._startTime >= this.lifetime) {
+        if (this.parentEntity && !this.parentEntity.IsValid?.()) {
+            eventBus.emit(event.Particle.In.StopRequest, { particleId: this.id });
+            return;
+        }
+
+        if (this.lifetime != -1 && now - this._startTime >= this.lifetime) {
             eventBus.emit(event.Particle.In.StopRequest, { particleId: this.id });
         }
     }
@@ -102,13 +116,10 @@ export class Particle {
 
         for (const ent of entities) {
             if (ent.GetClassName() !== "info_particle_system") continue;
-            if (targetName && ent.GetEntityName() === targetName) return ent;
-            if (!fallback) fallback = ent;
+            if (ent.GetEntityName() === targetName) return ent;
+            fallback = ent;
         }
 
-        if (fallback && targetName) {
-            Instance.Msg(`Particle: 未精确匹配 middleEntityName "${targetName}"，使用第一个 info_particle_system\n`);
-        }
         return fallback;
     }
 

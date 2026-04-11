@@ -1,7 +1,8 @@
 /**
  * @module 怪物系统/怪物技能/飞扑
  */
-import { DEFAULT_WORLD_GRAVITY, MovementPriority, MovementRequestType, SkillEvents } from "../skill_const";
+import { DEFAULT_WORLD_GRAVITY, MovementPriority, MovementRequestType } from "../skill_const";
+import { MonsterRuntimeEvents } from "../../util/runtime_events.js";
 import { SkillTemplate } from "../skill_template";
 
 export class PounceSkill extends SkillTemplate {
@@ -15,7 +16,7 @@ export class PounceSkill extends SkillTemplate {
         super(player, monster, "pounce", id, params);
         this.distance = params.distance ?? 0;
         this.animation = params.animation ?? null;
-        this.events = params.events ?? [SkillEvents.Tick];
+        this.events = params.events ?? [MonsterRuntimeEvents.Tick];
         this._duration = params.duration ?? 1;
         this.asyncOccupation = "pounce";
     }

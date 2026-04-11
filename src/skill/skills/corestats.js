@@ -1,15 +1,13 @@
 /**
  * @module 怪物系统/怪物技能/基础属性增强
  */
-import { Monster } from "../../monster/monster/monster";
-import { Player } from "../../player/player/player";
-import { SkillEvents } from "../skill_const";
+import { getRuntimeEventsForHost } from "../../util/runtime_events.js";
 import { SkillTemplate } from "../skill_template";
 
 export class CoreStats extends SkillTemplate {
     /**
-     * @param {Player|null} player
-     * @param {Monster|null} monster
+    * @param {import("../../player/player/player.js").Player|null} player
+    * @param {import("../../monster/monster/monster.js").Monster|null} monster
      * @param {number} id
      * @param {{
      *   cooldown?: number;
@@ -28,12 +26,13 @@ export class CoreStats extends SkillTemplate {
     constructor(player, monster, id, params = {}) {
         super(player, monster, "corestats", id, params);
         this.animation = params.animation ?? null;
-        this.events = params.events ?? [SkillEvents.Spawn];
+        const runtimeEvents = getRuntimeEventsForHost(player, monster);
+        this.events = params.events ?? [runtimeEvents.Spawn];
         this.params = params;
     }
 
     /**
-     * @param {any} event
+        * @param {import("../../util/runtime_events.js").RuntimeEvent} event
      */
     canTrigger(event) {
         if (!this.events.includes(event.type)) return false;

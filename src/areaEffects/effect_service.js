@@ -27,16 +27,19 @@ export class AreaEffect {
     constructor(desc) {
         /** 自增唯一 ID。 */
         this.id = AreaEffect._nextId++;
-        /** 效果类型标识（如 "poisongas"）。 */
+        /** 效果类型标识（如 "fire"）。 */
         this.effectName = areaEffectStatics[desc.areaEffectStaticKey].effectName;
         /** Buff 类型名字。 */
         this.buffName = areaEffectStatics[desc.areaEffectStaticKey].buffName;
         /** 关联的粒子效果名字。
          * @type {string} */
         this.particleName = areaEffectStatics[desc.areaEffectStaticKey].particleName;
+        /** 可选的父实体；有效时区域中心会跟随它的世界坐标。
+         * @type {import("cs_script/point_script").Entity | null} */
+        this.parentEntity = desc.parentEntity ?? null;
 
         /** 效果中心世界坐标。 */
-        this.position = desc.position;
+        this.position = { ...desc.position };
         /** 影响半径。 */
         this.radius = desc.radius;
         /** 总持续时间（秒）。 */
@@ -74,6 +77,9 @@ export class AreaEffect {
         if (this.alive) {
             this.stop();
         }
+        if (!this._syncPositionFromParentEntity()) {
+            return false;
+        }
         this._buffid.clear();
         this._hitCooldowns.clear();
         this.startTime = Instance.GetGameTime();
@@ -94,6 +100,11 @@ export class AreaEffect {
      */
     tick(now, tickContext) {
         if (!this.alive) return;
+
+        if (!this._syncPositionFromParentEntity()) {
+            this.stop();
+            return;
+        }
 
         if (now - this.startTime >= this.duration) {
             this.stop();
@@ -248,11 +259,38 @@ export class AreaEffect {
         const payload = {
             particleName: this.particleName,
             position: { ...this.position },
+            parentEntity: this.parentEntity,
             lifetime: this.duration,
             result:-1,
         };
         eventBus.emit(event.Particle.In.CreateRequest, payload);
         this.particleId = payload.result;
+    }
+
+    /**
+     * 若存在父实体，则用其同步当前位置。
+     * @returns {boolean}
+     */
+    _syncPositionFromParentEntity() {
+        if (!this.parentEntity) {
+            return true;
+        }
+
+        if (!this.parentEntity.IsValid?.()) {
+            return false;
+        }
+
+        const nextPosition = this.parentEntity.GetAbsOrigin?.();
+        if (!nextPosition) {
+            return false;
+        }
+
+        this.position = {
+            x: nextPosition.x,
+            y: nextPosition.y,
+            z: nextPosition.z,
+        };
+        return true;
     }
 
     /** 停止并释放粒子句柄。 */

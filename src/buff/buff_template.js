@@ -16,6 +16,7 @@ export class BuffTemplate{
         this.target = target;
         this.targetType = targetType;
         this.typeId = typeId;
+        /**@type {number} */
         this.duration = params.duration;
         this.params = { ...(params ?? {}) };
         this.startTime = Instance.GetGameTime();

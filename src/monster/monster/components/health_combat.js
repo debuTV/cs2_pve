@@ -4,7 +4,8 @@
 import { BaseModelEntity, CSPlayerPawn, Instance } from "cs_script/point_script";
 import { eventBus } from "../../../util/event_bus";
 import { event } from "../../../util/definition";
-import { MonsterBuffEvents, MonsterState } from "../../monster_const";
+import { MonsterState } from "../../monster_const";
+import { MonsterRuntimeEvents } from "../../../util/runtime_events.js";
 
 export class MonsterHealthCombat {
     /**
@@ -51,12 +52,20 @@ export class MonsterHealthCombat {
             source: meta?.source ?? null,
             reason: meta?.reason,
         };
-        this.monster.emitBuffEvent(MonsterBuffEvents.BeforeTakeDamage, ctx);
+        this.monster.emitRuntimeEvent(MonsterRuntimeEvents.BeforeTakeDamage, ctx);
         amount = ctx.damage;
 
+        const previousHealth = this.monster.health;
+
         if (amount <= 0) {
-            this.monster.emitBuffEvent(MonsterBuffEvents.TakeDamage, { ...ctx, damage: 0 });
-            this.monster.emitEvent({ type: MonsterBuffEvents.TakeDamage, value: 0, health: this.monster.health });
+            this.monster.emitRuntimeEvent(MonsterRuntimeEvents.TakeDamage, {
+                ...ctx,
+                damage: 0,
+                value: 0,
+                health: this.monster.health,
+                previousHealth,
+                currentHealth: this.monster.health,
+            });
             return false;
         }
 
@@ -64,16 +73,27 @@ export class MonsterHealthCombat {
         for (const mod of this._damageModifiers) {
             finalAmount = mod(finalAmount);
             if (finalAmount <= 0) {
-                this.monster.emitBuffEvent(MonsterBuffEvents.TakeDamage, { ...ctx, damage: 0 });
-                this.monster.emitEvent({ type: MonsterBuffEvents.TakeDamage, value: 0, health: this.monster.health });
+                this.monster.emitRuntimeEvent(MonsterRuntimeEvents.TakeDamage, {
+                    ...ctx,
+                    damage: 0,
+                    value: 0,
+                    health: this.monster.health,
+                    previousHealth,
+                    currentHealth: this.monster.health,
+                });
                 return false;
             }
         }
 
-        const previousHealth = this.monster.health;
         this.monster.health = Math.max(0, Math.min(this.monster.health - finalAmount, this.monster.maxhealth));
-        this.monster.emitBuffEvent(MonsterBuffEvents.TakeDamage, { ...ctx, damage: finalAmount });
-        this.monster.emitEvent({ type: MonsterBuffEvents.TakeDamage, value: finalAmount, health: this.monster.health });
+        this.monster.emitRuntimeEvent(MonsterRuntimeEvents.TakeDamage, {
+            ...ctx,
+            damage: finalAmount,
+            value: finalAmount,
+            health: this.monster.health,
+            previousHealth,
+            currentHealth: this.monster.health,
+        });
         /** @type {import("../../monster_const").OnMonsterDamaged} */
         const payload = {
             monster: this.monster,
@@ -109,12 +129,12 @@ export class MonsterHealthCombat {
 
         const prevState = this.monster.state;
         this.monster.state = MonsterState.DEAD;
-        this.monster.emitBuffEvent("OnStateChange", { oldState: prevState, nextState: MonsterState.DEAD });
+        this.monster.emitRuntimeEvent(MonsterRuntimeEvents.StateChange, { oldState: prevState, nextState: MonsterState.DEAD });
+        this.monster.emitRuntimeEvent(MonsterRuntimeEvents.Die, { killer });
         this.monster.clearBuffs();
         if (this.monster.model instanceof BaseModelEntity) {
             this.monster.model.Unglow();
         }
-        this.monster.emitEvent({ type: MonsterBuffEvents.Die });
         this.monster.killer = killer instanceof CSPlayerPawn ? killer : null;
         this.monster.emitDeathEvent(killer);
         this.monster.animation.enter(MonsterState.DEAD);
@@ -134,11 +154,11 @@ export class MonsterHealthCombat {
         const targetPos = target.GetAbsOrigin();
         const distsq = this.monster.distanceTosq(target);
         if (distsq > this.monster.attackdist * this.monster.attackdist) {
-            this.monster.emitEvent({ type: MonsterBuffEvents.AttackFalse });
+            this.monster.emitRuntimeEvent(MonsterRuntimeEvents.AttackFalse, { target });
             return;
         }
 
-        this.monster.emitEvent({ type: MonsterBuffEvents.AttackTrue });
+        this.monster.emitRuntimeEvent(MonsterRuntimeEvents.AttackTrue, { target, damage: this.monster.damage });
         this.monster.emitAttackEvent(this.monster.damage, target);
 
         const l = 300 / Math.hypot(targetPos.x - origin.x, targetPos.y - origin.y);

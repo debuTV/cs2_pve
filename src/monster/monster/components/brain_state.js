@@ -2,7 +2,8 @@
  * @module 怪物系统/怪物组件/AI状态机
  */
 
-import { MonsterBuffEvents, MonsterState } from "../../monster_const";
+import { MonsterState } from "../../monster_const";
+import { MonsterRuntimeEvents } from "../../../util/runtime_events.js";
 
 /**
  * 怪物 AI 决策组件。
@@ -29,6 +30,7 @@ export class MonsterBrainState {
      * @param {import("cs_script/point_script").CSPlayerPawn[]} allppos 所有存活玩家
      */
     updateTarget(allppos) {
+        const previousTarget = this.monster.target;
         let best = null;
         let bestDistsq = Infinity;
         for (const player of allppos) {
@@ -39,7 +41,10 @@ export class MonsterBrainState {
             }
         }
         this.monster.target = best;
-        this.monster.emitEvent({ type: MonsterBuffEvents.TargetUpdate });
+        this.monster.emitRuntimeEvent(MonsterRuntimeEvents.TargetUpdate, {
+            previousTarget,
+            target: best,
+        });
     }
 
     /**

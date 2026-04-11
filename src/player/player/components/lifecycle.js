@@ -2,8 +2,8 @@
  * @module 玩家系统/玩家/组件/生命周期
  */
 import { Instance } from "cs_script/point_script";
-import { SkillEvents } from "../../../skill/skill_const";
 import { PlayerState } from "../../player_const";
+import { PlayerRuntimeEvents } from "../../../util/runtime_events.js";
 
 /**
  * 玩家生命周期编排器。
@@ -58,7 +58,7 @@ export class PlayerLifecycle {
         this.player.applyStateTransition(nextState);
         this.player.startInputTracking(pawn);
         this.player.ensureProfessionSkillBound();
-        this.player.emitSkillEvent(SkillEvents.Spawn, { state: nextState });
+        this.player.emitRuntimeEvent(PlayerRuntimeEvents.Spawn, { state: nextState });
 
         // 给予初始装备
         this._giveStartingEquipment();
@@ -115,7 +115,7 @@ export class PlayerLifecycle {
         this.player.applyStateTransition(nextState);
         this.player.startInputTracking(this.player.entityBridge.pawn);
         this.player.ensureProfessionSkillBound();
-        this.player.emitSkillEvent(SkillEvents.Spawn, { state: nextState });
+        this.player.emitRuntimeEvent(PlayerRuntimeEvents.Spawn, { state: nextState });
 
         Instance.Msg(`玩家 ${this.player.entityBridge.getPlayerName()} 已重生 (HP: ${stats.health})`);
     }
@@ -159,7 +159,7 @@ export class PlayerLifecycle {
         const rebound = this.player.rebindProfessionSkill();
         this.player.startInputTracking(this.player.entityBridge.pawn);
         if (rebound) {
-            this.player.emitSkillEvent(SkillEvents.Spawn, { state: PlayerState.PREPARING });
+            this.player.emitRuntimeEvent(PlayerRuntimeEvents.Spawn, { state: PlayerState.PREPARING });
         }
         this._giveStartingEquipment();
     }

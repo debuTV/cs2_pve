@@ -1,4 +1,4 @@
-import { SkillEvents } from "../skill_const";
+import { PlayerRuntimeEvents } from "../../util/runtime_events.js";
 import { SkillTemplate } from "../skill_template";
 
 export class PlayerPulseSkill extends SkillTemplate {
@@ -18,20 +18,21 @@ export class PlayerPulseSkill extends SkillTemplate {
     constructor(player, monster, typeId, id, params = {}) {
         super(player, monster, typeId, id, params);
         this.animation = null;
-        this.events = params.events ?? [SkillEvents.Input];
+        this.events = params.events ?? [PlayerRuntimeEvents.Input];
         this.inputKey = params.inputKey ?? "InspectWeapon";
         this.heal = params.heal ?? 0;
         this.armor = params.armor ?? 0;
     }
 
     /**
-     * @param {{ type: string, key?: string }} event
+        * @param {import("../../util/runtime_events.js").RuntimeEvent} event
      * @returns {boolean}
      */
     canTrigger(event) {
         if (!this.player || this.monster) return false;
         if (!this.events.includes(event.type)) return false;
-        if (event.type === SkillEvents.Input && event.key !== this.inputKey) return false;
+        const inputKey = "key" in event ? event.key : undefined;
+        if (event.type === PlayerRuntimeEvents.Input && inputKey !== this.inputKey) return false;
         if (!this._cooldownReady()) return false;
 
         this.trigger();

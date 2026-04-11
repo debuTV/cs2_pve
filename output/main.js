@@ -1,4 +1,4 @@
-import { Instance, PointTemplate, CSPlayerPawn, BaseModelEntity, CSInputs } from 'cs_script/point_script';
+import { Instance, CSPlayerPawn, CSInputs, PointTemplate, BaseModelEntity } from 'cs_script/point_script';
 
 /**
  * @module EventBus/EventBus
@@ -384,10 +384,6 @@ const event={
         In:{
             CreateRequest:"Particle_OnCreateRequest",    //粒子特效创建请求
             StopRequest:"Particle_OnStopRequest",        //粒子特效停止请求
-        },
-        Out:{
-            OnCreated:"Particle_OnCreated",    //粒子特效创建成功后
-            OnStopped:"Particle_OnStopped",    //粒子特效停止后
         }
     },
     Player:{
@@ -658,33 +654,6 @@ const MonsterState = {
     DEAD: 4//死亡
 };
 /**
- * 怪物事件类型常量。
- *
- * 收录怪物技能内部事件名称字符串。
- * 使用统一常量替代散落的字符串，防止拼写错误导致事件丢失。
- *
- * 事件按职责分为四组：
- * - **生命周期**：生成（Spawn）、死亡（Die）、模型移除（ModelRemove）。
- * - **战斗**：受伤（TakeDamage）、攻击命中（AttackTrue）、攻击未命中（AttackFalse）。
- * - **AI**：每帧心跳（Tick）、目标更新（TargetUpdate）。
- * - **技能**：技能施放（SkillCast）。
- *
- */
-const MonsterBuffEvents = {
-    // 生命周期
-    Spawn:        "OnSpawn",
-    Die:          "OnDie",
-    ModelRemove:  "OnModelRemove",
-    // 战斗
-    BeforeTakeDamage: "BeforeTakeDamage", // 受伤前事件，允许修改伤害
-    TakeDamage:   "OnTakeDamage",        // 受伤后事件，提供最终伤害值
-    AttackTrue:   "OnAttackTrue",
-    AttackFalse:  "OnAttackFalse",
-    // AI
-    Tick:         "OnTick",
-    TargetUpdate: "OnupdateTarget"};
-
-/**
  * @typedef {object} OnMonsterSpawn
  * @property {import("./monster/monster").Monster} monster
  */
@@ -761,6 +730,11 @@ const MonsterType={
             attackCooldown:0.1,
             movementmode:"walk",
             skill_pool:[
+                {
+                    id:"sound",
+                    chance: 1,
+                    params:{ cooldown:5, templateName:"headcrab_classic_sound", eventSoundMap:{ OnSpawn:"Headcrab.Classic.Spawn", OnTakeDamage:"Headcrab.Classic.Hurt" } }
+                },
                 //// 示例：同类型技能重复（分别叠加不同属性）
                 //{
                 //    id:"corestats",
@@ -1189,2883 +1163,143 @@ class WaveManager {
 }
 
 /**
- * @module 怪物系统/怪物组件/实体桥接
- */
-
-const BREAKABLE_HEALTH_SCALE = 10000;
-
-/**
- * 怪物实体桥接组件。
- *
- * 负责生成 model / breakable，并把 breakable 受到的引擎伤害
- * 单向折算到脚本侧生命，不再把脚本生命反向同步给 breakable。
- * 
- * @navigationTitle 怪物实体桥接
- */
-class MonsterEntityBridge {
-    /**
-     * 创建怪物实体桥接组件。
-     * @param {import("../monster").Monster} monster 所属怪物实例
-     */
-    constructor(monster) {
-        /** 所属怪物实例。 */
-        this.monster = monster;
-    }
-    /**
-     * 根据怪物配置生成引擎实体（breakable + model）。
-     *
-     * 通过 `PointTemplate.ForceSpawn` 在指定位置创建模板实体，
-     * 并监听 breakable 的 `OnHealthChanged` 将引擎伤害转发给 `healthCombat`。
-     *
-     * @param {import("cs_script/point_script").Vector} position 出生世界坐标
-     * @param {import("../../../util/definition").monsterTypes} typeConfig 怪物类型配置
-     */
-    init(position, typeConfig) {
-        const template = Instance.FindEntityByName(typeConfig.template_name);
-        if (template && template instanceof PointTemplate) {
-            const spawned = template.ForceSpawn(position);
-            if (spawned && spawned.length > 0) {
-                spawned.forEach((element) => {
-                    if (element.GetClassName() == "func_breakable") {
-                        this.monster.breakable = element;
-                    }
-                    if (element.GetClassName() == "prop_dynamic" && element.GetEntityName() == typeConfig.model_name) {
-                        this.monster.model = element;
-                    }
-                });
-            }
-        }
-
-        if (this.monster.breakable) {
-            this.monster.preBreakableHealth = BREAKABLE_HEALTH_SCALE;
-            Instance.ConnectOutput(this.monster.breakable, "OnHealthChanged", (e) => {
-                if (typeof e.value !== "number") return;
-
-                const currentBreakableHealth = Math.max(
-                    0,
-                    Math.min(BREAKABLE_HEALTH_SCALE, BREAKABLE_HEALTH_SCALE * e.value)
-                );
-                const damage = this.monster.preBreakableHealth - currentBreakableHealth;
-                this.monster.preBreakableHealth = currentBreakableHealth;
-
-                if (damage <= 1) return;
-
-                const attacker = e.activator instanceof CSPlayerPawn ? e.activator : null;
-                this.monster.takeDamage(damage, attacker);
-            });
-        }
-
-        //if (this.monster.model) {
-        //    if (this.monster.model instanceof BaseModelEntity) {
-        //        this.monster.model.Glow();
-        //    }
-        //}
-    }
-
-    /**
-     * 死亡后移除引擎实体。breakable 始终移除，model 是否删除由参数控制。
-     * @param {boolean} [removeModelAfterDeathAnimation=true] 是否删除怪物模型
-     */
-    removeAfterDeath(removeModelAfterDeathAnimation = true) {
-        if (this.monster.breakable?.IsValid()) {
-            this.monster.breakable.Remove();
-        }
-        if (removeModelAfterDeathAnimation && this.monster.model?.IsValid()) {
-            this.monster.model.Remove();
-        }
-    }
-}
-
-/**
- * @module 怪物系统/怪物组件/生命与战斗
- */
-
-class MonsterHealthCombat {
-    /**
-     * @param {import("../monster").Monster} monster
-     */
-    constructor(monster) {
-        this.monster = monster;
-        /** @type {((amount: number) => number)[]} */
-        this._damageModifiers = [];
-    }
-
-    /**
-     * @param {(amount: number) => number} modifier
-     */
-    addDamageModifier(modifier) {
-        this._damageModifiers.push(modifier);
-    }
-
-    /**
-     * @param {(amount: number) => number} modifier
-     */
-    removeDamageModifier(modifier) {
-        const idx = this._damageModifiers.indexOf(modifier);
-        if (idx !== -1) this._damageModifiers.splice(idx, 1);
-    }
-
-    /**
-     * @param {number} amount
-     * @param {import("cs_script/point_script").CSPlayerPawn | null} attacker
-     * @param {{ source?: import("cs_script/point_script").Entity | null, reason?: string } | null} [meta]
-     * @returns {boolean}
-     */
-    takeDamage(amount, attacker, meta = null) {
-        if (this.monster.state === MonsterState.DEAD) return true;
-
-        const modifiedAmount = this.monster.requestBeforeTakeDamage(amount, attacker);
-        if (typeof modifiedAmount === "number") {
-            amount = modifiedAmount;
-        }
-
-        const ctx = {
-            damage: amount,
-            attacker,
-            source: meta?.source ?? null,
-            reason: meta?.reason,
-        };
-        this.monster.emitBuffEvent(MonsterBuffEvents.BeforeTakeDamage, ctx);
-        amount = ctx.damage;
-
-        if (amount <= 0) {
-            this.monster.emitBuffEvent(MonsterBuffEvents.TakeDamage, { ...ctx, damage: 0 });
-            this.monster.emitEvent({ type: MonsterBuffEvents.TakeDamage, value: 0, health: this.monster.health });
-            return false;
-        }
-
-        let finalAmount = amount;
-        for (const mod of this._damageModifiers) {
-            finalAmount = mod(finalAmount);
-            if (finalAmount <= 0) {
-                this.monster.emitBuffEvent(MonsterBuffEvents.TakeDamage, { ...ctx, damage: 0 });
-                this.monster.emitEvent({ type: MonsterBuffEvents.TakeDamage, value: 0, health: this.monster.health });
-                return false;
-            }
-        }
-
-        const previousHealth = this.monster.health;
-        this.monster.health = Math.max(0, Math.min(this.monster.health - finalAmount, this.monster.maxhealth));
-        this.monster.emitBuffEvent(MonsterBuffEvents.TakeDamage, { ...ctx, damage: finalAmount });
-        this.monster.emitEvent({ type: MonsterBuffEvents.TakeDamage, value: finalAmount, health: this.monster.health });
-        /** @type {import("../../monster_const").OnMonsterDamaged} */
-        const payload = {
-            monster: this.monster,
-            damage: finalAmount,
-            previousHealth,
-            currentHealth: this.monster.health,
-            attacker: attacker instanceof CSPlayerPawn ? attacker : null,
-        };
-        eventBus.emit(event.Monster.Out.OnMonsterDamaged, payload);
-        Instance.Msg(`鎬墿 #${this.monster.id} 鍙楀埌 ${finalAmount} 鐐逛激瀹?(鍘熷:${amount}) (${previousHealth} -> ${this.monster.health})`);
-
-        if (this.monster.health <= 0) {
-            this.die(attacker);
-            return true;
-        }
-        return false;
-    }
-
-    /**
-     * @param {import("cs_script/point_script").Entity | null | undefined} killer
-     */
-    die(killer) {
-        if (this.monster.state === MonsterState.DEAD) return;
-
-        const breakable = this.monster.breakable;
-        if (breakable?.IsValid()) {
-            Instance.EntFireAtTarget({
-                target: breakable,
-                input: "fireuser1",
-                activator: killer ?? this.monster.target ?? undefined,
-            });
-        }
-
-        const prevState = this.monster.state;
-        this.monster.state = MonsterState.DEAD;
-        this.monster.emitBuffEvent("OnStateChange", { oldState: prevState, nextState: MonsterState.DEAD });
-        this.monster.clearBuffs();
-        if (this.monster.model instanceof BaseModelEntity) {
-            this.monster.model.Unglow();
-        }
-        this.monster.emitEvent({ type: MonsterBuffEvents.Die });
-        this.monster.killer = killer instanceof CSPlayerPawn ? killer : null;
-        this.monster.emitDeathEvent(killer);
-        this.monster.animation.enter(MonsterState.DEAD);
-        Instance.Msg(`鎬墿 #${this.monster.id} 姝讳骸`);
-    }
-
-    enterAttack() {
-        const model = this.monster.model;
-        const target = this.monster.target;
-        if (!model?.IsValid() || !target) return;
-
-        this.monster.animation.setOccupation("attack");
-        this.monster.movementPath.onOccupationChanged();
-        this.monster.attackCooldown = this.monster.atc;
-
-        const origin = model.GetAbsOrigin();
-        const targetPos = target.GetAbsOrigin();
-        const distsq = this.monster.distanceTosq(target);
-        if (distsq > this.monster.attackdist * this.monster.attackdist) {
-            this.monster.emitEvent({ type: MonsterBuffEvents.AttackFalse });
-            return;
-        }
-
-        this.monster.emitEvent({ type: MonsterBuffEvents.AttackTrue });
-        this.monster.emitAttackEvent(this.monster.damage, target);
-
-        300 / Math.hypot(targetPos.x - origin.x, targetPos.y - origin.y);
-    }
-}
-
-/**
- * @module 怪物系统/怪物组件/AI状态机
- */
-
-
-/**
- * 怪物 AI 决策组件。
- *
- * 每帧评估当前意图并解析为 MonsterState 转换：
- * 1. `updateTarget` — 选择最近玩家作为目标。
- * 2. `evaluateIntent` — 根据距离和冷却判断意图（Idle/Chase/Attack/Skill）。
- * 3. `resolveState` — 将意图转化为实际状态，考虑占用锁和当前待执行技能。
- *
- * @navigationTitle 怪物 AI 决策
- */
-class MonsterBrainState {
-    /**
-     * 创建怪物 AI 决策组件。
-     * @param {import("../monster").Monster} monster 所属怪物实例
-     */
-    constructor(monster) {
-        /** 所属怪物实例。 */
-        this.monster = monster;
-    }
-
-    /**
-     * 更新追击目标：选择最近的存活玩家。同时发布 `TargetUpdate` 事件。
-     * @param {import("cs_script/point_script").CSPlayerPawn[]} allppos 所有存活玩家
-     */
-    updateTarget(allppos) {
-        let best = null;
-        let bestDistsq = Infinity;
-        for (const player of allppos) {
-            const dist = this.monster.distanceTosq(player);
-            if (dist < bestDistsq) {
-                best = player;
-                bestDistsq = dist;
-            }
-        }
-        this.monster.target = best;
-        this.monster.emitEvent({ type: MonsterBuffEvents.TargetUpdate });
-    }
-
-    /**
-     * 评估当前意图。只判断“想做什么”，不修改 `monster.state`。
-     *
-     * 优先级：被锁定→CHASE，有技能请求→SKILL，攻击距离内且无冷却→ATTACK，否则→CHASE。
-     * @returns {number} MonsterState 枚举值
-     */
-    evaluateIntent() {
-        if (!this.monster.target) return MonsterState.IDLE;
-        const distsq = this.monster.distanceTosq(this.monster.target);
-        if (this.monster.movementStateMovemode === "ladder") return MonsterState.CHASE;
-        if (this.monster.skillsManager.hasRequestedSkill()) return MonsterState.SKILL;
-        if (distsq <= this.monster.attackdist*this.monster.attackdist && this.monster.attackCooldown <= 0) return MonsterState.ATTACK;
-        return MonsterState.CHASE;
-    }
-
-    /**
-     * 根据意图评估结果执行状态切换。ATTACK/SKILL 切换成功后会调用对应入口方法。
-     * @param {number} intent 目标状态（MonsterState 枚举值）
-     */
-    resolveIntent(intent) {
-        switch (intent) {
-            case MonsterState.IDLE:
-                this.trySwitchState(MonsterState.IDLE);
-                break;
-            case MonsterState.CHASE:
-                this.trySwitchState(MonsterState.CHASE);
-                break;
-            case MonsterState.ATTACK:
-                if (this.trySwitchState(MonsterState.ATTACK)) {
-                    this.monster.enterAttack();
-                }
-                break;
-            case MonsterState.SKILL:
-                if (this.trySwitchState(MonsterState.SKILL)) {
-                    this.monster.enterSkill();
-                }
-                break;
-        }
-    }
-
-    /**
-     * 尝试状态迁移。委托 `monster.applyStateTransition`。
-     * @param {number} nextState 目标 MonsterState
-     * @returns {boolean} 是否切换成功
-     */
-    trySwitchState(nextState) {
-        return this.monster.applyStateTransition(nextState);
-    }
-}
-
-/**
- * @module 技能系统/共享常量
+ * @module 运行时事件契约
  */
 
 /**
- * 技能统一事件键。
- *
- * 约定：monster、player 与输入系统都向 skill 层发送这些字符串值，
- * 这样 skill 模块不必再直接依赖具体宿主模块的事件常量文件。
+ * 玩家宿主内统一运行时事件。
+ * buff 与 skill 都只应订阅这组玩家事件。
  */
-const SkillEvents = {
+const PlayerRuntimeEvents = {
     Spawn: "OnSpawn",
-    Die: "OnDie",
-    AttackTrue: "OnAttackTrue",
-    Tick: "OnTick",
     Input: "OnInput",
-};
-
-/** 与技能位移交互兼容的移动请求类型。 */
-const MovementRequestType = {
-    Move: "Move"};
-
-/** 与技能位移交互兼容的移动请求优先级。 */
-const MovementPriority = {
-    Skill: 0};
-
-/** 默认世界重力加速度。 */
-const DEFAULT_WORLD_GRAVITY = 800;
-
-/**
- * 技能 运行时事件负载。
- * 当前仅作为 JSDoc 类型占位，供 skill_manager / skill_template 引用。
- * @typedef {Record<string, any>} EmitEventPayload
- */
-
-/**
- * @typedef {Object} SkillAddRequest
- * @property {import("../player/player/player").Player|import("../monster/monster/monster").Monster} target
- * @property {string} typeId
- * @property {Record<string, any>} params
- * @property {number|null} result
- */
-
-/**
- * @typedef {Object} SkillRemoveRequest
- * @property {number} skillId
- * @property {import("../player/player/player").Player|import("../monster/monster/monster").Monster|null} [target]
- * @property {boolean} result
- */
-
-/**
- * @typedef {Object} SkillUseRequest
- * @property {number} skillId
- * @property {import("../player/player/player").Player|import("../monster/monster/monster").Monster} target
- * @property {boolean} result
- */
-
-/**
- * @typedef {Object} SkillEmitRequest
- * @property {number} skillId
- * @property {string} eventName
- * @property {EmitEventPayload} params
- * @property {import("../player/player/player").Player|import("../monster/monster/monster").Monster|null} [target]
- * @property {boolean} result
- */
-
-/**
- * @module 怪物系统/技能基类
- */
-/*
-技能分类规则（唯一权威）：
-  有 animation 字段（非 null/undefined）= 主动技能：canTrigger 通过后占用当前待执行槽，
-    Monster 进入 SKILL 状态，skills_manager 先播放 animation 动作，再调用 trigger()。
-  无 animation 字段（null）           = 被动技能：在 canTrigger 内直接执行业务并返回 false，
-    不占用待执行槽，不触发状态切换。
-
-冷却语义：
-  cooldown > 0  → 间隔触发（秒）
-  cooldown = 0  → 无限制
-  cooldown = -1 → 一次性：仅首次触发一次，之后永久失效
-  默认值为 -1（一次性），可在子类构造函数或 params.cooldown 中覆盖。
-
-实例 id 语义：
-  skill.id  = 运行时实例 id，由 MonsterSkillsManager.addSkill 按添加顺序分配（0,1,2,...）。
-             同一怪物上 id 越小，优先级越高；同一轮事件结算时，先遇到可触发的技能会直接截断后续主动技能。
-  skill.typeId = 技能类型标识，对应 SkillFactory 注册键（如 "corestats"），子类在构造函数里设置。
-             同一怪物可同时拥有多个相同 typeId 的技能实例，各实例独立运行互不干扰。
-
-多事件触发：
-  子类构造函数中设置 this.events 数组，列出该技能响应的事件类型。
-  可在配置 params.events 中直接指定（如 ["OnSpawn","OnDie"]），未提供则使用技能类的默认值。
-  对 spawn 等技能：旧的单值 params.event 仍向后兼容（会被包装为单元素数组）。
-
-原 onAdd() 生命周期已移除；需要在生成时执行的初始化逻辑，
-请在 canTrigger 中响应 MonsterEvents.Spawn 并 return false。
-
-新增技能时不要手写 this.id（实例 id 由 addSkill 自动分配）；
-在子类构造函数里设置 this.typeId（技能类型标识）；
-isActive() 由基类根据 this.animation 自动判断。
-
-事件大全（统一使用 MonsterEvents 常量，见 monster_events.js）
-//怪物生成完后
-MonsterEvents.Spawn        → "OnSpawn"
-
-//当受到伤害后(伤害值，最后血量)
-MonsterEvents.TakeDamage   → "OnTakeDamage"   { value, health }
-
-//怪物死亡前，这时候实体还未销毁
-MonsterEvents.Die          → "OnDie"
-
-//当前TICK(tick间隔，所有怪物breakable实体)
-MonsterEvents.Tick         → "OnTick"          { dt, allmpos }
-
-//目标更新后
-MonsterEvents.TargetUpdate → "OnupdateTarget"
-
-//没有攻击到目标
-MonsterEvents.AttackFalse  → "OnAttackFalse"
-
-//对目标造成伤害后
-MonsterEvents.AttackTrue   → "OnAttackTrue"
-
-//模型移除后（动画结束）
-MonsterEvents.ModelRemove  → "OnModelRemove"
- */
-/**
- * 技能基类。所有具体技能继承此类，并在子类中按宿主类型重写专用入口。
- *
- * 技能分为两大类：
- * - **主动技能**（`animation` 非 null）— `canTrigger` 返回 true 后占用当前待执行槽，
- *   Monster 进入 SKILL 状态，播放动作后调用 `trigger()`。
- * - **被动技能**（`animation` 为 null）— 在 `canTrigger` 内直接执行并返回 false。
- *
- * 冷却语义：
- * - `-1` = 一次性（默认），触发过一次后永久失效。
- * - `0` = 无限制。
- * - `> 0` = 按秒间隔触发。
- *
- * 子类在构造函数中设置 `this.typeId`，运行时实例 id `this.id` 由
- * MonsterSkillsManager.addSkill 自动分配，id 越小优先级越高。
- *
- * @navigationTitle 技能基类
- */
-class SkillTemplate
-{
-    /**
-     * 创建技能基类实例，绑定所属施法者。
-     * @param {Player|null} player
-     * @param {Monster|null} monster
-     * @param {string} typeid 
-     * @param {number} id
-     * @param {any} params
-     */
-    constructor(player = null, monster = null,typeid,id,params={}) {
-        /** 玩家施法者；只有玩家技能实例会设置。 */
-        this.player = player;
-        /** 怪物施法者；只有怪物技能实例会设置。 */
-        this.monster = monster;
-        /** 技能类型标识，对应 SkillFactory 注册键（如 "corestats"）。子类在构造函数里设置。 */
-        this.typeId = typeid;
-        /** 运行时实例 id，由 addSkill 按添加顺序分配（0,1,2,...）。id 越小优先级越高。 */
-        this.id = id;
-        /** 冷却（秒）。-1=一次性，0=无限制，>0=按秒冷却。默认 -1。 */
-        this.cooldown = params.cooldown ?? -1;
-        /** 上次触发的游戏时间。初始值 -999。由 `_markTriggered` 更新，供 `_cooldownReady` 判断冷却。 */
-        this.lastTriggerTime = -999;
-        /** 技能是否正在后台运行中（限时技能的执行期间为 true）。由子类 `tick` 逻辑控制。 */
-        this.running=false;
-    }
-    onSkillAdd(){}
-    onSkillDelete(){
-      this.running = false;
-    }
-    /**
-     * @param {string} eventType
-     * @param {import("./skill_const").EmitEventPayload} payload
-     */
-    _emitEvent(eventType, payload = {}) {
-        if(this.canTrigger({ type: eventType, ...payload })) {
-            this._request();
-        }
-    }
-    /**
-     * 这个事件能否执行。
-    * - 有 animation（isActive=true）：做条件判断通过后返回 true，由 emitEvent 调用 request 锁定当前待执行技能。
-    * - 无 animation（isActive=false）：在此处直接执行业务逻辑并返回 false，不占用待执行槽也不切换状态。
-     * @param {any} event
-     */
-    canTrigger(event) {
-        if(this.player)return false;
-        if(this.monster)return false;
-        return false;
-    }
-    /**
-     * 请求执行（基类默认实现，子类无需重写）。
-     * 仅由 isActive()=true 的技能在 canTrigger 返回 true 后被 emitEvent 调用。
-     */
-    _request(){
-        //if(this.player)this.player.requestSkill(this);
-        if(this.monster)this.monster.requestSkill(this);
-    }
-    /**
-     * 执行技能主体逻辑。仅对主动技能有效——动画播放完毕后由 MonsterSkillsManager 调用。
-     * 子类必须重写此方法以实现具体技能效果。
-     */
-    trigger() {}
-    /**
-     * 后台限时技能的每帧执行入口。
-     * 对于有持续时间的技能（如护盾、急速），在 `running` 为 true 期间每帧调用。
-     * 子类按需重写以实现持续效果或到期清理。
-     */
-    tick(){}
-    /**
-     * 检查冷却是否就绪。
-     * - `cooldown = -1`（一次性）：仅当从未触发过时返回 true。
-     * - `cooldown <= 0`（无限制）：始终返回 true。
-     * - `cooldown > 0`：当前时间距上次触发超过冷却秒数时返回 true。
-     * @returns {boolean}
-     */
-    _cooldownReady() {
-        // -1 = 一次性：只要触发过一次（lastTriggerTime 不再是初始值 -999）就永久失效
-        if (this.cooldown === -1) return this.lastTriggerTime === -999;
-        if (this.cooldown <= 0) return true;
-        const now = Instance.GetGameTime();
-        return now - this.lastTriggerTime >= this.cooldown;
-    }
-
-    /**
-     * 标记技能已触发——更新 `lastTriggerTime` 为当前游戏时间。
-     * 若技能配置了 `buffTypeId` 且怪物当前有目标，还会通过事件系统发布 `SkillCast` 事件，
-     * 携带构建好的 buff 负载供玩家 buff 系统接收。
-     */
-    _markTriggered() {
-        this.lastTriggerTime = Instance.GetGameTime();
-    }
-}
-
-/**
- * @module 怪物系统/怪物技能/基础属性增强
- */
-
-class CoreStats extends SkillTemplate {
-    /**
-     * @param {Player|null} player
-     * @param {Monster|null} monster
-     * @param {number} id
-     * @param {{
-     *   cooldown?: number;
-     *   events?: string[];
-     *   animation?: string | null;
-     *   health_mult?: number;
-     *   health_value?: number;
-     *   damage_mult?: number;
-     *   damage_value?: number;
-     *   speed_mult?: number;
-     *   speed_value?: number;
-     *   reward_mult?: number;
-     *   reward_value?: number;
-     * }} [params]
-     */
-    constructor(player, monster, id, params = {}) {
-        super(player, monster, "corestats", id, params);
-        this.animation = params.animation ?? null;
-        this.events = params.events ?? [SkillEvents.Spawn];
-        this.params = params;
-    }
-
-    /**
-     * @param {any} event
-     */
-    canTrigger(event) {
-        if (!this.events.includes(event.type)) return false;
-        if (!this._cooldownReady()) return false;
-        if (this.animation === null) {
-            this.trigger();
-            return false;
-        }
-        return true;
-    }
-
-    trigger() {
-        this._markTriggered();
-        if (this.player) {
-            return;
-        }
-
-        if (this.monster) {
-            if (this.params.health_value) {
-                this.monster.baseMaxHealth += this.params.health_value;
-                this.monster.health += this.params.health_value;
-            }
-            if (this.params.health_mult) {
-                this.monster.baseMaxHealth *= this.params.health_mult;
-                this.monster.health *= this.params.health_mult;
-            }
-            if (this.params.damage_value) this.monster.baseDamage += this.params.damage_value;
-            if (this.params.damage_mult) this.monster.baseDamage *= this.params.damage_mult;
-            if (this.params.speed_value ) this.monster.baseSpeed += this.params.speed_value;
-            if (this.params.speed_mult ) this.monster.baseSpeed *= this.params.speed_mult;
-            if (this.params.reward_value ) this.monster.baseReward += this.params.reward_value;
-            if (this.params.reward_mult ) this.monster.baseReward *= this.params.reward_mult;
-            this.monster.recomputeDerivedStats();
-        }
-    }
-}
-
-/**
- * @module 怪物系统/怪物技能/飞扑
- */
-
-class PounceSkill extends SkillTemplate {
-    /**
-     * @param {any|null} player
-     * @param {import("../../monster/monster/monster").Monster|null} monster
-     * @param {number} id
-    * @param {Record<string, any>} [params]
-     */
-    constructor(player, monster, id, params = {}) {
-        super(player, monster, "pounce", id, params);
-        this.distance = params.distance ?? 0;
-        this.animation = params.animation ?? null;
-        this.events = params.events ?? [SkillEvents.Tick];
-        this._duration = params.duration ?? 1;
-        this.asyncOccupation = "pounce";
-    }
-
-    canTrigger(/** @type {any} */ event) {
-        if (!this.events.includes(event.type)) return false;
-        if (!this._cooldownReady()) return false;
-
-        const monster = this.monster;
-        if (monster) {
-            if (!monster.target) return false;
-            if (monster.isOccupied()) return false;
-
-            const distsq = monster.distanceTosq(monster.target);
-            const attackDistSq = monster.attackdist * monster.attackdist;
-            const triggerDistSq = this.distance * this.distance;
-            if (!(distsq > attackDistSq && distsq < triggerDistSq)) return false;
-        }
-
-        if (this.animation === null) {
-            this.trigger();
-            return false;
-        }
-        return true;
-    }
-
-    tick() {
-        if (this.player) return;
-
-        const monster = this.monster;
-        if (!this.running || !monster) return;
-
-        if (monster.movementStateMovemode==="walk") {
-            this.running = false;
-            monster.onOccupationEnd("pounce");
-        }
-    }
-
-    trigger() {
-        if (this.player) {
-            this._markTriggered();
-            return;
-        }
-
-        const monster = this.monster;
-        if (!monster) return;
-
-        const model = monster.model;
-        const target = monster.target;
-        if (!model?.IsValid() || !target) return;
-
-        const start = model.GetAbsOrigin();
-        const targetPos = target.GetAbsOrigin();
-
-        const duration = this._duration > 0 ? this._duration : 1;
-        const velocity = {
-            x: (targetPos.x - start.x) / duration,
-            y: (targetPos.y - start.y) / duration,
-            z: (targetPos.z - start.z + 0.5 * DEFAULT_WORLD_GRAVITY * duration * duration) / duration,
-        };
-
-        monster.animation.setOccupation("pounce");
-        this.running = true;
-
-        const submitted = monster.submitMovementEvent({
-            type: MovementRequestType.Move,
-            entity: model,
-            priority: MovementPriority.Skill,
-            targetPosition: targetPos,
-            usePathRefresh: false,
-            useNPCSeparation: true,
-            Mode: "air",
-            Velocity: velocity,
-        });
-
-        if (!submitted) {
-            this.running = false;
-            monster.onOccupationEnd("pounce");
-            return;
-        }
-
-        this._markTriggered();
-    }
-}
-
-/**
- * @module 怪物系统/怪物技能/初始动画
- */
-
-class InitAnimSkill extends SkillTemplate {
-    /**
-     * @param {Player|null} player
-     * @param {Monster|null} monster
-     * @param {number} id
-     * @param {{
-     *   cooldown?: number;
-     *   events?: string[];
-     *   animation?: string | null;
-     * }} [params]
-     */
-    constructor(player, monster, id, params = {}) {
-        super(player, monster, "initanim", id, params);
-        this.animation = params.animation ?? null;
-        this.events = params.events ?? [SkillEvents.Spawn];
-    }
-    /**
-     * @param {any} event
-     */
-    canTrigger(event) {
-        if (!this.events.includes(event.type)) return false;
-        if (!this._cooldownReady()) return false;
-        // 怪物专属技能
-        if (!this.monster)return false;
-        if (this.monster && !this.monster.isOccupied()) return false;
-        if (this.animation === null) {
-            this.trigger();
-            return false;
-        }
-        return true;
-    }
-
-    trigger() {
-        this._markTriggered();
-        if (this.player) {
-            return;
-        }
-        if (this.monster)
-        {
-            return;
-        }
-    }
-}
-
-/**
- * @module 怪物系统/怪物技能/双倍攻击
- */
-
-class DoubleAttackSkill extends SkillTemplate {
-    /**
-     * @param {Player|null} player
-     * @param {Monster|null} monster
-     * @param {number} id
-     * @param {{
-     *   cooldown?: number;
-     *   events?: string[];
-     *   animation?: string | null;
-     * }} [params]
-     */
-    constructor(player, monster, id, params = {}) {
-        super(player, monster, "doubleattack", id, params);
-        this.animation = params.animation ?? null;
-        this.events = params.events ?? [SkillEvents.AttackTrue];
-    }
-    /**
-     * @param {any} event
-     */
-    canTrigger(event) {
-        if (!this.events.includes(event.type)) return false;
-        if (!this._cooldownReady()) return false;
-        if (this.monster && !this.monster.target) return false;
-        if (!this.monster)return false;
-        if (this.animation === null) {
-            this.trigger();
-            return false;
-        }
-        return true;
-    }
-
-    trigger() {
-        if (this.player) {
-            this._markTriggered();
-            return;
-        }
-        const monster = this.monster;
-        const target = monster?.target;
-        if (!monster || !target) return;
-        if (monster.distanceTosq(target) > monster.attackdist * monster.attackdist) return;
-
-        this._markTriggered();
-        monster.emitAttackEvent(monster.damage, target);
-    }
-}
-
-/**
- * @module 怪物系统/怪物技能/重击
- */
-
-class PowerAttackSkill extends SkillTemplate {
-    /**
-     * @param {any|null} player
-     * @param {import("../../monster/monster/monster").Monster|null} monster
-     * @param {number} id
-     * @param {{
-     *   cooldown?: number;
-     *   events?: string[];
-     *   animation?: string | null;
-     *   impulse?: number;
-     *   verticalBoost?: number;
-     *   buffDuration?: number;
-     * }} [params]
-     */
-    constructor(player, monster, id, params = {}) {
-        super(player, monster, "powerattack", id, params);
-        this.animation = params.animation ?? null;
-        this.events = params.events ?? [SkillEvents.AttackTrue];
-        this.buffTypeId = "knockup";
-        this.buffParams = {
-            impulse: params.impulse ?? 300,
-            verticalBoost: params.verticalBoost ?? 400,
-            duration: params.buffDuration ?? 0.6,
-        };
-    }
-
-    canTrigger(/** @type {any} */ event) {
-        if (!this.events.includes(event.type)) return false;
-        if (!this._cooldownReady()) return false;
-
-        const monster = this.monster;
-        if (monster) {
-            if (!monster.target) return false;
-            if (monster.isOccupied()) return false;
-        }
-
-        if (this.animation === null) {
-            this.trigger();
-            return false;
-        }
-        return true;
-    }
-
-    trigger() {
-        if (this.player) {
-            this._markTriggered();
-            return;
-        }
-        const monster = this.monster;
-        const target = monster?.target;
-        if (!monster || !target) return;
-        if (monster.distanceTosq(target) > monster.attackdist * monster.attackdist) return;
-
-        this._markTriggered();
-        monster.emitAttackEvent(Math.max(1, Math.round(monster.damage * 2)), target);
-    }
-}
-
-/**
- * @module 怪物系统/怪物技能/毒气
- */
-
-class PoisonGasSkill extends SkillTemplate {
-    /**
-     * @param {any|null} player
-     * @param {import("../../monster/monster/monster").Monster|null} monster
-     * @param {number} id
-     * @param {{
-     *   areaEffectStaticKey?: string;
-     *   cooldown?: number;
-     *   events?: string[];
-     *   animation?: string | null;
-     *   zoneDuration?: number;
-     *   zoneRadius?: number;
-     * }} params
-     */
-    constructor(player, monster, id, params = {}) {
-        super(player, monster, "poisongas", id, params);
-        this.animation = params.animation ?? null;
-        this.events = params.events ?? [SkillEvents.Die];
-        this.areaEffectStaticKey= "poisongas";
-        this.zoneDuration = params.zoneDuration ?? 5;
-        this.zoneRadius = params.zoneRadius ?? 150;
-    }
-    /**
-     * @param {any} event
-     */
-    canTrigger(event) {
-        if (!this.events.includes(event.type)) return false;
-        if (!this._cooldownReady()) return false;
-        if (this.animation === null) {
-            this.trigger();
-            return false;
-        }
-        return true;
-    }
-
-    trigger() {
-        this._markTriggered();
-        if (this.player) {
-            return;
-        }
-
-        const monster = this.monster;
-        if (!monster) return;
-
-        const pos = monster.model?.GetAbsOrigin?.();
-        if (!pos) return;
-        /**@type {import("../../areaEffects/area_const").AreaEffectCreateRequest} */
-        const payload = {
-            areaEffectStaticKey: "poisongas",
-            position: { x: pos.x, y: pos.y, z: pos.z },
-            radius: this.zoneRadius,
-            duration: this.zoneDuration,
-            targetTypes: ["player"],
-            result: false,
-        };
-        eventBus.emit(event.AreaEffects.In.CreateRequest, payload);
-        return payload.result;
-    }
-}
-
-/**
- * @module 怪物系统/怪物技能/产卵
- */
-
-class SpawnSkill extends SkillTemplate {
-    /**
-     * @param {any|null} player
-     * @param {import("../../monster/monster/monster").Monster|null} monster
-     * @param {number} id
-     * @param {{
-     *   events?: string[];
-     *   event?: string;
-     *   count?: number;
-     *   typeName?: string;
-     *   cooldown?: number;
-     *   maxSummons?: number;
-     *   radiusMin?: number;
-     *   radiusMax?: number;
-     *   tries?: number;
-     *   animation?: string | null;
-     * }} [params]
-     */
-    constructor(player, monster, id, params = {}) {
-        super(player, monster, "spawn", id, params);
-        this.animation = params.animation ?? null;
-
-        const configuredEvents = params.events ?? (params.event ? [params.event] : [SkillEvents.Die]);
-        this.events = Array.isArray(configuredEvents) ? configuredEvents : [configuredEvents];
-        this.count = Math.max(1, params.count ?? 1);
-        this.typeName = params.typeName ?? monster?.type ?? "";
-        this.maxSummons = params.maxSummons ?? 1;
-        this.radiusMin = Math.max(0, params.radiusMin ?? 24);
-        this.radiusMax = Math.max(this.radiusMin, params.radiusMax ?? 96);
-        this.tries = Math.max(1, params.tries ?? 6);
-        this.spawnedTotal = 0;
-        this._pendingCount = 0;
-    }
-
-    canTrigger(/** @type {any} */ event) {
-        if (!this.events.includes(event.type)) return false;
-        if (!this._cooldownReady()) return false;
-
-        const monster = this.monster;
-        if (monster) {
-            if (this.maxSummons >= 0 && this.spawnedTotal >= this.maxSummons) return false;
-
-            const remaining = this.maxSummons < 0
-                ? this.count
-                : Math.min(this.count, this.maxSummons - this.spawnedTotal);
-            if (remaining <= 0) return false;
-
-            this._pendingCount = remaining;
-        }
-
-        if (this.animation === null) {
-            this.trigger();
-            return false;
-        }
-        return true;
-    }
-
-    trigger() {
-        if (this.player) {
-            this._markTriggered();
-            return;
-        }
-
-        const monster = this.monster;
-        if (!monster) return;
-
-        let spawnedNow = 0;
-        for (let i = 0; i < this._pendingCount; i++) {
-            const ok = monster.requestSpawn({
-                typeName: this.typeName,
-                radiusMin: this.radiusMin,
-                radiusMax: this.radiusMax,
-                tries: this.tries,
-            });
-            if (ok) spawnedNow++;
-        }
-
-        this._pendingCount = 0;
-        if (spawnedNow > 0) {
-            this.spawnedTotal += spawnedNow;
-            this._markTriggered();
-        }
-    }
-}
-
-/**
- * @module 怪物系统/怪物技能/护盾
- */
-
-class ShieldSkill extends SkillTemplate {
-    /**
-     * @param {any|null} player
-     * @param {import("../../monster/monster/monster").Monster|null} monster
-     * @param {number} id
-    * @param {Record<string, any>} [params]
-     */
-    constructor(player, monster, id, params = {}) {
-        super(player, monster, "shield", id, params);
-        this.runtime = params.runtime ?? -1;
-        this.maxshield = params.value ?? 0;
-        this.shield = 0;
-        this.animation = params.animation ?? null;
-
-        const userEvents = params.events ?? [SkillEvents.Spawn, SkillEvents.Tick];
-        this.events = userEvents.includes(SkillEvents.Spawn)
-            ? userEvents
-            : [SkillEvents.Spawn, ...userEvents];
-
-        this._initialized = false;
-        this._modFn = null;
-    }
-
-    onSkillDelete() {
-        const monster = this.monster;
-        if (monster && this._modFn) {
-            monster.healthCombat.removeDamageModifier(this._modFn);
-        }
-        this.running = false;
-        if (monster && monster.model instanceof BaseModelEntity) {
-            monster.model.Unglow();
-        }
-    }
-
-    canTrigger(/** @type {any} */ event) {
-        if (!this.events.includes(event.type)) return false;
-
-        const monster = this.monster;
-        if (event.type === SkillEvents.Spawn) {
-            if (this.player || !monster) return false;
-            if (!this._initialized) {
-                this._initialized = true;
-                this._modFn = (/** @type {number} */ amount) => {
-                    if (!this.running) return amount;
-
-                    const absorbed = Math.min(amount, this.shield);
-                    this.shield -= absorbed;
-                    if (this.shield <= 0) {
-                        this.running = false;
-                        if (monster.model instanceof BaseModelEntity) {
-                            monster.model.Unglow();
-                        }
-                    }
-                    return amount - absorbed;
-                };
-                monster.healthCombat.addDamageModifier(this._modFn);
-            }
-            return false;
-        }
-
-        if (!this._cooldownReady()) return false;
-
-        if (monster) {
-            if (this.running) return false;
-            if (monster.isOccupied()) return false;
-        }
-
-        if (this.animation === null) {
-            this.trigger();
-            return false;
-        }
-        return true;
-    }
-
-    tick() {
-        if (this.player) return;
-
-        const monster = this.monster;
-        if (!this.running || !monster) return;
-
-        if (this.runtime !== -1 && this.lastTriggerTime + this.runtime <= Instance.GetGameTime()) {
-            this.running = false;
-            if (monster.model instanceof BaseModelEntity) {
-                monster.model.Unglow();
-            }
-        }
-    }
-
-    trigger() {
-        if (this.player) {
-            this._markTriggered();
-            return;
-        }
-
-        const monster = this.monster;
-        if (!monster) return;
-
-        this.shield = this.maxshield;
-        if (monster.model instanceof BaseModelEntity) {
-            monster.model.Glow({ r: 0, g: 0, b: 255 });
-        }
-        this.running = true;
-        this._markTriggered();
-    }
-}
-
-/**
- * @module 怪物系统/怪物技能/急速
- */
-
-class SpeedBoostSkill extends SkillTemplate {
-    /**
-     * @param {any|null} player
-     * @param {import("../../monster/monster/monster").Monster|null} monster
-     * @param {number} id
-     * @param {{
-     *   cooldown?: number;
-     *   runtime?: number;
-     *   speed_mult?: number;
-     *   speed_value?: number;
-     *   events?: string[];
-     *   animation?: string | null;
-     *   glow?: {r:number, g:number, b:number} | null;
-     * }} [params]
-     */
-    constructor(player, monster, id, params = {}) {
-        super(player, monster, "speedboost", id, params);
-        this.animation = params.animation ?? null;
-        this.events = params.events ?? [SkillEvents.Tick];
-        this.glow = params.glow ?? null;
-    }
-
-    onSkillDelete() {
-        this._endBoost();
-    }
-
-    canTrigger(/** @type {any} */ event) {
-        if (!this.events.includes(event.type)) return false;
-        if (!this._cooldownReady()) return false;
-
-        const monster = this.monster;
-        if (monster) {
-            if (this.running) return false;
-            if (monster.isOccupied()) return false;
-        }
-
-        if (this.animation === null) {
-            this.trigger();
-            return false;
-        }
-        return true;
-    }
-
-    tick() {
-        if (this.player) return;
-
-        const monster = this.monster;
-        if (!this.running || !monster) return;
-
-        if (!monster.hasBuff("speed_up")) {
-            this._endBoost();
-        }
-    }
-
-    trigger() {
-        if (this.player) {
-            this._markTriggered();
-            return;
-        }
-
-        const monster = this.monster;
-        if (!monster) return;
-
-        const buff = monster.addBuff("speed_up");
-
-        if (!buff) return;
-
-        if (this.glow && monster.model instanceof BaseModelEntity) {
-            monster.model.Glow(this.glow);
-        }
-        this.running = true;
-        this._markTriggered();
-    }
-
-    _endBoost() {
-        const monster = this.monster;
-        this.running = false;
-        if (this.glow && monster && monster.model instanceof BaseModelEntity) {
-            monster.model.Unglow();
-        }
-    }
-}
-
-/**
- * @module 怪物系统/怪物技能/投掷石头
- */
-
-class ThrowStoneSkill extends SkillTemplate {
-    /**
-     * @param {any|null} player
-     * @param {import("../../monster/monster/monster").Monster|null} monster
-     * @param {number} id
-     * @param {{
-     *   cooldown?: number;
-     *   events?: string[];
-     *   animation?: string | null;
-     *   distanceMin?: number;
-     *   distanceMax?: number;
-     *   damage?: number;
-     *   projectileSpeed?: number;
-     *   gravityScale?: number;
-     *   radius?: number;
-     *   maxTargets?: number;
-     * }} [params]
-     */
-    constructor(player, monster, id, params = {}) {
-        super(player, monster, "throwstone", id, params);
-        this.animation = params.animation ?? null;
-        this.events = params.events ?? [SkillEvents.Tick];
-        this.distanceMin = params.distanceMin ?? 0;
-        this.distanceMax = params.distanceMax ?? 600;
-        this.damage = params.damage ?? 10;
-        this.projectileSpeed = params.projectileSpeed ?? 500;
-        this.gravityScale = params.gravityScale ?? 1;
-        this.radius = params.radius ?? 32;
-        this.maxTargets = params.maxTargets ?? 1;
-    }
-
-    canTrigger(/** @type {any} */ event) {
-        if (!this.events.includes(event.type)) return false;
-        if (!this._cooldownReady()) return false;
-
-        const monster = this.monster;
-        if (monster) {
-            if (!monster.target) return false;
-            if (this.running) return false;
-            if (monster.isOccupied()) return false;
-
-            const distsq = monster.distanceTosq(monster.target);
-            const minDistSq = this.distanceMin * this.distanceMin;
-            const maxDistSq = this.distanceMax * this.distanceMax;
-            if (distsq < minDistSq || distsq > maxDistSq) return false;
-        }
-
-        if (this.animation === null) {
-            this.trigger();
-            return false;
-        }
-        return true;
-    }
-
-    tick() {
-        if (this.player) return;
-        this.running = false;
-    }
-
-    trigger() {
-        if (this.player) {
-            this._markTriggered();
-            return;
-        }
-        const monster = this.monster;
-        const target = monster?.target;
-        if (!monster || !target) return;
-
-        const distsq = monster.distanceTosq(target);
-        const minDistSq = this.distanceMin * this.distanceMin;
-        const maxDistSq = this.distanceMax * this.distanceMax;
-        if (distsq < minDistSq || distsq > maxDistSq) return;
-
-        this.running = true;
-        this._markTriggered();
-        monster.emitAttackEvent(this.damage, target);
-        this.running = false;
-    }
-}
-
-/**
- * @module 怪物系统/怪物技能/激光
- */
-
-class LaserBeamSkill extends SkillTemplate {
-    /**
-     * @param {Player|null} player
-     * @param {Monster|null} monster
-     * @param {number} id
-     * @param {{
-     *   cooldown?: number;
-     *   events?: string[];
-     *   animation?: string | null;
-     *   distance?: number;
-     *   duration?: number;
-     *   damagePerSecond?: number;
-     *   tickInterval?: number;
-     *   width?: number;
-     *   pierce?: boolean;
-     *   maxTargets?: number;
-     *   startDelay?: number;
-     * }} [params]
-     */
-    constructor(player, monster, id, params = {}) {
-        super(player, monster, "laserbeam", id, params);
-        this.animation = params.animation ?? null;
-        this.events = params.events ?? [SkillEvents.Tick];
-        this.distance = params.distance ?? 500;
-        this.duration = params.duration ?? 0;
-        this.damagePerSecond = params.damagePerSecond ?? 20;
-        this.tickInterval = params.tickInterval ?? 0.25;
-        this.width = params.width ?? 8;
-        this.pierce = params.pierce ?? false;
-        this.maxTargets = params.maxTargets ?? 1;
-        this.startDelay = params.startDelay ?? 0;
-        this._beamStartedAt = 0;
-        this._nextDamageAt = 0;
-    }
-    /**
-     * @param {any} event
-     */
-    canTrigger(event) {
-        if (!this.events.includes(event.type)) return false;
-        if (!this._cooldownReady()) return false;
-        if (!this.monster)return false;
-
-        if (!this.monster.target) return false;
-        if (this.running) return false;
-        if (this.monster.isOccupied()) return false;
-
-        const distsq = this.monster.distanceTosq(this.monster.target);
-        if (distsq > this.distance * this.distance) return false;
-
-        if (this.animation === null) {
-            this.trigger();
-            return false;
-        }
-        return true;
-    }
-
-    tick() {
-        if (this.player) return;
-        if (!this.running || !this.monster) return;
-
-        const now = Instance.GetGameTime();
-        if (this.duration > 0 && this._beamStartedAt + this.duration <= now) {
-            this._stopBeam();
-            return;
-        }
-
-        const target = this.monster.target;
-        if (!target || this.monster.distanceTosq(target) > this.distance * this.distance) {
-            this._stopBeam();
-            return;
-        }
-
-        const interval = this.tickInterval > 0 ? this.tickInterval : 0.25;
-        while (now >= this._nextDamageAt) {
-            this.monster.emitAttackEvent(Math.max(1, Math.round(this.damagePerSecond * interval)), target);
-            this._nextDamageAt += interval;
-        }
-    }
-
-    trigger() {
-        if (this.player) {
-            this._markTriggered();
-            return;
-        }
-        const monster = this.monster;
-        const target = monster?.target;
-        if (!monster || !target) return;
-        if (monster.distanceTosq(target) > this.distance * this.distance) return;
-
-        this._markTriggered();
-        this._beamStartedAt = Instance.GetGameTime();
-        const interval = this.tickInterval > 0 ? this.tickInterval : 0.25;
-        this._nextDamageAt = this._beamStartedAt + this.startDelay;
-
-        if (this.duration <= 0) {
-            monster.emitAttackEvent(Math.max(1, Math.round(this.damagePerSecond * interval)), target);
-            this._stopBeam();
-            return;
-        }
-
-        this.running = true;
-    }
-
-    onSkillDelete() {
-        this._stopBeam();
-    }
-
-    _stopBeam() {
-        this.running = false;
-        this._beamStartedAt = 0;
-        this._nextDamageAt = 0;
-    }
-}
-
-class PlayerPulseSkill extends SkillTemplate {
-    /**
-     * @param {import("../../player/player/player").Player | null} player
-     * @param {import("../../monster/monster/monster").Monster | null} monster
-     * @param {string} typeId
-     * @param {number} id
-     * @param {{
-     *   inputKey?: string;
-     *   cooldown?: number;
-     *   heal?: number;
-     *   armor?: number;
-     *   events?: string[];
-     * }} [params]
-     */
-    constructor(player, monster, typeId, id, params = {}) {
-        super(player, monster, typeId, id, params);
-        this.animation = null;
-        this.events = params.events ?? [SkillEvents.Input];
-        this.inputKey = params.inputKey ?? "InspectWeapon";
-        this.heal = params.heal ?? 0;
-        this.armor = params.armor ?? 0;
-    }
-
-    /**
-     * @param {{ type: string, key?: string }} event
-     * @returns {boolean}
-     */
-    canTrigger(event) {
-        if (!this.player || this.monster) return false;
-        if (!this.events.includes(event.type)) return false;
-        if (event.type === SkillEvents.Input && event.key !== this.inputKey) return false;
-        if (!this._cooldownReady()) return false;
-
-        this.trigger();
-        return false;
-    }
-
-    trigger() {
-        const player = this.player;
-        if (!player || this.monster) return;
-
-        let applied = false;
-        if (this.heal > 0) {
-            applied = player.heal(this.heal) || applied;
-        }
-        if (this.armor > 0) {
-            applied = player.giveArmor(this.armor) || applied;
-        }
-
-        if (!applied) return;
-        this._markTriggered();
-    }
-}
-
-/**
- * @module 怪物系统/技能工厂
- */
-/*
-技能分类规则（唯一权威）：
-  有 animation 参数（非 null）= 有动作：canTrigger 返回 true 后 request 占用当前待执行槽，
-    Monster 进入 SKILL 状态，管理器先播放 animation，再调用 trigger()。
-  无 animation（null）       = 无动作：canTrigger 内直接执行业务并返回 false。
-  cooldown = -1              = 一次性：仅首次触发后永久失效。默认为 -1。
-  cooldown = 0               = 无冷却。
-  cooldown > 0               = 按秒间隔触发。
-
-实例 id 语义：
-  skill.typeId 是技能类型标识（即下方的 id 字段）。
-  skill.id 是运行时实例 id，由 MonsterSkillsManager.addSkill 按添加顺序分配，
-  id 越小优先级越高。同一怪物可同时拥有多个相同 typeId 的技能实例。
-
-所有技能均支持 params.events（string[]）配置多个触发事件，未提供则使用各技能自身默认。
-每个技能均支持可选 animation 参数，不传则默认 null（无动作）。
-每个技能均支持可选 cooldown 参数，不传则默认 -1（一次性）。
-
-技能列表（typeId 均为小写无前缀）：
-
-corestats   基础属性增加（默认 OnSpawn 执行一次，cooldown=-1）
-  { health_mult?, health_value?, damage_mult?, damage_value?,
-    speed_mult?, speed_value?, reward_mult?, reward_value?,
-    cooldown?, events?, animation? }
-
-pounce      飞扑（默认 OnTick 判断距离和冷却）
-  { distance: number, cooldown?, events?, animation? }
-
-initanim    初始动画（默认 OnSpawn 一次性）
-  { cooldown?, events?, animation? }
-
-doubleattack  双倍攻击（默认 AttackTrue 触发）
-  { cooldown?, events?, animation? }
-
-powerattack   重击（默认 AttackTrue 触发，可击飞玩家）
-  { cooldown?, events?, animation? }
-
-poisongas     毒气（默认 Die 触发，可释放毒气粒子）
-  { cooldown?, events?, animation? }
-
-shield      能量护盾（默认 [OnSpawn, OnTick]，Spawn 始终保留以初始化修饰器）
-  { runtime: number, value: number, cooldown?, events?, animation? }
-
-speedboost  急速（默认 OnTick，临时提升移动速度，超时后恢复）
-  { runtime: number, speed_mult?, speed_value?, cooldown?, events?, animation?,
-    glow?: {r,g,b} }
-
-throwstone  投掷石头（默认 OnTick，距离判定后投掷，trigger 待实现）
-  { distanceMin?, distanceMax?, damage?, projectileSpeed?, gravityScale?,
-    radius?, maxTargets?, cooldown?, events?, animation? }
-
-laserbeam   发射激光（默认 OnTick，distance 内判定，trigger 待实现）
-  { distance?, duration?, damagePerSecond?, tickInterval?, width?,
-    pierce?, maxTargets?, startDelay?, cooldown?, events?, animation? }
-
-spawn       事件触发产卵（默认 OnDie）
-  { events?, event?(旧单值兄容), count?, typeName?, cooldown?,
-    maxSummons?, radiusMin?, radiusMax?, tries?, animation? }
-
-player_guard    玩家守护脉冲（InspectWeapon 触发，加护甲）
-player_mend     玩家治疗脉冲（InspectWeapon 触发，回血）
-player_vanguard 玩家先锋脉冲（InspectWeapon 触发，回血+护甲）
- */
-/**
- * 技能工厂。根据 typeId 创建对应的技能实例。
- *
- * 当前支持的 typeId：
- * corestats、pounce、initanim、doubleattack、powerattack、
- * poisongas、spawn、shield、speedboost、throwstone、laserbeam、
- * player_guard、player_mend、player_vanguard。
- *
- * 所有技能均支持 `params.events`、`params.animation`、`params.cooldown`。
- * 详细参数见各技能类的 JSDoc。
- */
-const SkillFactory = {
-    /**
-     * 根据 typeId 创建对应的技能实例。未识别的 id 返回 null。
-     * @param {Player|null} player 施法玩家
-     * @param {Monster|null} monster 施法怪物
-     * @param {string} typeid 技能类型标识（如 "corestats"、"pounce"）
-     * @param {number} id 技能实例 id
-     * @param {any} params 技能配置参数
-     * @returns {SkillTemplate|null}
-     */
-  create(player, monster, typeid, id, params = {}) {
-        switch (typeid) {
-            case "corestats":
-        return new CoreStats(player, monster,id, params);
-            case "pounce":
-        return new PounceSkill(player, monster,id, params);
-            case "initanim":
-        return new InitAnimSkill(player, monster,id, params);
-            case "doubleattack":
-        return new DoubleAttackSkill(player, monster,id, params);
-            case "powerattack":
-        return new PowerAttackSkill(player, monster,id, params);
-            case "poisongas":
-        return new PoisonGasSkill(player, monster,id, params);
-            case "spawn":
-        return new SpawnSkill(player, monster,id, params);
-            case "shield":
-        return new ShieldSkill(player, monster,id, params);
-            case "speedboost":
-        return new SpeedBoostSkill(player, monster,id, params);
-            case "throwstone":
-        return new ThrowStoneSkill(player, monster,id, params);
-            case "laserbeam":
-        return new LaserBeamSkill(player, monster,id, params);
-            case "player_guard":
-          return new PlayerPulseSkill(player, monster, "player_guard", id, { inputKey: "InspectWeapon", cooldown: 8, armor: 25, ...params });
-            case "player_mend":
-          return new PlayerPulseSkill(player, monster, "player_mend", id, { inputKey: "InspectWeapon", cooldown: 8, heal: 35, ...params });
-            case "player_vanguard":
-          return new PlayerPulseSkill(player, monster, "player_vanguard", id, { inputKey: "InspectWeapon", cooldown: 10, heal: 20, armor: 15, ...params });
-            default:
-                return null;
-        } 
-    }
-};
-
-/** @typedef {import("../../../skill/skill_template").SkillTemplate & { animation?: string | null }} MonsterSkill */
-
-class MonsterSkillsManager {
-    /**
-     * @param {import("../monster").Monster} monster
-     */
-    constructor(monster) {
-        this.monster = monster;
-        /** @type {MonsterSkill | null} */
-        this._requestedSkill = null;
-    }
-
-    /**
-     * @param {import("../../../util/definition").skill_pool[] | undefined} skillPool
-     */
-    initSkills(skillPool) {
-        if (!skillPool) return;
-
-        for (const cfg of skillPool) {
-            if (Math.random() > cfg.chance) continue;
-            const skill = SkillFactory.create(null, this.monster, cfg.id, this.monster.skills.length, cfg.params);
-            if (!skill) continue;
-            this.addSkill(skill);
-        }
-    }
-
-    /**
-     * @param {MonsterSkill} skill
-     */
-    addSkill(skill) {
-        skill.id = this.monster.skills.length;
-        this.monster.skills.push(skill);
-    }
-
-    /**
-     * @param {import("../../../skill/skill_const").EmitEventPayload & { type: string }} event
-     */
-    emitEvent(event) {
-        for (const skill of this.monster.skills) {
-            if (!skill.canTrigger(event)) continue;
-            skill._request();
-            break;
-        }
-    }
-
-    tickRunningSkills() {
-        for (const skill of this.monster.skills) {
-            if (!skill.running) continue;
-            skill.tick();
-        }
-    }
-
-    clear() {
-        this._requestedSkill = null;
-        for (const skill of this.monster.skills) {
-            skill.onSkillDelete();
-        }
-        this.monster.skills.length = 0;
-    }
-
-    /**
-     * @param {MonsterSkill} skill
-     */
-    requestSkill(skill) {
-        if (this.monster.movementStateMovemode === "ladder") {
-            this._requestedSkill = null;
-            return false;
-        }
-        if (this._requestedSkill) return false;
-        this._requestedSkill = skill;
-        return true;
-    }
-
-    hasRequestedSkill() {
-        if (this.monster.movementStateMovemode === "ladder") {
-            this._requestedSkill = null;
-            return false;
-        }
-        return this._requestedSkill !== null;
-    }
-
-    triggerRequestedSkill() {
-        if (this.monster.movementStateMovemode === "ladder") {
-            this._requestedSkill = null;
-            return;
-        }
-
-        const skill = this._requestedSkill;
-        this._requestedSkill = null;
-        if (!skill) return;
-
-        if (skill.animation) this.monster.animation.play(skill.animation);
-        skill.trigger();
-    }
-}
-
-/**
- * @module 怪物系统/怪物组件/移动意图适配
- */
-
-
-/**
- * 怪物移动意图适配器（事件驱动）。
- *
- * 不再每帧推送 Move 请求，而是在状态变化点发出请求：
- * - activate()   — 进入追击态时提交 Move
- * - deactivate() — 进入技能/空闲/死亡时提交 Stop
- * - onTargetChanged()      — 追击目标更换时重新提交
- * - onOccupationChanged()  — 动画占用开始/结束时重新提交 Chase 请求，更新 usePathRefresh
- *
- * MovementManager 持有长期任务，无需每帧重复推送。
- *
- * @navigationTitle 怪物移动意图适配器
- */
-class MonsterMovementPathAdapter {
-    /**
-     * @param {import("../monster").Monster} monster 所属怪物实例
-     */
-    constructor(monster) {
-        /** 所属怪物实例。 */
-        this.monster = monster;
-        /** 注册时的默认移动模式。由 init 保存。 */
-        this._defaultMode = "walk";
-        /** 当前是否有活跃的追击任务。 */
-        this._active = false;
-    }
-
-    /**
-     * 初始化：仅记录配置，不创建运动执行器。
-     * @param {import("../../../util/definition").monsterTypes} typeConfig 怪物类型配置
-     */
-    init(typeConfig) {
-        switch (typeConfig.movementmode) {
-            case "fly":
-                this._defaultMode = "fly";
-                break;
-            default:
-                this._defaultMode = "walk";
-                break;
-        }
-    }
-
-    /**
-     * 激活追击。进入 CHASE / ATTACK 等需要持续移动的状态时调用。
-     */
-    activate() {
-        if (!this._getMovementEntity() || !this.monster.target) return;
-        this._active = true;
-        this._submitChase();
-    }
-
-    /**
-     * 停止移动。进入 SKILL / IDLE / DEAD 或丢失目标时调用。
-     */
-    deactivate() {
-        if (!this._active) return;
-        const entity = this._getMovementEntity();
-        this._active = false;
-        if (!entity) return;
-        this.monster.submitMovementEvent({
-            type: MovementRequestType$1.Stop,
-            entity,
-            priority: MovementPriority$1.StateChange,
-            clearPath: false,
-        });
-    }
-
-    /**
-     * 追击目标实体变化时调用。若当前活跃则重新提交 Move；
-     * 若新目标为 null 则自动停止。
-     */
-    onTargetChanged() {
-        if (!this._active) return;
-        if (!this.monster.target) {
-            this.deactivate();
-            return;
-        }
-        this._submitChase();
-    }
-
-    /**
-     * 动画占用状态变化时调用（开始/结束）。
-     * 重新提交 Chase 请求，用 usePathRefresh 直接表达“当前是否允许刷新路径”。
-     */
-    onOccupationChanged() {
-        if (!this._active) return;
-        this._submitChase();
-    }
-
-    refreshMovement() {
-        if (!this._active) return;
-        if (this.monster.state === MonsterState.DEAD) {
-            this.deactivate();
-            return;
-        }
-        if (!this.monster.target) {
-            this.deactivate();
-            return;
-        }
-        this._submitChase();
-    }
-
-    /** 内部：提交一次 Chase Move 请求。 */
-    _submitChase() {
-        const entity = this._getMovementEntity();
-        const target = this.monster.target;
-        if (!entity || !target) return;
-
-        this.monster.submitMovementEvent({
-            type: MovementRequestType$1.Move,
-            entity,
-            priority: MovementPriority$1.Chase,
-            targetEntity: target,
-            usePathRefresh: !this.monster.isOccupied(),
-            useNPCSeparation: true,
-            maxSpeed: this.monster.speed,
-            Mode: this._defaultMode,
-        });
-    }
-
-    /** @returns {import("cs_script/point_script").Entity | null} */
-    _getMovementEntity() {
-        const entity = this.monster.model;
-        if (!entity?.IsValid()) return null;
-        return entity;
-    }
-
-    /** 获取注册用的默认模式。 */
-    getDefaultMode() {
-        return this._defaultMode;
-    }
-}
-
-/**
- * @module 怪物系统/怪物组件/动画占用
- */
-
-/**
- * 怪物动画控制器。
- *
- * 封装 MonsterAnimator 并在攻击、技能、死亡动作播放期间
- * 设置占用标志，禁止其他动作插入。
- * 动作结束后自动取消占用并触发回调。
- * 同时管理死亡动画/尸体降落流程。
- *
- * @navigationTitle 怪物动画控制器
- */
-class MonsterAnimator {
-    /**
-     * 创建怪物动画控制器。
-     * @param {import("../monster").Monster} monster 所属怪物实例
-     * @param {Entity | null} model Source 2 怪物模型实体
-     * @param {import("../../../util/definition").animations} animConfig 动画配置表（idle/walk/attack/skill/dead 动画名数组）
-     */
-    constructor(monster,model,animConfig) {
-        /** 所属怪物实例。 */
-        this.monster = monster;
-        /** Source 2 怪物模型实体。 */
-        this.model = model;
-        /**
-         * 动画配置表。每个键对应一组可随机播放的动画名。
-         * @type {import("../../../util/definition").animations}
-         */
-        this.animConfig = animConfig;
-        /** 是否处于动作占用期。播放动画时置 true，`OnAnimationDone` 事件触发后置 false。 */
-        this.locked = false;
-        /** 当前动画对应的 MonsterState 值。由 `tick` / `enter` 设置。 */
-        this.currentstats=-1;
-        /** 动作结束回调。仅当 type 与当前占用一致时才清除。 */
-        this.onStateFinish = null;
-        /** @type {Entity | null} */
-        this._boundModel = null;
-
-        this._bindModelOutput();
-    }
-
-    _bindModelOutput() {
-        this.model = this.monster.model ?? this.model;
-        if (!this.model || this._boundModel === this.model) return;
-
-        this._boundModel = this.model;
-        Instance.ConnectOutput(this.model,"OnAnimationDone",()=>{
-            this.locked = false;
-            this.onStateFinish?.(this.currentstats);
-        });
-    }
-    /**
-     * 设置动画播放完成回调。当任一动画结束（`OnAnimationDone`）时触发，
-     * 传入当时的 MonsterState 值。
-     * @param {(state: number) => void} callback 状态回调
-     */
-    setonStateFinish(callback)
-    {
-        this.onStateFinish=callback;
-    }
-    /**
-     * 初始化动画控制器，并注册动画完成回调处理占用释放和死亡流程。
-     * @param {import("../../../util/definition").animations} animations 动画配置表
-     */
-    init(animations) {
-        this.animConfig = animations;
-        this._bindModelOutput();
-        this.setonStateFinish((/** @type {number} */ state) => {
-            if (state == MonsterState.ATTACK) this.monster.onOccupationEnd("attack");
-            else if (state == MonsterState.SKILL) this.monster.onOccupationEnd("skill");
-            else if (state == MonsterState.DEAD) this.monster.finalizeDeath(removeModelAfterDeathAnimation);
-        });
-    }
-
-    /**
-     * 当前是否被占用。
-     * @returns {boolean}
-     */
-    isOccupied() {
-        return this.monster.occupation != "";
-    }
-
-    /**
-     * 设置占用标记。占用期间状态切换被禁止。
-     * @param {string} type 占用类型（"attack" | "skill" | "pounce"）
-     */
-    setOccupation(type) {
-        this.monster.occupation = type;
-    }
-
-    /**
-     * 占用结束回调。仅当 type 与当前占用一致时才清除。
-     * @param {string} type 占用类型
-     */
-    onOccupationEnd(type) {
-        if (this.monster.occupation !== type) return;
-        this.monster.occupation = "";
-    }
-
-    /**
-     * 每帧更新。若 `locked` 则跳过；否则根据当前状态播放对应动画。
-     * @param {number} state 当前 MonsterState
-     */
-    tick(state) {
-        if (this.locked) return;
-        this.currentstats=state;
-        switch (state) {
-            case MonsterState.IDLE:
-                this.play("idle");
-                break;
-            case MonsterState.CHASE:
-                this.play("walk");
-                break;
-            case MonsterState.ATTACK:
-                this.play("attack");
-                break;
-            case MonsterState.SKILL:
-                this.play("skill");
-                break;
-            case MonsterState.DEAD:
-                this.play("dead");
-                break;
-        }
-    }
-
-    /**
-     * 未被占用时始终允许；占用期间仅当当前不是 ATTACK/SKILL 时允许。
-     * @returns {boolean}
-     */
-    canSwitch() {
-        if (!this.locked) {
-            return true;
-        }
-        if (this.currentstats==MonsterState.ATTACK||this.currentstats==MonsterState.SKILL) {
-            return false;
-        }
-        return true;
-    }
-
-    /**
-     * 强制播放指定状态对应的动画，无视 `locked` 状态。
-     * 由 `applyStateTransition` 在状态切换成功后调用。
-     * @param {number} nextState MonsterState
-     */
-    enter(nextState) {
-        this.currentstats=nextState;
-        switch (nextState) {
-            case MonsterState.IDLE:
-                this.play("idle");
-                break;
-            case MonsterState.CHASE:
-                this.play("walk");
-                break;
-            case MonsterState.ATTACK:
-                this.play("attack");
-                break;
-            case MonsterState.SKILL:
-                this.play("skill");
-                break;
-            case MonsterState.DEAD:
-                if (!this.play("dead")) {
-                    this.monster.finalizeDeath(removeModelAfterDeathAnimation);
-                }
-                break;
-        }
-    }
-    /**
-     * 播放指定类型的动画。从配置表中随机选择一个动画名，
-     * 通过 `EntFireAtTarget(SetAnimation)` 发送给引擎。
-     * @param {string} type 动画类型键（"idle"|"walk"|"attack"|"skill"|"dead"）
-     */
-    play(type) {
-        this._bindModelOutput();
-        const list = this.animConfig[type];
-        if (!this.model || !list || list.length === 0) return null;
-        const anim = list[Math.floor(Math.random() * list.length)];
-        if (!anim) return;
-        Instance.EntFireAtTarget({target:this.model,input:"SetAnimation",value:anim});
-        this.locked=true;
-        return anim;
-    }
-}
-
-/**
- * @module 工具/向量工具
- */
-/**
- * 向量工具类，提供 2D/3D 向量的静态运算方法（加减、点积、叉积、归一化、插值等）。
- * @navigationTitle 向量工具
- */
-let vec$1 = class vec{
-    /**
-     * 返回向量vec1+vec2
-     * @param {import("cs_script/point_script").Vector} a
-     * @param {import("cs_script/point_script").Vector} b
-     * @returns {import("cs_script/point_script").Vector}
-     */
-    static add(a, b) {
-        return { x: a.x + b.x, y: a.y + b.y, z: a.z + b.z };
-    }
-    /**
-     * 添加 2D 分量
-     * @param {import("cs_script/point_script").Vector} a
-     * @param {import("cs_script/point_script").Vector} b
-     * @returns {import("cs_script/point_script").Vector}
-     */
-    static add2D(a, b) {
-        return { x: a.x + b.x, y: a.y + b.y, z: a.z};
-    }
-    /**
-     * 返回向量vec1-vec2
-     * @param {import("cs_script/point_script").Vector} a
-     * @param {import("cs_script/point_script").Vector} b
-     * @returns {import("cs_script/point_script").Vector}
-     */
-    static sub(a, b) {
-        return { x: a.x - b.x, y: a.y - b.y, z: a.z - b.z };
-    }
-    /**
-     * 返回向量vec1*s
-     * @param {import("cs_script/point_script").Vector} a
-     * @param {number} s
-     * @returns {import("cs_script/point_script").Vector}
-     */
-    static scale(a,s)
-    {
-        return {x:a.x*s,y:a.y*s,z:a.z*s}
-    }
-    /**
-     * 返回向量vec1*s
-     * @param {import("cs_script/point_script").Vector} a
-     * @param {number} s
-     * @returns {import("cs_script/point_script").Vector}
-     */
-    static scale2D(a,s) {
-        return {
-            x:a.x * s,
-            y:a.y * s,
-            z:a.z
-        };
-    }
-    /**
-     * 得到vector
-     * @param {number} [x]
-     * @param {number} [y]
-     * @param {number} [z]
-     * @returns {import("cs_script/point_script").Vector}
-     */
-    static get(x=0,y=0,z=0)
-    {
-        return {x,y,z};
-    }
-    /**
-     * 深复制
-     * @param {import("cs_script/point_script").Vector} a
-     * @returns {import("cs_script/point_script").Vector}
-     */
-    static clone(a)
-    {
-        return {x:a.x,y:a.y,z:a.z};
-    }
-    /**
-     * 计算空间两点之间的距离
-     * @param {import("cs_script/point_script").Vector} a
-     * @param {import("cs_script/point_script").Vector} [b]
-     * @returns {number}
-     */
-    static length(a, b={x:0,y:0,z:0}) {
-        const dx = a.x - b.x; const dy = a.y - b.y; const dz = a.z - b.z;
-        return Math.sqrt(dx * dx + dy * dy + dz * dz);
-    }
-    /**
-     * 计算xy平面两点之间的距离
-     * @param {import("cs_script/point_script").Vector} a
-     * @param {import("cs_script/point_script").Vector} [b]
-     * @returns {number}
-     */
-    static length2D(a, b={x:0,y:0,z:0}) {
-        const dx = a.x - b.x; const dy = a.y - b.y;
-        return Math.sqrt(dx * dx + dy * dy);
-    }
-    /**
-     * 计算空间两点之间的距离平方（无平方根，更快）
-     * @param {import("cs_script/point_script").Vector} a
-     * @param {import("cs_script/point_script").Vector} [b]
-     * @returns {number}
-     */
-    static lengthsq(a, b={x:0,y:0,z:0}) {
-        const dx = a.x - b.x; const dy = a.y - b.y; const dz = a.z - b.z;
-        return dx * dx + dy * dy + dz * dz;
-    }
-    /**
-     * 计算xy平面两点之间的距离平方（无平方根，更快）
-     * @param {import("cs_script/point_script").Vector} a
-     * @param {import("cs_script/point_script").Vector} [b]
-     * @returns {number}
-     */
-    static length2Dsq(a, b={x:0,y:0,z:0}) {
-        const dx = a.x - b.x; const dy = a.y - b.y;
-        return dx * dx + dy * dy;
-    }
-    /**
-     * 返回pos上方height高度的点
-     * @param {import("cs_script/point_script").Vector} pos
-     * @param {number} height
-     * @returns {import("cs_script/point_script").Vector}
-     */
-    static Zfly(pos, height) {
-        return { x: pos.x, y: pos.y, z: pos.z + height };
-    }
-    /**
-     * 输出点pos的坐标
-     * @param {import("cs_script/point_script").Vector} pos
-     */
-    static msg(pos) {
-        Instance.Msg(`{${pos.x} ${pos.y} ${pos.z}}`);
-    }
-    /**
-     * 计算两个三维向量的点积。
-     * @param {import("cs_script/point_script").Vector} a
-     * @param {import("cs_script/point_script").Vector} b
-     */
-    static dot(a,b) {
-        return a.x * b.x + a.y * b.y + a.z * b.z;
-    }
-
-    /**
-     * 计算两个向量在 XY 平面上的点积。
-     * @param {import("cs_script/point_script").Vector} a
-     * @param {import("cs_script/point_script").Vector} b
-     */
-    static dot2D(a,b) {
-        return a.x * b.x + a.y * b.y;
-    }
-
-    /**
-     * 计算两个三维向量的叉积。
-     * @param {import("cs_script/point_script").Vector} a
-     * @param {import("cs_script/point_script").Vector} b
-     */
-    static cross(a,b) {
-        return {
-            x:a.y * b.z - a.z * b.y,
-            y:a.z * b.x - a.x * b.z,
-            z:a.x * b.y - a.y * b.x
-        };
-    }
-    /**
-     * 返回三维向量的单位向量，零向量时返回原点。
-     * @param {import("cs_script/point_script").Vector} a
-     */
-    static normalize(a) {
-        const len = this.length(a);
-        if (len < 1e-6) {
-            return {x:0,y:0,z:0};
-        }
-        return this.scale(a,1 / len);
-    }
-    /**
-     * 返回向量在 XY 平面上的单位向量（z 置零），零向量时返回原点。
-     * @param {import("cs_script/point_script").Vector} a
-     */
-    static normalize2D(a) {
-        const len = this.length2D(a);
-        if (len < 1e-6) {
-            return {x:0,y:0,z:0};
-        }
-        return {
-            x:a.x / len,
-            y:a.y / len,
-            z:0
-        };
-    }
-    /**
-     * 判断向量是否为零向量（各分量绝对值小于 1e-6）。
-     * @param {import("cs_script/point_script").Vector} a
-     */
-    static isZero(a) {
-        return (
-            Math.abs(a.x) < 1e-6 &&
-            Math.abs(a.y) < 1e-6 &&
-            Math.abs(a.z) < 1e-6
-        );
-    }
+    Tick: "OnTick",
+    StateChange: "OnStateChange",
+    Recompute: "OnRecompute",
+    BeforeTakeDamage: "BeforeTakeDamage",
+    TakeDamage: "OnTakeDamage",
+    Attack: "OnAttack",
+    Die: "OnDie",
 };
 
 /**
- * @module 怪物系统/怪物实体
+ * 怪物宿主内统一运行时事件。
+ * buff 与 skill 都只应订阅这组怪物事件。
  */
+const MonsterRuntimeEvents = {
+    Spawn: "OnSpawn",
+    Tick: "OnTick",
+    TargetUpdate: "OnTargetUpdate",
+    StateChange: "OnStateChange",
+    Recompute: "OnRecompute",
+    BeforeTakeDamage: "BeforeTakeDamage",
+    TakeDamage: "OnTakeDamage",
+    AttackTrue: "OnAttackTrue",
+    AttackFalse: "OnAttackFalse",
+    SkillCast: "OnSkillCast",
+    Die: "OnDie",
+    ModelRemove: "OnModelRemove",
+};
 
-/** @typedef {import("../../skill/skill_template").SkillTemplate} MonsterSkill */
-/** @typedef {import("../../util/definition").MovementRequest} MovementRequest */
 /**
- * @typedef {{
- *   buffId: number;
- *   typeId: string;
- *   params: Record<string, any>;
- *   groupKey: string | null;
- *   source: Record<string, any> | null;
- *   context: Record<string, any> | null;
- * }} MonsterBuffRuntime
+ * @typedef {Object} RuntimeSpawnPayload
+ * @property {number} [state]
  */
-/** @typedef {{ type: string, [key: string]: any }} MonsterRuntimeEvent */
 
-class Monster {
-    /**
-     * @param {number} id
-     * @param {import("cs_script/point_script").Vector} position
-     * @param {import("../../util/definition").monsterTypes} typeConfig
-     */
-    constructor(id, position, typeConfig) {
-        this.id = id;
-
-        /** @type {Entity | null} */
-        this.model = null;
-        /** @type {Entity | null} */
-        this.breakable = null;
-        /** @type {MonsterSkill[]} */
-        this.skills = [];
-
-        this.type = typeConfig.name;
-
-        this.baseMaxHealth = typeConfig.baseHealth;
-        this.maxhealth = this.baseMaxHealth;
-        this.health = this.baseMaxHealth;
-        this.preBreakableHealth = 10000;
-
-        this.baseDamage = typeConfig.baseDamage;
-        this.damage = this.baseDamage;
-
-        this.baseSpeed = typeConfig.speed;
-        this.speed = this.baseSpeed;
-
-        this.attackdist = typeConfig.attackdist;
-        this.baseReward = typeConfig.reward;
-        this.atc = typeConfig.attackCooldown;
-
-        this.occupation = "";
-        /** @type {CSPlayerPawn | null} */
-        this.killer = null;
-
-        this.entityBridge = new MonsterEntityBridge(this);
-        this.healthCombat = new MonsterHealthCombat(this);
-        this.brainState = new MonsterBrainState(this);
-        this.skillsManager = new MonsterSkillsManager(this);
-        this.movementPath = new MonsterMovementPathAdapter(this);
-        /**
-         * key 为 buff 类型。
-         * value 为 buff id。
-         * @type {Map<string, number>}
-         */
-        this.buffMap = new Map();
-        /** @type {Map<string, MonsterBuffRuntime>} */
-        this.buffStateMap = new Map();
-        /** @type {Array<() => boolean>} */
-        this._buffUnsubscribers = [
-            eventBus.on(event.Buff.Out.OnBuffRemoved, (/** @type {import("../../buff/buff_const").OnBuffRemoved} */ payload) => {
-                this._removeRuntimeByBuffId(payload.buffId);
-            }),
-        ];
-
-        this.initEntities(position, typeConfig);
-        this.animation = new MonsterAnimator(this, this.model, typeConfig.animations);
-
-        this.state = MonsterState.IDLE;
-        /** @type {CSPlayerPawn | null} */
-        this.target = null;
-        this.lastTargetUpdate = 0;
-        this.attackCooldown = 0;
-        this.lasttick = 0;
-        this._runtimeReleased = false;
-        this._deathFinalized = false;
-
-        /** @type {string} */
-        this.movementStateMovemode ="walk";
-
-        this.initSkills(typeConfig.skill_pool);
-        this.movementPath.init(typeConfig);
-        this.animation.init(typeConfig.animations);
-        this.recomputeDerivedStats();
-    }
-
-    init() {
-        this.emitEvent({ type: MonsterBuffEvents.Spawn });
-    }
-
-    /**
-     * @param {import("../../util/definition").skill_pool[] | undefined} skillPool
-     */
-    initSkills(skillPool) {
-        this.skillsManager.initSkills(skillPool);
-    }
-
-    /**
-     * @param {MonsterSkill} skill
-     */
-    addSkill(skill) {
-        this.skillsManager.addSkill(skill);
-    }
-
-    /**
-     * @param {import("cs_script/point_script").Vector} position
-     * @param {import("../../util/definition").monsterTypes} typeConfig
-     */
-    initEntities(position, typeConfig) {
-        this.entityBridge.init(position, typeConfig);
-    }
-
-    /**
-     * @param {number} amount
-     * @param {CSPlayerPawn | null} attacker
-     * @param {{ source?: Entity | null, reason?: string } | null} [meta]
-     * @returns {boolean}
-     */
-    takeDamage(amount, attacker, meta = null) {
-        return this.healthCombat.takeDamage(amount, attacker, meta);
-    }
-
-    /**
-     * @param {string} typeId
-     * @param {Record<string, any>} [params]
-     * @param {Record<string, any> | null} [source]
-     * @param {Record<string, any> | null} [context]
-     * @returns {boolean}
-     */
-    addBuff(typeId, params = {}, source = null, context = null) {
-        if (this.buffMap.has(typeId)) return false;
-        const normalizedParams = { ...(params ?? {}) };
-        /** @type {import("../../buff/buff_const").BuffAddRequest} */
-        const addRequest = {
-            configid: typeId,
-            target: this,
-            targetType: "monster",
-            result: -1,
-        };
-        eventBus.emit(event.Buff.In.BuffAddRequest, addRequest);
-        if (addRequest.result <= 0) return false;
-
-        this.buffMap.set(typeId, addRequest.result);
-        this.buffStateMap.set(typeId, {
-            buffId: addRequest.result,
-            typeId,
-            params: normalizedParams,
-            groupKey: typeof normalizedParams.groupKey === "string" ? normalizedParams.groupKey : null,
-            source,
-            context,
-        });
-        this.recomputeDerivedStats();
-        return true;
-    }
-
-    /**
-     * @param {string} typeId
-     * @param {Record<string, any>} [params]
-     * @returns {boolean}
-     */
-    refreshBuff(typeId, params = {}) {
-        const id = this.buffMap.get(typeId);
-        if (id == null) return this.addBuff(typeId, params);
-
-        /** @type {import("../../buff/buff_const").BuffRefreshRequest} */
-        const refreshRequest = {
-            buffId: id,
-            result: false,
-        };
-        eventBus.emit(event.Buff.In.BuffRefreshRequest, refreshRequest);
-        if (!refreshRequest.result) return false;
-
-        const runtime = this.buffStateMap.get(typeId);
-        if (runtime) {
-            runtime.params = { ...(params ?? runtime.params) };
-            runtime.groupKey = typeof runtime.params.groupKey === "string" ? runtime.params.groupKey : null;
-        }
-        this.recomputeDerivedStats();
-        return true;
-    }
-
-    /**
-     * @param {string | ((buff: MonsterBuffRuntime) => boolean)} typeIdOrFilter
-     * @returns {boolean}
-     */
-    removeBuff(typeIdOrFilter) {
-        if (typeof typeIdOrFilter === "string") {
-            return this._removeBuffByTypeId(typeIdOrFilter);
-        }
-
-        let removed = false;
-        for (const buff of this.getAllBuffs()) {
-            if (!typeIdOrFilter(buff)) continue;
-            removed = this._removeBuffByTypeId(buff.typeId) || removed;
-        }
-        return removed;
-    }
-
-    /**
-     * @param {string} typeId
-     * @returns {boolean}
-     */
-    hasBuff(typeId) {
-        return this.buffMap.has(typeId);
-    }
-
-    /**
-     * @returns {MonsterBuffRuntime[]}
-     */
-    getAllBuffs() {
-        return Array.from(this.buffStateMap.values());
-    }
-
-    clearBuffs() {
-        for (const typeId of Array.from(this.buffMap.keys())) {
-            this._removeBuffByTypeId(typeId);
-        }
-    }
-
-    dispose() {
-        if (this.state !== MonsterState.DEAD) {
-            this.state = MonsterState.DEAD;
-            this.clearBuffs();
-        }
-        this.finalizeDeath(true);
-    }
-
-    finalizeDeath(removeModelAfterDeathAnimation = true) {
-        if (this._deathFinalized) return false;
-        this._deathFinalized = true;
-        this.emitEvent({ type: MonsterBuffEvents.ModelRemove });
-        this._releaseRuntime();
-        this.entityBridge.removeAfterDeath(removeModelAfterDeathAnimation);
-        this.model = null;
-        this.breakable = null;
-        this.state = MonsterState.DEAD;
-        return true;
-    }
-
-    /**
-     * @param {string} eventName
-     * @param {any} params
-     */
-    emitBuffEvent(eventName, params) {
-        for (const id of this.buffMap.values()) {
-            /** @type {import("../../buff/buff_const").BuffEmitRequest} */
-            const emitRequest = {
-                buffId: id,
-                eventName,
-                params,
-                result: { result: false },
-            };
-            eventBus.emit(event.Buff.In.BuffEmitRequest, emitRequest);
-        }
-    }
-
-    /**
-     * @param {string} typeId
-     * @returns {boolean}
-     */
-    _removeBuffByTypeId(typeId) {
-        const id = this.buffMap.get(typeId);
-        if (id == null) return false;
-
-        /** @type {import("../../buff/buff_const").BuffRemoveRequest} */
-        const removeRequest = {
-            buffId: id,
-            result: false,
-        };
-        eventBus.emit(event.Buff.In.BuffRemoveRequest, removeRequest);
-        return removeRequest.result;
-    }
-
-    recomputeDerivedStats() {
-        this.damage = this.baseDamage;
-        this.speed = this.baseSpeed;
-        this.emitBuffEvent("OnRecompute", { recompute: true });
-        this.movementPath.refreshMovement();
-    }
-
-    /**
-     * @param {number} buffId
-     */
-    _removeRuntimeByBuffId(buffId) {
-        for (const [typeId, id] of this.buffMap.entries()) {
-            if (id !== buffId) continue;
-            this.buffMap.delete(typeId);
-            this.buffStateMap.delete(typeId);
-            this.recomputeDerivedStats();
-            break;
-        }
-    }
-
-    _releaseRuntime() {
-        if (this._runtimeReleased) return;
-        this._runtimeReleased = true;
-        for (const unsubscribe of this._buffUnsubscribers) {
-            unsubscribe();
-        }
-        this._buffUnsubscribers.length = 0;
-        this.skillsManager.clear();
-        this.buffMap.clear();
-        this.buffStateMap.clear();
-        this.target = null;
-        this.killer = null;
-    }
-
-    /**
-     * @param {Entity | null | undefined} killer
-     */
-    die(killer) {
-        this.healthCombat.die(killer);
-    }
-
-    /**
-     * @param {import("../monster_const").MonsterSpawnRequest["options"]} options
-     * @returns {boolean}
-     */
-    requestSpawn(options) {
-        /** @type {import("../monster_const").MonsterSpawnRequest} */
-        const payload = {
-            monster: this,
-            options,
-            result: false,
-        };
-        eventBus.emit(event.Monster.In.SpawnRequest, payload);
-        return payload.result;
-    }
-
-    /**
-     * @param {number} amount
-     * @param {CSPlayerPawn|null|undefined} attacker
-     * @returns {number|void}
-     */
-    requestBeforeTakeDamage(amount, attacker) {
-        /** @type {import("../monster_const").MonsterBeforeTakeDamageRequest} */
-        const payload = {
-            monster: this,
-            amount,
-            attacker: attacker ?? null,
-            result: amount,
-        };
-        eventBus.emit(event.Monster.In.BeforeTakeDamageRequest, payload);
-        return payload.result;
-    }
-
-    /**
-     * @param {number} damage
-     * @param {CSPlayerPawn} target
-     */
-    emitAttackEvent(damage, target) {
-        /** @type {import("../monster_const").OnMonsterAttack} */
-        const payload = { monster: this, damage, target };
-        eventBus.emit(event.Monster.Out.OnAttack, payload);
-    }
-
-    /**
-     * @param {Entity|null|undefined} killer
-     */
-    emitDeathEvent(killer) {
-        /** @type {import("../monster_const").OnMonsterDeath} */
-        const payload = { monster: this, killer, reward: this.baseReward };
-        eventBus.emit(event.Monster.Out.OnMonsterDeath, payload);
-    }
-
-    /**
-     * @param {CSPlayerPawn[]} allppos
-     */
-    tick(allppos) {
-        if (!this.model || !this.breakable?.IsValid()) return;
-        if (this.state === MonsterState.DEAD) return;
-
-        const now = Instance.GetGameTime();
-        const dt = this.lasttick > 0 ? now - this.lasttick : 0;
-        this.lasttick = now;
-
-        if (this.attackCooldown > 0) {
-            this.attackCooldown -= dt;
-        }
-
-        if (dt > 0) {
-            this.emitBuffEvent(MonsterBuffEvents.Tick, { dt });
-        }
-        if (this.state === MonsterState.DEAD) return;
-
-        this.emitEvent({ type: MonsterBuffEvents.Tick, dt });
-        this.skillsManager.tickRunningSkills();
-
-        if (now - this.lastTargetUpdate > 3.0 || !this.target) {
-            this.updateTarget(allppos);
-            this.lastTargetUpdate = now;
-        }
-        if (!this.target) return;
-        if (this.isOccupied()) return;
-
-        const intent = this.evaluateIntent();
-        this.resolveIntent(intent);
-        this.animation.tick(this.state);
-    }
-
-    /**
-     * @param {CSPlayerPawn[]} allppos
-     */
-    updateTarget(allppos) {
-        const prevTarget = this.target;
-        this.brainState.updateTarget(allppos);
-        if (this.target !== prevTarget) {
-            this.movementPath.onTargetChanged();
-        }
-    }
-
-    isOccupied() {
-        return this.animation.isOccupied();
-    }
-
-    /**
-     * @param {MonsterRuntimeEvent} event
-     */
-    emitEvent(event) {
-        this.skillsManager.emitEvent(event);
-    }
-
-    /**
-     * @returns {number}
-     */
-    evaluateIntent() {
-        return this.brainState.evaluateIntent();
-    }
-
-    /**
-     * @param {number} intent
-     */
-    resolveIntent(intent) {
-        this.brainState.resolveIntent(intent);
-    }
-
-    /**
-     * @param {number} nextState
-     * @returns {boolean}
-     */
-    trySwitchState(nextState) {
-        return this.brainState.trySwitchState(nextState);
-    }
-
-    /**
-     * @param {number} nextState
-     * @returns {boolean}
-     */
-    applyStateTransition(nextState) {
-        if (this.state === nextState) return true;
-        if (this.state === MonsterState.DEAD) return false;
-        if (this.isOccupied()) return false;
-        if (!this.animation.canSwitch()) return false;
-
-        const prevState = this.state;
-        this.state = nextState;
-        this.emitBuffEvent("OnStateChange", { oldState: prevState, nextState });
-        this.animation.enter(nextState);
-
-        if (nextState === MonsterState.CHASE || nextState === MonsterState.ATTACK) {
-            this.movementPath.activate();
-        } else if (prevState === MonsterState.CHASE || prevState === MonsterState.ATTACK) {
-            this.movementPath.deactivate();
-        }
-        return true;
-    }
-
-    enterSkill() {
-        this.movementPath.deactivate();
-        this.animation.setOccupation("skill");
-        this.skillsManager.triggerRequestedSkill();
-    }
-
-    enterAttack() {
-        this.healthCombat.enterAttack();
-    }
-
-    /**
-     * @param {Entity} ent
-     * @returns {number}
-     */
-    distanceTosq(ent) {
-        if(!this.model)return Infinity;
-        const a = this.model.GetAbsOrigin();
-        const b = ent.GetAbsOrigin();
-        return vec$1.lengthsq(a, b);
-    }
-
-    /**
-     * @param {string} type
-     */
-    onOccupationEnd(type) {
-        this.animation.onOccupationEnd(type);
-        this.movementPath.onOccupationChanged();
-    }
-
-    /**
-     * @param {MonsterSkill} skill
-     */
-    requestSkill(skill) {
-        this.skillsManager.requestSkill(skill);
-    }
-
-    /**
-     * @param {MovementRequest} request
-     * @returns {boolean}
-     */
-    submitMovementEvent(request) {
-        switch (request?.type) {
-            case MovementRequestType$1.Move:
-                eventBus.emit(event.Movement.In.MoveRequest, request);
-                return true;
-            case MovementRequestType$1.Stop:
-                eventBus.emit(event.Movement.In.StopRequest, request);
-                return true;
-            case MovementRequestType$1.Remove:
-                eventBus.emit(event.Movement.In.RemoveRequest, request);
-                return true;
-            default:
-                return false;
-        }
-    }
-
-    /**
-     * @param {string} movemode
-     */
-    updateMovementMovemode(movemode) {
-        this.movementStateMovemode = movemode;
-    }
+/**
+ * @typedef {Object} RuntimeStateChangePayload
+ * @property {number} oldState
+ * @property {number} nextState
+ */
+
+/**
+ * @typedef {Object} RuntimeTickPayload
+ * @property {number} [dt]
+ */
+
+/**
+ * @typedef {Object} RuntimeRecomputePayload
+ * @property {boolean} recompute
+ */
+
+/**
+ * @typedef {Object} RuntimeInputPayload
+ * @property {string} key
+ */
+
+/**
+ * @typedef {Object} RuntimeDiePayload
+ * @property {import("cs_script/point_script").Entity|null} [killer]
+ */
+
+/**
+ * @typedef {Object} RuntimeAttackPayload
+ * @property {number} damage
+ * @property {number} [baseDamage]
+ * @property {number} [scaledDamage]
+ * @property {number} [critChance]
+ * @property {number} [critMultiplier]
+ * @property {boolean} [isCritical]
+ * @property {import("cs_script/point_script").Entity|null} [target]
+ * @property {import("cs_script/point_script").Entity|null} [attacker]
+ */
+
+/**
+ * @typedef {Object} RuntimeTargetUpdatePayload
+ * @property {import("cs_script/point_script").Entity|null} [previousTarget]
+ * @property {import("cs_script/point_script").Entity|null} [target]
+ */
+
+/**
+ * @typedef {Object} RuntimeModelRemovePayload
+ * @property {number} [state]
+ */
+
+/**
+ * @typedef {Object} RuntimeSkillCastPayload
+ * @property {number} [skillId]
+ * @property {string} [skillTypeId]
+ * @property {string} [buffTypeId]
+ * @property {import("cs_script/point_script").Entity|null} [source]
+ * @property {import("cs_script/point_script").Entity|null} [target]
+ */
+
+/**
+ * @typedef {Object} RuntimeBeforeTakeDamagePayload
+ * @property {number} damage
+ * @property {import("cs_script/point_script").Entity|null} [attacker]
+ * @property {import("cs_script/point_script").Entity|null} [source]
+ * @property {string} [reason]
+ */
+
+/**
+ * @typedef {RuntimeBeforeTakeDamagePayload & {
+ *   previousHealth?: number,
+ *   currentHealth?: number,
+ *   previousArmor?: number,
+ *   currentArmor?: number,
+ *   value?: number,
+ *   health?: number,
+ * }} RuntimeTakeDamagePayload
+ */
+
+/**
+ * 运行时事件 payload 的共享联合类型。
+ * 玩家与怪物宿主都会从这组结构中取子集使用。
+ * @typedef {RuntimeSpawnPayload|RuntimeStateChangePayload|RuntimeTickPayload|RuntimeRecomputePayload|RuntimeInputPayload|RuntimeDiePayload|RuntimeAttackPayload|RuntimeTargetUpdatePayload|RuntimeModelRemovePayload|RuntimeSkillCastPayload|RuntimeBeforeTakeDamagePayload|RuntimeTakeDamagePayload} RuntimeEventPayload
+ */
+
+/**
+ * @typedef {RuntimeEventPayload & { type: string }} RuntimeEvent
+ */
+
+/**
+ * @param {import("../player/player/player.js").Player|null|undefined} player
+ * @param {import("../monster/monster/monster.js").Monster|null|undefined} monster
+ */
+function getRuntimeEventsForHost(player, monster) {
+    return player && !monster ? PlayerRuntimeEvents : MonsterRuntimeEvents;
 }
-
-/**
- * @module Buff 系统/配置
- */
-
-
-/**
- * 玩家侧 Buff 运行时事件名。
- * 统一放在 Buff 常量模块，避免 Player 再维护一层薄包装组件。
- */
-const PlayerBuffEvents = {
-	Recompute: "OnRecompute",
-	Die: "OnDeath",
-	StateChange: "OnStateChange",
-	BeforeTakeDamage: "OnDamage",
-	Attack: "OnAttack",
-	Tick: "OnTick",
-};
-
-/**
- * @typedef {Object} BuffConfig
- * @property {string} configid Buff 配置 id
- * @property {string} typeid Buff 种类
- * @property {Object} params Buff 参数
- */
-/**
- * @typedef {Object} BuffAddRequest
- * @property {string} configid Buff 配置 id
- * @property {Monster|Player} target Buff 作用的目标
- * @property {string} targetType Buff 作用的目标类型
- * @property {number} result - 结果，返回buffid，失败返回-1
- */
-/**
- * @typedef {Object} BuffRemoveRequest
- * @property {number} buffId Buff id
- * @property {boolean} result - 结果，成功返回true，失败返回false
- */
-/**
- * @typedef {Object} BuffRefreshRequest
- * @property {number} buffId Buff id
- * @property {boolean} result - 结果，成功返回true，失败返回false
- */
-/**
- * @typedef {Object} BuffEmitRequest
- * @property {number} buffId Buff id
- * @property {string} eventName 事件名称
- * @property {object} params - 事件参数
- * @property {object} result - 结果
- */
-/**
- * @typedef {Object} OnBuffAdded
- * @property {number} buffId Buff id
- */
-/**
- * @typedef {Object} OnBuffRefreshed
- * @property {number} buffId Buff id
- */
-/**
- * @typedef {Object} OnBuffRemoved
- * @property {number} buffId Buff id
- */
-//=====================预制buff配置====================
-// Buff 构建参数的唯一来源。运行时只按 configid 查这里的预设，不接受外部附加参数。
-/**@type {Record<string, BuffConfig>} */
-const buffconfig={
-	poison:{
-		configid:"poison",
-		typeid:"poison",
-		params:{
-			duration:1,
-			tickInterval:0.5,
-			dps:8,
-		}
-	},
-	attack_up:{
-		configid:"attack_up",
-		typeid:"attack_up",
-		params:{
-			duration:30,
-			multiplier:1.35,
-		}
-	},
-	speed_up:{
-		configid:"speed_up",
-		typeid:"speed_up",
-		params:{
-			duration:5,
-			multiplier:1.8,
-			flatBonus:0,
-		}
-	},
-	aaa:{
-		configid:"aaa",
-		typeid:"bbb",
-		params:{}
-	}
-};
 
 /**
  * @module 玩家系统/玩家/组件/实体桥接
@@ -4328,28 +1562,29 @@ const PlayerState = {
  */
 
 /** 默认职业。 */
-const DEFAULT_PLAYER_PROFESSION = "guardian";
+const DEFAULT_PLAYER_PROFESSION = "medic";
 
 /** @type {Record<string, PlayerProfessionConfig>} */
 const PLAYER_PROFESSIONS = {
     guardian: {
         id: "guardian",
         displayName: "守护者",
-        skillTypeId: "player_guard",
+        skillTypeId: "fire",
         skillParams: {
-            inputKey: "InspectWeapon",
             cooldown: 8,
-            armor: 25,
+            zoneRadius: 150,
+            zoneDuration: 5,
         },
     },
     medic: {
         id: "medic",
         displayName: "医疗兵",
-        skillTypeId: "player_mend",
+        skillTypeId: "player_mend_field",
         skillParams: {
             inputKey: "InspectWeapon",
-            cooldown: 8,
-            heal: 35,
+            cooldown: 10,
+            zoneRadius: 150,
+            zoneDuration: 5,
         },
     },
     vanguard: {
@@ -4695,7 +1930,7 @@ class PlayerStats {
      */
     getAttackDamage(baseDamage) {
         const event = this._rollAttackDamage(baseDamage);
-        this.player.emitBuffEvent(PlayerBuffEvents.Attack, event);
+        this.player.emitRuntimeEvent(PlayerRuntimeEvents.Attack, event);
         event.damage = Math.max(0, Math.round(event.damage));
         return event.damage;
     }
@@ -4829,7 +2064,7 @@ class PlayerStats {
      * @returns {void}
      */
     _recomputeBuffModifiers() {
-        this.player.emitBuffEvent(PlayerBuffEvents.Recompute, { recompute: true });
+        this.player.emitRuntimeEvent(PlayerRuntimeEvents.Recompute, { recompute: true });
         this.setHealth(this.health);
         this.setArmor(this.armor);
     }
@@ -4986,13 +2221,27 @@ class PlayerHealthCombat {
         // 从引擎同步当前值
         this._syncFromEngine();
 
+        const previousHealth = this.player.stats.health;
+        const previousArmor = this.player.stats.armor;
+
         // buff 修饰器链
         const ctx = { damage, attacker };
-        // 触发前置事件，允许 buff 修改伤害,例如减伤、增伤、护甲一类的效果
-        this.player.emitBuffEvent(PlayerBuffEvents.BeforeTakeDamage, ctx);
+        this.player.emitRuntimeEvent(PlayerRuntimeEvents.BeforeTakeDamage, ctx);
         damage = ctx.damage;
 
-        if (damage <= 0) return false;
+        if (damage <= 0) {
+            this.player.emitRuntimeEvent(PlayerRuntimeEvents.TakeDamage, {
+                ...ctx,
+                damage: 0,
+                value: 0,
+                health: this.player.stats.health,
+                previousHealth,
+                currentHealth: this.player.stats.health,
+                previousArmor,
+                currentArmor: this.player.stats.armor,
+            });
+            return false;
+        }
         // 优先扣护甲
         const armor = this.player.stats.armor;
         const damageToArmor = Math.min(armor, damage);
@@ -5004,6 +2253,17 @@ class PlayerHealthCombat {
         // 扣血后同步
         this.player.stats.setHealth(this.player.stats.health - damageToHealth);
         this.player.entityBridge.syncHealth(this.player.stats.health);
+
+        this.player.emitRuntimeEvent(PlayerRuntimeEvents.TakeDamage, {
+            ...ctx,
+            damage,
+            value: damage,
+            health: this.player.stats.health,
+            previousHealth,
+            currentHealth: this.player.stats.health,
+            previousArmor,
+            currentArmor: this.player.stats.armor,
+        });
 
         Instance.Msg(`玩家 ${this.player.entityBridge.getPlayerName()} 受到 ${damage} 伤害 (生命: ${this.player.stats.health}, 护甲: ${this.player.stats.armor})`);
 
@@ -5026,6 +2286,18 @@ class PlayerHealthCombat {
         if (this.player.state === PlayerState.DEAD) return true;
 
         this._syncFromEngine();
+
+        this.player.emitRuntimeEvent(PlayerRuntimeEvents.TakeDamage, {
+            damage,
+            value: damage,
+            health: this.player.stats.health,
+            attacker,
+            source: inflictor ?? null,
+            previousHealth: this.player.stats.health + Math.max(0, damage),
+            currentHealth: this.player.stats.health,
+            previousArmor: this.player.stats.armor,
+            currentArmor: this.player.stats.armor,
+        });
 
         Instance.Msg(`玩家 ${this.player.entityBridge.getPlayerName()} 受到 ${damage} 伤害 (生命: ${this.player.stats.health}, 护甲: ${this.player.stats.armor})`);
 
@@ -5084,9 +2356,7 @@ class PlayerHealthCombat {
 
         this.player.applyStateTransition(PlayerState.DEAD);
 
-        // 清理临时战斗 buff
-        this.player.emitBuffEvent(PlayerBuffEvents.Die, { killer });
-        this.player.emitSkillEvent(SkillEvents.Die, { killer });
+        this.player.emitRuntimeEvent(PlayerRuntimeEvents.Die, { killer });
         this.player.stopInputTracking();
 
         // 切换到观察者
@@ -5163,7 +2433,7 @@ class PlayerLifecycle {
         this.player.applyStateTransition(nextState);
         this.player.startInputTracking(pawn);
         this.player.ensureProfessionSkillBound();
-        this.player.emitSkillEvent(SkillEvents.Spawn, { state: nextState });
+        this.player.emitRuntimeEvent(PlayerRuntimeEvents.Spawn, { state: nextState });
 
         // 给予初始装备
         this._giveStartingEquipment();
@@ -5220,7 +2490,7 @@ class PlayerLifecycle {
         this.player.applyStateTransition(nextState);
         this.player.startInputTracking(this.player.entityBridge.pawn);
         this.player.ensureProfessionSkillBound();
-        this.player.emitSkillEvent(SkillEvents.Spawn, { state: nextState });
+        this.player.emitRuntimeEvent(PlayerRuntimeEvents.Spawn, { state: nextState });
 
         Instance.Msg(`玩家 ${this.player.entityBridge.getPlayerName()} 已重生 (HP: ${stats.health})`);
     }
@@ -5264,7 +2534,7 @@ class PlayerLifecycle {
         const rebound = this.player.rebindProfessionSkill();
         this.player.startInputTracking(this.player.entityBridge.pawn);
         if (rebound) {
-            this.player.emitSkillEvent(SkillEvents.Spawn, { state: PlayerState.PREPARING });
+            this.player.emitRuntimeEvent(PlayerRuntimeEvents.Spawn, { state: PlayerState.PREPARING });
         }
         this._giveStartingEquipment();
     }
@@ -5585,6 +2855,7 @@ class Player {
      * @param {any} params 事件参数
      */
     emitBuffEvent(eventName, params) {
+        let handled = false;
         for (const id of this.buffMap.values()) {
             /** @type {import("../../buff/buff_const").BuffEmitRequest} */
             const emitRequest = {
@@ -5594,7 +2865,10 @@ class Player {
                 result: { result: false },
             };
             eventBus.emit(event.Buff.In.BuffEmitRequest, emitRequest);
+            const emitResult = /** @type {{ result?: boolean }} */ (emitRequest.result);
+            handled = emitResult.result === true || handled;
         }
+        return handled;
     }
 
     /**
@@ -5603,7 +2877,7 @@ class Player {
      */
     handleInputKey(key) {
         if (this.state !== PlayerState.ALIVE) return false;
-        return this.emitSkillEvent(SkillEvents.Input, { key });
+        return this.emitRuntimeEvent(PlayerRuntimeEvents.Input, { key });
     }
 
     /**
@@ -5624,6 +2898,18 @@ class Player {
         };
         eventBus.emit(event.Skill.In.SkillEmitRequest, emitRequest);
         return emitRequest.result;
+    }
+
+    /**
+     * 向玩家宿主内的 buff 与 skill 同时广播统一运行时事件。
+     * @param {string} eventName
+        * @param {import("../../util/runtime_events.js").RuntimeEventPayload} [params]
+     * @returns {boolean}
+     */
+    emitRuntimeEvent(eventName, params = {}) {
+        const buffHandled = this.emitBuffEvent(eventName, params);
+        const skillHandled = this.emitSkillEvent(eventName, params);
+        return buffHandled || skillHandled;
     }
 
     /**
@@ -5813,7 +3099,7 @@ class Player {
         if (this.state === nextState) return true;
         const oldState = this.state;
         this.state = nextState;
-        this.emitBuffEvent(PlayerBuffEvents.StateChange, { oldState, nextState });
+        this.emitRuntimeEvent(PlayerRuntimeEvents.StateChange, { oldState, nextState });
         return true;
     }
     // ——— Tick ———
@@ -5823,9 +3109,7 @@ class Player {
     tick() {
         if (this.state !== PlayerState.ALIVE) return;
 
-        // 1. buff 计时 & 过期清理
-        this.emitBuffEvent(PlayerBuffEvents.Tick, {});
-        this.emitSkillEvent(SkillEvents.Tick, {});
+        this.emitRuntimeEvent(PlayerRuntimeEvents.Tick, {});
     }
 
     // ——— 查询 ———
@@ -7490,8 +4774,9 @@ class HudManager {
      * 每 tick 刷新全部可见 HUD 的贴脸位置。
      * @param {{ id: number; name: string; slot: number; level: number; money: number; health: number; maxHealth: number; armor: number; attack: number; critChance: number; critMultiplier: number; kills: number; score: number; lastMonsterDamage: number; exp: number; expNeeded: number; pawn: import("cs_script/point_script").CSPlayerPawn | null; }[]} [allAlivePlayersSummary=[]]
      * @param {{ remainingMonsters?: number; currentWave?: number; totalWaves?: number; }} [waveSummary={}]
+     * @param {Map<number, { buffs?: { id: number; typeId: string; remaining: number; }[]; skill?: { id: number; typeId: string; cooldown: number; remainingCooldown: number; isReady: boolean; isConsumed: boolean; } | null; }>} [runtimeSummaryBySlot=new Map()]
      */
-    tick(allAlivePlayersSummary=[], waveSummary={}) {
+    tick(allAlivePlayersSummary=[], waveSummary={}, runtimeSummaryBySlot=new Map()) {
         const remainingMonsters = Math.max(0, Math.round(waveSummary.remainingMonsters ?? 0));
         const currentWave = Math.max(0, Math.round(waveSummary.currentWave ?? 0));
         const totalWaves = Math.max(0, Math.round(waveSummary.totalWaves ?? 0));
@@ -7500,7 +4785,10 @@ class HudManager {
         for (const s of allAlivePlayersSummary) {
             if(!s.pawn)continue;
             const remainingExp = Math.max(0, s.expNeeded - s.exp);
-            const text = `Lv.${s.level} \nHP:${s.health}/${s.maxHealth} \n护甲:${s.armor}\nMoney:$${s.money} \n升级还需:${remainingExp}EXP\n伤害:${s.lastMonsterDamage} \n剩余怪物:${remainingMonsters} \n波次:${waveLabel}`;
+            const runtimeSummary = runtimeSummaryBySlot.get(s.slot);
+            const buffLabel = this._formatBuffLabel(runtimeSummary?.buffs ?? []);
+            const skillLabel = this._formatSkillCooldownLabel(runtimeSummary?.skill ?? null);
+            const text = `Lv.${s.level} \nHP:${s.health}/${s.maxHealth} \n护甲:${s.armor}\nMoney:$${s.money} \n升级还需:${remainingExp}EXP\n伤害:${s.lastMonsterDamage} \nBuff:${buffLabel}\n技能CD:${skillLabel}\n剩余怪物:${remainingMonsters} \n波次:${waveLabel}`;
             this.showHud({ slot: s.slot, pawn: s.pawn, text, channel: CHANNAL.STATUS, result: true });
         }
         for (const [, session] of this._sessions) {
@@ -7658,8 +4946,62 @@ class HudManager {
             }
         }
 
-        if (session.entity?.IsValid()) {
-            Instance.EntFireAtTarget({target: session.entity,input: session.use?"Enable":"Disable",});
+        const entity = session.entity;
+        if (entity?.IsValid()) {
+            Instance.EntFireAtTarget({ target: entity, input: session.use ? "Enable" : "Disable" });
+        }
+    }
+
+
+    /**
+     * @param {{ id: number; typeId: string; remaining: number; }[]} buffSummaries
+     * @returns {string}
+     */
+    _formatBuffLabel(buffSummaries) {
+        if (buffSummaries.length === 0) return "无";
+
+        const labels = buffSummaries.slice(0, 2).map((buffSummary) => this._formatSingleBuffLabel(buffSummary));
+        if (buffSummaries.length > 2) {
+            labels.push(`+${buffSummaries.length - 2}`);
+        }
+        return labels.join(", ");
+    }
+
+    /**
+     * @param {{ id: number; typeId: string; remaining: number; }} buffSummary
+     * @returns {string}
+     */
+    _formatSingleBuffLabel(buffSummary) {
+        const displayName = this._getEffectDisplayName(buffSummary.typeId);
+        if (buffSummary.remaining >= 0) {
+            return `${displayName}(${buffSummary.remaining.toFixed(1)}s)`;
+        }
+        return `${displayName}`;
+    }
+
+    /**
+     * @param {{ id: number; typeId: string; cooldown: number; remainingCooldown: number; isReady: boolean; isConsumed: boolean; } | null} skillSummary
+     * @returns {string}
+     */
+    _formatSkillCooldownLabel(skillSummary) {
+        if (!skillSummary) return "无";
+        const displayName = this._getEffectDisplayName(skillSummary.typeId);
+        if (skillSummary.isConsumed) return `${displayName}(已使用)`;
+        if (!skillSummary.isReady) return `${displayName}(${skillSummary.remainingCooldown.toFixed(1)}s)`;
+        return `${displayName}(就绪)`;
+    }
+
+    /**
+     * @param {string | null | undefined} typeId
+     * @returns {string}
+     */
+    _getEffectDisplayName(typeId) {
+        switch (typeId) {
+            case "fire":
+            case "burn":
+                return "燃烧";
+            default:
+                return typeId ?? "未知";
         }
     }
 
@@ -7715,6 +5057,3196 @@ class HudManager {
         });
 
         return true;
+    }
+}
+
+/**
+ * @module 怪物系统/怪物组件/实体桥接
+ */
+
+const BREAKABLE_HEALTH_SCALE = 10000;
+
+/**
+ * 怪物实体桥接组件。
+ *
+ * 负责生成 model / breakable，并把 breakable 受到的引擎伤害
+ * 单向折算到脚本侧生命，不再把脚本生命反向同步给 breakable。
+ * 
+ * @navigationTitle 怪物实体桥接
+ */
+class MonsterEntityBridge {
+    /**
+     * 创建怪物实体桥接组件。
+     * @param {import("../monster").Monster} monster 所属怪物实例
+     */
+    constructor(monster) {
+        /** 所属怪物实例。 */
+        this.monster = monster;
+    }
+    /**
+     * 根据怪物配置生成引擎实体（breakable + model）。
+     *
+     * 通过 `PointTemplate.ForceSpawn` 在指定位置创建模板实体，
+     * 并监听 breakable 的 `OnHealthChanged` 将引擎伤害转发给 `healthCombat`。
+     *
+     * @param {import("cs_script/point_script").Vector} position 出生世界坐标
+     * @param {import("../../../util/definition").monsterTypes} typeConfig 怪物类型配置
+     */
+    init(position, typeConfig) {
+        const template = Instance.FindEntityByName(typeConfig.template_name);
+        if (template && template instanceof PointTemplate) {
+            const spawned = template.ForceSpawn(position);
+            if (spawned && spawned.length > 0) {
+                spawned.forEach((element) => {
+                    if (element.GetClassName() == "func_breakable") {
+                        this.monster.breakable = element;
+                    }
+                    if (element.GetClassName() == "prop_dynamic" && element.GetEntityName() == typeConfig.model_name) {
+                        this.monster.model = element;
+                    }
+                });
+            }
+        }
+
+        if (this.monster.breakable) {
+            this.monster.preBreakableHealth = BREAKABLE_HEALTH_SCALE;
+            Instance.ConnectOutput(this.monster.breakable, "OnHealthChanged", (e) => {
+                if (typeof e.value !== "number") return;
+
+                const currentBreakableHealth = Math.max(
+                    0,
+                    Math.min(BREAKABLE_HEALTH_SCALE, BREAKABLE_HEALTH_SCALE * e.value)
+                );
+                const damage = this.monster.preBreakableHealth - currentBreakableHealth;
+                this.monster.preBreakableHealth = currentBreakableHealth;
+
+                if (damage <= 1) return;
+
+                const attacker = e.activator instanceof CSPlayerPawn ? e.activator : null;
+                this.monster.takeDamage(damage, attacker);
+            });
+        }
+
+        //if (this.monster.model) {
+        //    if (this.monster.model instanceof BaseModelEntity) {
+        //        this.monster.model.Glow();
+        //    }
+        //}
+    }
+
+    /**
+     * 死亡后移除引擎实体。breakable 始终移除，model 是否删除由参数控制。
+     * @param {boolean} [removeModelAfterDeathAnimation=true] 是否删除怪物模型
+     */
+    removeAfterDeath(removeModelAfterDeathAnimation = true) {
+        if (this.monster.breakable?.IsValid()) {
+            this.monster.breakable.Remove();
+        }
+        if (removeModelAfterDeathAnimation && this.monster.model?.IsValid()) {
+            this.monster.model.Remove();
+        }
+    }
+}
+
+/**
+ * @module 怪物系统/怪物组件/生命与战斗
+ */
+
+class MonsterHealthCombat {
+    /**
+     * @param {import("../monster").Monster} monster
+     */
+    constructor(monster) {
+        this.monster = monster;
+        /** @type {((amount: number) => number)[]} */
+        this._damageModifiers = [];
+    }
+
+    /**
+     * @param {(amount: number) => number} modifier
+     */
+    addDamageModifier(modifier) {
+        this._damageModifiers.push(modifier);
+    }
+
+    /**
+     * @param {(amount: number) => number} modifier
+     */
+    removeDamageModifier(modifier) {
+        const idx = this._damageModifiers.indexOf(modifier);
+        if (idx !== -1) this._damageModifiers.splice(idx, 1);
+    }
+
+    /**
+     * @param {number} amount
+     * @param {import("cs_script/point_script").CSPlayerPawn | null} attacker
+     * @param {{ source?: import("cs_script/point_script").Entity | null, reason?: string } | null} [meta]
+     * @returns {boolean}
+     */
+    takeDamage(amount, attacker, meta = null) {
+        if (this.monster.state === MonsterState.DEAD) return true;
+
+        const modifiedAmount = this.monster.requestBeforeTakeDamage(amount, attacker);
+        if (typeof modifiedAmount === "number") {
+            amount = modifiedAmount;
+        }
+
+        const ctx = {
+            damage: amount,
+            attacker,
+            source: meta?.source ?? null,
+            reason: meta?.reason,
+        };
+        this.monster.emitRuntimeEvent(MonsterRuntimeEvents.BeforeTakeDamage, ctx);
+        amount = ctx.damage;
+
+        const previousHealth = this.monster.health;
+
+        if (amount <= 0) {
+            this.monster.emitRuntimeEvent(MonsterRuntimeEvents.TakeDamage, {
+                ...ctx,
+                damage: 0,
+                value: 0,
+                health: this.monster.health,
+                previousHealth,
+                currentHealth: this.monster.health,
+            });
+            return false;
+        }
+
+        let finalAmount = amount;
+        for (const mod of this._damageModifiers) {
+            finalAmount = mod(finalAmount);
+            if (finalAmount <= 0) {
+                this.monster.emitRuntimeEvent(MonsterRuntimeEvents.TakeDamage, {
+                    ...ctx,
+                    damage: 0,
+                    value: 0,
+                    health: this.monster.health,
+                    previousHealth,
+                    currentHealth: this.monster.health,
+                });
+                return false;
+            }
+        }
+
+        this.monster.health = Math.max(0, Math.min(this.monster.health - finalAmount, this.monster.maxhealth));
+        this.monster.emitRuntimeEvent(MonsterRuntimeEvents.TakeDamage, {
+            ...ctx,
+            damage: finalAmount,
+            value: finalAmount,
+            health: this.monster.health,
+            previousHealth,
+            currentHealth: this.monster.health,
+        });
+        /** @type {import("../../monster_const").OnMonsterDamaged} */
+        const payload = {
+            monster: this.monster,
+            damage: finalAmount,
+            previousHealth,
+            currentHealth: this.monster.health,
+            attacker: attacker instanceof CSPlayerPawn ? attacker : null,
+        };
+        eventBus.emit(event.Monster.Out.OnMonsterDamaged, payload);
+        Instance.Msg(`鎬墿 #${this.monster.id} 鍙楀埌 ${finalAmount} 鐐逛激瀹?(鍘熷:${amount}) (${previousHealth} -> ${this.monster.health})`);
+
+        if (this.monster.health <= 0) {
+            this.die(attacker);
+            return true;
+        }
+        return false;
+    }
+
+    /**
+     * @param {import("cs_script/point_script").Entity | null | undefined} killer
+     */
+    die(killer) {
+        if (this.monster.state === MonsterState.DEAD) return;
+
+        const breakable = this.monster.breakable;
+        if (breakable?.IsValid()) {
+            Instance.EntFireAtTarget({
+                target: breakable,
+                input: "fireuser1",
+                activator: killer ?? this.monster.target ?? undefined,
+            });
+        }
+
+        const prevState = this.monster.state;
+        this.monster.state = MonsterState.DEAD;
+        this.monster.emitRuntimeEvent(MonsterRuntimeEvents.StateChange, { oldState: prevState, nextState: MonsterState.DEAD });
+        this.monster.emitRuntimeEvent(MonsterRuntimeEvents.Die, { killer });
+        this.monster.clearBuffs();
+        if (this.monster.model instanceof BaseModelEntity) {
+            this.monster.model.Unglow();
+        }
+        this.monster.killer = killer instanceof CSPlayerPawn ? killer : null;
+        this.monster.emitDeathEvent(killer);
+        this.monster.animation.enter(MonsterState.DEAD);
+        Instance.Msg(`鎬墿 #${this.monster.id} 姝讳骸`);
+    }
+
+    enterAttack() {
+        const model = this.monster.model;
+        const target = this.monster.target;
+        if (!model?.IsValid() || !target) return;
+
+        this.monster.animation.setOccupation("attack");
+        this.monster.movementPath.onOccupationChanged();
+        this.monster.attackCooldown = this.monster.atc;
+
+        const origin = model.GetAbsOrigin();
+        const targetPos = target.GetAbsOrigin();
+        const distsq = this.monster.distanceTosq(target);
+        if (distsq > this.monster.attackdist * this.monster.attackdist) {
+            this.monster.emitRuntimeEvent(MonsterRuntimeEvents.AttackFalse, { target });
+            return;
+        }
+
+        this.monster.emitRuntimeEvent(MonsterRuntimeEvents.AttackTrue, { target, damage: this.monster.damage });
+        this.monster.emitAttackEvent(this.monster.damage, target);
+
+        300 / Math.hypot(targetPos.x - origin.x, targetPos.y - origin.y);
+    }
+}
+
+/**
+ * @module 怪物系统/怪物组件/AI状态机
+ */
+
+
+/**
+ * 怪物 AI 决策组件。
+ *
+ * 每帧评估当前意图并解析为 MonsterState 转换：
+ * 1. `updateTarget` — 选择最近玩家作为目标。
+ * 2. `evaluateIntent` — 根据距离和冷却判断意图（Idle/Chase/Attack/Skill）。
+ * 3. `resolveState` — 将意图转化为实际状态，考虑占用锁和当前待执行技能。
+ *
+ * @navigationTitle 怪物 AI 决策
+ */
+class MonsterBrainState {
+    /**
+     * 创建怪物 AI 决策组件。
+     * @param {import("../monster").Monster} monster 所属怪物实例
+     */
+    constructor(monster) {
+        /** 所属怪物实例。 */
+        this.monster = monster;
+    }
+
+    /**
+     * 更新追击目标：选择最近的存活玩家。同时发布 `TargetUpdate` 事件。
+     * @param {import("cs_script/point_script").CSPlayerPawn[]} allppos 所有存活玩家
+     */
+    updateTarget(allppos) {
+        const previousTarget = this.monster.target;
+        let best = null;
+        let bestDistsq = Infinity;
+        for (const player of allppos) {
+            const dist = this.monster.distanceTosq(player);
+            if (dist < bestDistsq) {
+                best = player;
+                bestDistsq = dist;
+            }
+        }
+        this.monster.target = best;
+        this.monster.emitRuntimeEvent(MonsterRuntimeEvents.TargetUpdate, {
+            previousTarget,
+            target: best,
+        });
+    }
+
+    /**
+     * 评估当前意图。只判断“想做什么”，不修改 `monster.state`。
+     *
+     * 优先级：被锁定→CHASE，有技能请求→SKILL，攻击距离内且无冷却→ATTACK，否则→CHASE。
+     * @returns {number} MonsterState 枚举值
+     */
+    evaluateIntent() {
+        if (!this.monster.target) return MonsterState.IDLE;
+        const distsq = this.monster.distanceTosq(this.monster.target);
+        if (this.monster.movementStateMovemode === "ladder") return MonsterState.CHASE;
+        if (this.monster.skillsManager.hasRequestedSkill()) return MonsterState.SKILL;
+        if (distsq <= this.monster.attackdist*this.monster.attackdist && this.monster.attackCooldown <= 0) return MonsterState.ATTACK;
+        return MonsterState.CHASE;
+    }
+
+    /**
+     * 根据意图评估结果执行状态切换。ATTACK/SKILL 切换成功后会调用对应入口方法。
+     * @param {number} intent 目标状态（MonsterState 枚举值）
+     */
+    resolveIntent(intent) {
+        switch (intent) {
+            case MonsterState.IDLE:
+                this.trySwitchState(MonsterState.IDLE);
+                break;
+            case MonsterState.CHASE:
+                this.trySwitchState(MonsterState.CHASE);
+                break;
+            case MonsterState.ATTACK:
+                if (this.trySwitchState(MonsterState.ATTACK)) {
+                    this.monster.enterAttack();
+                }
+                break;
+            case MonsterState.SKILL:
+                if (this.trySwitchState(MonsterState.SKILL)) {
+                    this.monster.enterSkill();
+                }
+                break;
+        }
+    }
+
+    /**
+     * 尝试状态迁移。委托 `monster.applyStateTransition`。
+     * @param {number} nextState 目标 MonsterState
+     * @returns {boolean} 是否切换成功
+     */
+    trySwitchState(nextState) {
+        return this.monster.applyStateTransition(nextState);
+    }
+}
+
+/**
+ * @module 怪物系统/技能基类
+ */
+/*
+技能分类规则（唯一权威）：
+  有 animation 字段（非 null/undefined）= 主动技能：canTrigger 通过后占用当前待执行槽，
+    Monster 进入 SKILL 状态，skills_manager 先播放 animation 动作，再调用 trigger()。
+  无 animation 字段（null）           = 被动技能：在 canTrigger 内直接执行业务并返回 false，
+    不占用待执行槽，不触发状态切换。
+
+冷却语义：
+  cooldown > 0  → 间隔触发（秒）
+  cooldown = 0  → 无限制
+  cooldown = -1 → 一次性：仅首次触发一次，之后永久失效
+  默认值为 -1（一次性），可在子类构造函数或 params.cooldown 中覆盖。
+
+实例 id 语义：
+  skill.id  = 运行时实例 id，由 MonsterSkillsManager.addSkill 按添加顺序分配（0,1,2,...）。
+             同一怪物上 id 越小，优先级越高；同一轮事件结算时，先遇到可触发的技能会直接截断后续主动技能。
+  skill.typeId = 技能类型标识，对应 SkillFactory 注册键（如 "corestats"），子类在构造函数里设置。
+             同一怪物可同时拥有多个相同 typeId 的技能实例，各实例独立运行互不干扰。
+
+多事件触发：
+  子类构造函数中设置 this.events 数组，列出该技能响应的事件类型。
+  可在配置 params.events 中直接指定（如 ["OnSpawn","OnDie"]），未提供则使用技能类的默认值。
+  对 spawn 等技能：旧的单值 params.event 仍向后兼容（会被包装为单元素数组）。
+
+原 onAdd() 生命周期已移除；需要在生成时执行的初始化逻辑，
+请在 canTrigger 中响应宿主对应的 Spawn 运行时事件并 return false。
+
+新增技能时不要手写 this.id（实例 id 由 addSkill 自动分配）；
+在子类构造函数里设置 this.typeId（技能类型标识）；
+isActive() 由基类根据 this.animation 自动判断。
+
+运行时事件约定：
+- 玩家技能与玩家 buff 共用 `PlayerRuntimeEvents`
+- 怪物技能与怪物 buff 共用 `MonsterRuntimeEvents`
+- 事件名统一来自 `src/util/runtime_events.js`
+- `TakeDamage` 事件负载统一包含 `damage`，兼容字段 `value` / `health` 仍可读取
+ */
+/**
+ * 技能基类。所有具体技能继承此类，并在子类中按宿主类型重写专用入口。
+ *
+ * 技能分为两大类：
+ * - **主动技能**（`animation` 非 null）— `canTrigger` 返回 true 后占用当前待执行槽，
+ *   Monster 进入 SKILL 状态，播放动作后调用 `trigger()`。
+ * - **被动技能**（`animation` 为 null）— 在 `canTrigger` 内直接执行并返回 false。
+ *
+ * 冷却语义：
+ * - `-1` = 一次性（默认），触发过一次后永久失效。
+ * - `0` = 无限制。
+ * - `> 0` = 按秒间隔触发。
+ *
+ * 子类在构造函数中设置 `this.typeId`，运行时实例 id `this.id` 由
+ * MonsterSkillsManager.addSkill 自动分配，id 越小优先级越高。
+ *
+ * 运行时事件 payload 约束见 `src/util/runtime_events.js`。
+ *
+ * @navigationTitle 技能基类
+ */
+class SkillTemplate
+{
+    /**
+     * 创建技能基类实例，绑定所属施法者。
+    * @param {import("../player/player/player.js").Player|null} player
+    * @param {import("../monster/monster/monster.js").Monster|null} monster
+     * @param {string} typeid 
+     * @param {number} id
+     * @param {any} params
+     */
+    constructor(player = null, monster = null,typeid,id,params={}) {
+        /** 玩家施法者；只有玩家技能实例会设置。 */
+        this.player = player;
+        /** 怪物施法者；只有怪物技能实例会设置。 */
+        this.monster = monster;
+        /** 技能类型标识，对应 SkillFactory 注册键（如 "corestats"）。子类在构造函数里设置。 */
+        this.typeId = typeid;
+        /** 运行时实例 id，由 addSkill 按添加顺序分配（0,1,2,...）。id 越小优先级越高。 */
+        this.id = id;
+        /** 冷却（秒）。-1=一次性，0=无限制，>0=按秒冷却。默认 -1。 */
+        this.cooldown = params.cooldown ?? -1;
+        /** 上次触发的游戏时间。初始值 -999。由 `_markTriggered` 更新，供 `_cooldownReady` 判断冷却。 */
+        this.lastTriggerTime = -999;
+        /** 技能是否正在后台运行中（限时技能的执行期间为 true）。由子类 `tick` 逻辑控制。 */
+        this.running=false;
+    }
+    onSkillAdd(){}
+    onSkillDelete(){
+      this.running = false;
+    }
+    /**
+     * @param {string} eventType
+     * @param {import("../util/runtime_events.js").RuntimeEventPayload} payload
+     */
+    _emitEvent(eventType, payload = {}) {
+        if(this.canTrigger({ type: eventType, ...payload })) {
+            this._request();
+        }
+    }
+    /**
+     * 这个事件能否执行。
+    * - 有 animation（isActive=true）：做条件判断通过后返回 true，由 emitEvent 调用 request 锁定当前待执行技能。
+    * - 无 animation（isActive=false）：在此处直接执行业务逻辑并返回 false，不占用待执行槽也不切换状态。
+     * @param {import("../util/runtime_events.js").RuntimeEvent} event
+     */
+    canTrigger(event) {
+        if(this.player)return false;
+        if(this.monster)return false;
+        return false;
+    }
+    /**
+     * 请求执行（基类默认实现，子类无需重写）。
+     * 仅由 isActive()=true 的技能在 canTrigger 返回 true 后被 emitEvent 调用。
+     */
+    _request(){
+        //if(this.player)this.player.requestSkill(this);
+        if(this.monster)this.monster.requestSkill(this);
+    }
+    /**
+     * 执行技能主体逻辑。仅对主动技能有效——动画播放完毕后由 MonsterSkillsManager 调用。
+     * 子类必须重写此方法以实现具体技能效果。
+     */
+    trigger() {}
+    /**
+     * 后台限时技能的每帧执行入口。
+     * 对于有持续时间的技能（如护盾、急速），在 `running` 为 true 期间每帧调用。
+     * 子类按需重写以实现持续效果或到期清理。
+     */
+    tick(){}
+    /**
+     * 检查冷却是否就绪。
+     * - `cooldown = -1`（一次性）：仅当从未触发过时返回 true。
+     * - `cooldown <= 0`（无限制）：始终返回 true。
+     * - `cooldown > 0`：当前时间距上次触发超过冷却秒数时返回 true。
+     * @returns {boolean}
+     */
+    _cooldownReady() {
+        // -1 = 一次性：只要触发过一次（lastTriggerTime 不再是初始值 -999）就永久失效
+        if (this.cooldown === -1) return this.lastTriggerTime === -999;
+        if (this.cooldown <= 0) return true;
+        const now = Instance.GetGameTime();
+        return now - this.lastTriggerTime >= this.cooldown;
+    }
+
+    /**
+     * 标记技能已触发——更新 `lastTriggerTime` 为当前游戏时间。
+     * 若技能配置了 `buffTypeId` 且怪物当前有目标，还会通过事件系统发布 `SkillCast` 事件，
+     * 携带构建好的 buff 负载供玩家 buff 系统接收。
+     */
+    _markTriggered() {
+        this.lastTriggerTime = Instance.GetGameTime();
+    }
+}
+
+/**
+ * @module 怪物系统/怪物技能/基础属性增强
+ */
+
+class CoreStats extends SkillTemplate {
+    /**
+    * @param {import("../../player/player/player.js").Player|null} player
+    * @param {import("../../monster/monster/monster.js").Monster|null} monster
+     * @param {number} id
+     * @param {{
+     *   cooldown?: number;
+     *   events?: string[];
+     *   animation?: string | null;
+     *   health_mult?: number;
+     *   health_value?: number;
+     *   damage_mult?: number;
+     *   damage_value?: number;
+     *   speed_mult?: number;
+     *   speed_value?: number;
+     *   reward_mult?: number;
+     *   reward_value?: number;
+     * }} [params]
+     */
+    constructor(player, monster, id, params = {}) {
+        super(player, monster, "corestats", id, params);
+        this.animation = params.animation ?? null;
+        const runtimeEvents = getRuntimeEventsForHost(player, monster);
+        this.events = params.events ?? [runtimeEvents.Spawn];
+        this.params = params;
+    }
+
+    /**
+        * @param {import("../../util/runtime_events.js").RuntimeEvent} event
+     */
+    canTrigger(event) {
+        if (!this.events.includes(event.type)) return false;
+        if (!this._cooldownReady()) return false;
+        if (this.animation === null) {
+            this.trigger();
+            return false;
+        }
+        return true;
+    }
+
+    trigger() {
+        this._markTriggered();
+        if (this.player) {
+            return;
+        }
+
+        if (this.monster) {
+            if (this.params.health_value) {
+                this.monster.baseMaxHealth += this.params.health_value;
+                this.monster.health += this.params.health_value;
+            }
+            if (this.params.health_mult) {
+                this.monster.baseMaxHealth *= this.params.health_mult;
+                this.monster.health *= this.params.health_mult;
+            }
+            if (this.params.damage_value) this.monster.baseDamage += this.params.damage_value;
+            if (this.params.damage_mult) this.monster.baseDamage *= this.params.damage_mult;
+            if (this.params.speed_value ) this.monster.baseSpeed += this.params.speed_value;
+            if (this.params.speed_mult ) this.monster.baseSpeed *= this.params.speed_mult;
+            if (this.params.reward_value ) this.monster.baseReward += this.params.reward_value;
+            if (this.params.reward_mult ) this.monster.baseReward *= this.params.reward_mult;
+            this.monster.recomputeDerivedStats();
+        }
+    }
+}
+
+/**
+ * @module 技能系统/共享常量
+ */
+
+/** 与技能位移交互兼容的移动请求类型。 */
+const MovementRequestType = {
+    Move: "Move"};
+
+/** 与技能位移交互兼容的移动请求优先级。 */
+const MovementPriority = {
+    Skill: 0};
+
+/** 默认世界重力加速度。 */
+const DEFAULT_WORLD_GRAVITY = 800;
+
+/** @typedef {import("../util/runtime_events.js").RuntimeEventPayload} EmitEventPayload */
+/** @typedef {import("../util/runtime_events.js").RuntimeEvent} SkillRuntimeEvent */
+
+/**
+ * @typedef {Object} SkillAddRequest
+ * @property {import("../player/player/player").Player|import("../monster/monster/monster").Monster} target
+ * @property {string} typeId
+ * @property {Record<string, any>} params
+ * @property {number|null} result
+ */
+
+/**
+ * @typedef {Object} SkillRemoveRequest
+ * @property {number} skillId
+ * @property {import("../player/player/player").Player|import("../monster/monster/monster").Monster|null} [target]
+ * @property {boolean} result
+ */
+
+/**
+ * @typedef {Object} SkillUseRequest
+ * @property {number} skillId
+ * @property {import("../player/player/player").Player|import("../monster/monster/monster").Monster} target
+ * @property {boolean} result
+ */
+
+/**
+ * @typedef {Object} SkillEmitRequest
+ * @property {number} skillId
+ * @property {string} eventName
+ * @property {EmitEventPayload} params
+ * @property {import("../player/player/player").Player|import("../monster/monster/monster").Monster|null} [target]
+ * @property {boolean} result
+ */
+
+/**
+ * @module 怪物系统/怪物技能/飞扑
+ */
+
+class PounceSkill extends SkillTemplate {
+    /**
+     * @param {any|null} player
+     * @param {import("../../monster/monster/monster").Monster|null} monster
+     * @param {number} id
+    * @param {Record<string, any>} [params]
+     */
+    constructor(player, monster, id, params = {}) {
+        super(player, monster, "pounce", id, params);
+        this.distance = params.distance ?? 0;
+        this.animation = params.animation ?? null;
+        this.events = params.events ?? [MonsterRuntimeEvents.Tick];
+        this._duration = params.duration ?? 1;
+        this.asyncOccupation = "pounce";
+    }
+
+    canTrigger(/** @type {any} */ event) {
+        if (!this.events.includes(event.type)) return false;
+        if (!this._cooldownReady()) return false;
+
+        const monster = this.monster;
+        if (monster) {
+            if (!monster.target) return false;
+            if (monster.isOccupied()) return false;
+
+            const distsq = monster.distanceTosq(monster.target);
+            const attackDistSq = monster.attackdist * monster.attackdist;
+            const triggerDistSq = this.distance * this.distance;
+            if (!(distsq > attackDistSq && distsq < triggerDistSq)) return false;
+        }
+
+        if (this.animation === null) {
+            this.trigger();
+            return false;
+        }
+        return true;
+    }
+
+    tick() {
+        if (this.player) return;
+
+        const monster = this.monster;
+        if (!this.running || !monster) return;
+
+        if (monster.movementStateMovemode==="walk") {
+            this.running = false;
+            monster.onOccupationEnd("pounce");
+        }
+    }
+
+    trigger() {
+        if (this.player) {
+            this._markTriggered();
+            return;
+        }
+
+        const monster = this.monster;
+        if (!monster) return;
+
+        const model = monster.model;
+        const target = monster.target;
+        if (!model?.IsValid() || !target) return;
+
+        const start = model.GetAbsOrigin();
+        const targetPos = target.GetAbsOrigin();
+
+        const duration = this._duration > 0 ? this._duration : 1;
+        const velocity = {
+            x: (targetPos.x - start.x) / duration,
+            y: (targetPos.y - start.y) / duration,
+            z: (targetPos.z - start.z + 0.5 * DEFAULT_WORLD_GRAVITY * duration * duration) / duration,
+        };
+
+        monster.animation.setOccupation("pounce");
+        this.running = true;
+
+        const submitted = monster.submitMovementEvent({
+            type: MovementRequestType.Move,
+            entity: model,
+            priority: MovementPriority.Skill,
+            targetPosition: targetPos,
+            usePathRefresh: false,
+            useNPCSeparation: true,
+            Mode: "air",
+            Velocity: velocity,
+        });
+
+        if (!submitted) {
+            this.running = false;
+            monster.onOccupationEnd("pounce");
+            return;
+        }
+
+        this._markTriggered();
+    }
+}
+
+/**
+ * @module 怪物系统/怪物技能/初始动画
+ */
+
+class InitAnimSkill extends SkillTemplate {
+    /**
+    * @param {import("../../player/player/player.js").Player|null} player
+    * @param {import("../../monster/monster/monster.js").Monster|null} monster
+     * @param {number} id
+     * @param {{
+     *   cooldown?: number;
+     *   events?: string[];
+     *   animation?: string | null;
+     * }} [params]
+     */
+    constructor(player, monster, id, params = {}) {
+        super(player, monster, "initanim", id, params);
+        this.animation = params.animation ?? null;
+        this.events = params.events ?? [MonsterRuntimeEvents.Spawn];
+    }
+    /**
+        * @param {import("../../util/runtime_events.js").RuntimeEvent} event
+     */
+    canTrigger(event) {
+        if (!this.events.includes(event.type)) return false;
+        if (!this._cooldownReady()) return false;
+        // 怪物专属技能
+        if (!this.monster)return false;
+        if (this.monster && !this.monster.isOccupied()) return false;
+        if (this.animation === null) {
+            this.trigger();
+            return false;
+        }
+        return true;
+    }
+
+    trigger() {
+        this._markTriggered();
+        if (this.player) {
+            return;
+        }
+        if (this.monster)
+        {
+            return;
+        }
+    }
+}
+
+/**
+ * @module 怪物系统/怪物技能/双倍攻击
+ */
+
+class DoubleAttackSkill extends SkillTemplate {
+    /**
+    * @param {import("../../player/player/player.js").Player|null} player
+    * @param {import("../../monster/monster/monster.js").Monster|null} monster
+     * @param {number} id
+     * @param {{
+     *   cooldown?: number;
+     *   events?: string[];
+     *   animation?: string | null;
+     * }} [params]
+     */
+    constructor(player, monster, id, params = {}) {
+        super(player, monster, "doubleattack", id, params);
+        this.animation = params.animation ?? null;
+        this.events = params.events ?? [MonsterRuntimeEvents.AttackTrue];
+    }
+    /**
+        * @param {import("../../util/runtime_events.js").RuntimeEvent} event
+     */
+    canTrigger(event) {
+        if (!this.events.includes(event.type)) return false;
+        if (!this._cooldownReady()) return false;
+        if (this.monster && !this.monster.target) return false;
+        if (!this.monster)return false;
+        if (this.animation === null) {
+            this.trigger();
+            return false;
+        }
+        return true;
+    }
+
+    trigger() {
+        if (this.player) {
+            this._markTriggered();
+            return;
+        }
+        const monster = this.monster;
+        const target = monster?.target;
+        if (!monster || !target) return;
+        if (monster.distanceTosq(target) > monster.attackdist * monster.attackdist) return;
+
+        this._markTriggered();
+        monster.emitAttackEvent(monster.damage, target);
+    }
+}
+
+/**
+ * @module 怪物系统/怪物技能/重击
+ */
+
+class PowerAttackSkill extends SkillTemplate {
+    /**
+     * @param {any|null} player
+     * @param {import("../../monster/monster/monster").Monster|null} monster
+     * @param {number} id
+     * @param {{
+     *   cooldown?: number;
+     *   events?: string[];
+     *   animation?: string | null;
+     *   impulse?: number;
+     *   verticalBoost?: number;
+     *   buffDuration?: number;
+     * }} [params]
+     */
+    constructor(player, monster, id, params = {}) {
+        super(player, monster, "powerattack", id, params);
+        this.animation = params.animation ?? null;
+        this.events = params.events ?? [MonsterRuntimeEvents.AttackTrue];
+        this.buffTypeId = "knockup";
+        this.buffParams = {
+            impulse: params.impulse ?? 300,
+            verticalBoost: params.verticalBoost ?? 400,
+            duration: params.buffDuration ?? 0.6,
+        };
+    }
+
+    canTrigger(/** @type {any} */ event) {
+        if (!this.events.includes(event.type)) return false;
+        if (!this._cooldownReady()) return false;
+
+        const monster = this.monster;
+        if (monster) {
+            if (!monster.target) return false;
+            if (monster.isOccupied()) return false;
+        }
+
+        if (this.animation === null) {
+            this.trigger();
+            return false;
+        }
+        return true;
+    }
+
+    trigger() {
+        if (this.player) {
+            this._markTriggered();
+            return;
+        }
+        const monster = this.monster;
+        const target = monster?.target;
+        if (!monster || !target) return;
+        if (monster.distanceTosq(target) > monster.attackdist * monster.attackdist) return;
+
+        this._markTriggered();
+        monster.emitAttackEvent(Math.max(1, Math.round(monster.damage * 2)), target);
+    }
+}
+
+/**
+ * @module 区域效果/效果配置
+ */
+/**
+ * 区域效果配置
+ * @typedef {object} areaEffectStatic
+ * @property {string} effectName - 区域预制效果名称
+ * @property {string} buffName - 命中后要施加的预制 Buff 名字
+ * @property {string} particleName - 需要创建的粒子系统预制名字
+ */
+/**
+ * @typedef {object} AreaEffectCreateRequest
+ * @property {string} areaEffectStaticKey - 预制区域效果配置的 key
+ * @property {{x:number,y:number,z:number}} position - 区域中心点
+ * @property {number} radius - 区域半径
+ * @property {number} duration - 总持续时间（秒）
+ * @property {string[]} targetTypes - 该区域效果可命中的目标类型
+ * @property {import("cs_script/point_script").Entity | null} [parentEntity] - 跟随的父实体；无效时区域自动停止
+ * @property {number} result - 结果，成功返回区域效果实例 id，失败返回 -1
+ */
+/**
+ * @typedef {object} AreaEffectStopRequest
+ * @property {number} areaEffectId - 区域效果实例 id
+ * @property {boolean} result - 结果是否成功
+ */
+
+/**
+ * 区域效果每帧检测上下文。
+ * @typedef {object} areaEffectTickContext
+ * @property {import("../player/player/player").Player[]} players - 当帧可被命中的玩家列表
+ * @property {import("../monster/monster/monster").Monster[]} monsters - 当帧可被命中的怪物列表
+ */
+/**
+ * @typedef {object} OnAreaEffectCreated
+ * @property {number} effectId - 区域效果实例 id
+ */
+/**
+ * @typedef {object} OnAreaEffectStopped
+ * @property {number} effectId - 区域效果实例 id
+ */
+/**
+ * @typedef {object} OnAreaEffectHitPlayer
+ * @property {import("../player/player/player").Player} player - 命中的玩家实例
+ * @property {number} effectId - 区域效果实例 id
+ * @property {string} targetType - 命中的目标类型
+ * @property {number} hit -  玩家：`slot`  怪物：`monsterId`
+ * @property {string} buffName - 命中后要施加的预制 Buff 名称
+ */
+/**
+ * @typedef {object} OnAreaEffectHitMonster
+ * @property {import("../monster/monster/monster").Monster} monster - 命中的怪物实例
+ * @property {number} effectId - 区域效果实例 id
+ * @property {string} targetType - 命中的目标类型
+ * @property {number} hit -  玩家：`slot`  怪物：`monsterId`
+ * @property {string} buffName - 命中后要施加的预制 Buff 名称
+ */
+/**
+ * 区域效果目标类型常量。
+ */
+const Target={
+    Player:"player",
+    Monster:"monster",
+};
+//export const AreaEffectTargetType = Object.freeze({
+//    Player: "player",
+//    Monster: "monster",
+//});
+//
+///**
+// * 默认命中的目标类型。当前为了兼容燃烧区域，默认只命中玩家。
+// */
+//export const DEFAULT_AREA_EFFECT_TARGET_TYPES = Object.freeze([
+//    AreaEffectTargetType.Player,
+//]);
+//===================预制区域效果配置========================
+/** @type {Record<string, areaEffectStatic>} */
+const areaEffectStatics = {
+    "fire": {
+        effectName: "fire_area_effect",
+        buffName: "burn",
+        particleName: "fire",
+    },
+    "healing_field": {
+        effectName: "healing_field_area_effect",
+        buffName: "regeneration",
+        particleName: "healing_field",
+    },
+    // 后续在此添加更多预制区域效果，例如：
+    // firezone: { effectName: "firezone_area_effect", position: { x: 0, y: 0, z: 0 }, radius: 100, duration: 3, buffName: "burn", particleName: "firezone", targetTypes: [Target.Player, Target.Monster] },
+};
+
+/**
+ * @module 怪物系统/怪物技能/燃烧
+ */
+
+class FireSkill extends SkillTemplate {
+    /**
+     * @param {any|null} player
+     * @param {import("../../monster/monster/monster").Monster|null} monster
+     * @param {number} id
+     * @param {{
+     *   areaEffectStaticKey?: string;
+     *   cooldown?: number;
+     *   events?: string[];
+     *   animation?: string | null;
+     *   inputKey?: string;
+     *   zoneDuration?: number;
+     *   zoneRadius?: number;
+     *   triggerDistance?: number;
+     *   distance?: number;
+     *   targetTypes?: string[];
+     * }} params
+     */
+    constructor(player, monster, id, params = {}) {
+        super(player, monster, "fire", id, params);
+        this.animation = params.animation ?? null;
+        this.events = Array.isArray(params.events) && params.events.length > 0
+            ? params.events
+            : (player && !monster ? [PlayerRuntimeEvents.Input] : [MonsterRuntimeEvents.Die]);
+        this.inputKey = params.inputKey ?? "InspectWeapon";
+        this.areaEffectStaticKey = params.areaEffectStaticKey ?? "fire";
+        this.zoneDuration = params.zoneDuration ?? 5;
+        this.zoneRadius = params.zoneRadius ?? 150;
+        this.triggerDistance = Math.max(0, params.triggerDistance ?? params.distance ?? this.zoneRadius);
+        this.targetTypes = Array.isArray(params.targetTypes) ? params.targetTypes : null;
+    }
+    /**
+        * @param {import("../../util/runtime_events.js").RuntimeEvent} event
+     */
+    canTrigger(event) {
+        if (!this.events.includes(event.type)) return false;
+        if (!this._cooldownReady()) return false;
+
+        if (this.player && !this.monster) {
+            const inputKey = "key" in event ? event.key : undefined;
+            if (event.type === PlayerRuntimeEvents.Input && inputKey !== this.inputKey) return false;
+            this.trigger();
+            return false;
+        }
+
+        const monster = this.monster;
+        if (!monster) return false;
+
+        if (event.type === MonsterRuntimeEvents.Tick) {
+            if (!monster.target) return false;
+            if (monster.isOccupied()) return false;
+            const triggerDistanceSq = this.triggerDistance * this.triggerDistance;
+            if (triggerDistanceSq > 0 && monster.distanceTosq(monster.target) > triggerDistanceSq) {
+                return false;
+            }
+        }
+
+        if (this.animation === null) {
+            this.trigger();
+            return false;
+        }
+
+        return true;
+    }
+
+    trigger() {
+        const pos = this.player
+            ? this.player.entityBridge?.pawn?.GetAbsOrigin?.()
+            : this.monster?.model?.GetAbsOrigin?.();
+        if (!pos) return false;
+
+        /**@type {import("../../areaEffects/area_const").AreaEffectCreateRequest} */
+        const payload = {
+            areaEffectStaticKey: this.areaEffectStaticKey,
+            position: { x: pos.x, y: pos.y, z: pos.z },
+            radius: this.zoneRadius,
+            duration: this.zoneDuration,
+            targetTypes: this._resolveTargetTypes(),
+            result: -1,
+        };
+        eventBus.emit(event.AreaEffects.In.CreateRequest, payload);
+        if (payload.result > 0) {
+            this._markTriggered();
+            return true;
+        }
+        return false;
+    }
+
+    _resolveTargetTypes() {
+        const configuredTypes = Array.isArray(this.targetTypes)
+            ? this.targetTypes.filter((type) => type === Target.Player || type === Target.Monster)
+            : [];
+        if (configuredTypes.length > 0) {
+            return Array.from(new Set(configuredTypes));
+        }
+        if (this.player && !this.monster) {
+            return [Target.Monster];
+        }
+        return [Target.Player];
+    }
+}
+
+/**
+ * @module 怪物系统/怪物技能/产卵
+ */
+
+class SpawnSkill extends SkillTemplate {
+    /**
+     * @param {any|null} player
+     * @param {import("../../monster/monster/monster").Monster|null} monster
+     * @param {number} id
+     * @param {{
+     *   events?: string[];
+     *   event?: string;
+     *   count?: number;
+     *   typeName?: string;
+     *   cooldown?: number;
+     *   maxSummons?: number;
+     *   radiusMin?: number;
+     *   radiusMax?: number;
+     *   tries?: number;
+     *   animation?: string | null;
+     * }} [params]
+     */
+    constructor(player, monster, id, params = {}) {
+        super(player, monster, "spawn", id, params);
+        this.animation = params.animation ?? null;
+
+        const configuredEvents = params.events ?? (params.event ? [params.event] : [MonsterRuntimeEvents.Die]);
+        this.events = Array.isArray(configuredEvents) ? configuredEvents : [configuredEvents];
+        this.count = Math.max(1, params.count ?? 1);
+        this.typeName = params.typeName ?? monster?.type ?? "";
+        this.maxSummons = params.maxSummons ?? 1;
+        this.radiusMin = Math.max(0, params.radiusMin ?? 24);
+        this.radiusMax = Math.max(this.radiusMin, params.radiusMax ?? 96);
+        this.tries = Math.max(1, params.tries ?? 6);
+        this.spawnedTotal = 0;
+        this._pendingCount = 0;
+    }
+
+    canTrigger(/** @type {any} */ event) {
+        if (!this.events.includes(event.type)) return false;
+        if (!this._cooldownReady()) return false;
+
+        const monster = this.monster;
+        if (monster) {
+            if (this.maxSummons >= 0 && this.spawnedTotal >= this.maxSummons) return false;
+
+            const remaining = this.maxSummons < 0
+                ? this.count
+                : Math.min(this.count, this.maxSummons - this.spawnedTotal);
+            if (remaining <= 0) return false;
+
+            this._pendingCount = remaining;
+        }
+
+        if (this.animation === null) {
+            this.trigger();
+            return false;
+        }
+        return true;
+    }
+
+    trigger() {
+        if (this.player) {
+            this._markTriggered();
+            return;
+        }
+
+        const monster = this.monster;
+        if (!monster) return;
+
+        let spawnedNow = 0;
+        for (let i = 0; i < this._pendingCount; i++) {
+            const ok = monster.requestSpawn({
+                typeName: this.typeName,
+                radiusMin: this.radiusMin,
+                radiusMax: this.radiusMax,
+                tries: this.tries,
+            });
+            if (ok) spawnedNow++;
+        }
+
+        this._pendingCount = 0;
+        if (spawnedNow > 0) {
+            this.spawnedTotal += spawnedNow;
+            this._markTriggered();
+        }
+    }
+}
+
+/**
+ * @module 怪物系统/怪物技能/护盾
+ */
+
+class ShieldSkill extends SkillTemplate {
+    /**
+     * @param {any|null} player
+     * @param {import("../../monster/monster/monster").Monster|null} monster
+     * @param {number} id
+    * @param {Record<string, any>} [params]
+     */
+    constructor(player, monster, id, params = {}) {
+        super(player, monster, "shield", id, params);
+        this.runtime = params.runtime ?? -1;
+        this.maxshield = params.value ?? 0;
+        this.shield = 0;
+        this.animation = params.animation ?? null;
+
+        const userEvents = params.events ?? [MonsterRuntimeEvents.Spawn, MonsterRuntimeEvents.Tick];
+        this.events = userEvents.includes(MonsterRuntimeEvents.Spawn)
+            ? userEvents
+            : [MonsterRuntimeEvents.Spawn, ...userEvents];
+
+        this._initialized = false;
+        this._modFn = null;
+    }
+
+    onSkillDelete() {
+        const monster = this.monster;
+        if (monster && this._modFn) {
+            monster.healthCombat.removeDamageModifier(this._modFn);
+        }
+        this.running = false;
+        if (monster && monster.model instanceof BaseModelEntity) {
+            monster.model.Unglow();
+        }
+    }
+
+    canTrigger(/** @type {any} */ event) {
+        if (!this.events.includes(event.type)) return false;
+
+        const monster = this.monster;
+        if (event.type === MonsterRuntimeEvents.Spawn) {
+            if (this.player || !monster) return false;
+            if (!this._initialized) {
+                this._initialized = true;
+                this._modFn = (/** @type {number} */ amount) => {
+                    if (!this.running) return amount;
+
+                    const absorbed = Math.min(amount, this.shield);
+                    this.shield -= absorbed;
+                    if (this.shield <= 0) {
+                        this.running = false;
+                        if (monster.model instanceof BaseModelEntity) {
+                            monster.model.Unglow();
+                        }
+                    }
+                    return amount - absorbed;
+                };
+                monster.healthCombat.addDamageModifier(this._modFn);
+            }
+            return false;
+        }
+
+        if (!this._cooldownReady()) return false;
+
+        if (monster) {
+            if (this.running) return false;
+            if (monster.isOccupied()) return false;
+        }
+
+        if (this.animation === null) {
+            this.trigger();
+            return false;
+        }
+        return true;
+    }
+
+    tick() {
+        if (this.player) return;
+
+        const monster = this.monster;
+        if (!this.running || !monster) return;
+
+        if (this.runtime !== -1 && this.lastTriggerTime + this.runtime <= Instance.GetGameTime()) {
+            this.running = false;
+            if (monster.model instanceof BaseModelEntity) {
+                monster.model.Unglow();
+            }
+        }
+    }
+
+    trigger() {
+        if (this.player) {
+            this._markTriggered();
+            return;
+        }
+
+        const monster = this.monster;
+        if (!monster) return;
+
+        this.shield = this.maxshield;
+        if (monster.model instanceof BaseModelEntity) {
+            monster.model.Glow({ r: 0, g: 0, b: 255 });
+        }
+        this.running = true;
+        this._markTriggered();
+    }
+}
+
+/**
+ * @module 怪物系统/怪物技能/急速
+ */
+
+class SpeedBoostSkill extends SkillTemplate {
+    /**
+     * @param {any|null} player
+     * @param {import("../../monster/monster/monster").Monster|null} monster
+     * @param {number} id
+     * @param {{
+     *   cooldown?: number;
+     *   runtime?: number;
+     *   speed_mult?: number;
+     *   speed_value?: number;
+     *   events?: string[];
+     *   animation?: string | null;
+     *   glow?: {r:number, g:number, b:number} | null;
+     * }} [params]
+     */
+    constructor(player, monster, id, params = {}) {
+        super(player, monster, "speedboost", id, params);
+        this.animation = params.animation ?? null;
+        this.events = params.events ?? [MonsterRuntimeEvents.Tick];
+        this.glow = params.glow ?? null;
+    }
+
+    onSkillDelete() {
+        this._endBoost();
+    }
+
+    canTrigger(/** @type {any} */ event) {
+        if (!this.events.includes(event.type)) return false;
+        if (!this._cooldownReady()) return false;
+
+        const monster = this.monster;
+        if (monster) {
+            if (this.running) return false;
+            if (monster.isOccupied()) return false;
+        }
+
+        if (this.animation === null) {
+            this.trigger();
+            return false;
+        }
+        return true;
+    }
+
+    tick() {
+        if (this.player) return;
+
+        const monster = this.monster;
+        if (!this.running || !monster) return;
+
+        if (!monster.hasBuff("speed_up")) {
+            this._endBoost();
+        }
+    }
+
+    trigger() {
+        if (this.player) {
+            this._markTriggered();
+            return;
+        }
+
+        const monster = this.monster;
+        if (!monster) return;
+
+        const buff = monster.addBuff("speed_up");
+
+        if (!buff) return;
+
+        if (this.glow && monster.model instanceof BaseModelEntity) {
+            monster.model.Glow(this.glow);
+        }
+        this.running = true;
+        this._markTriggered();
+    }
+
+    _endBoost() {
+        const monster = this.monster;
+        this.running = false;
+        if (this.glow && monster && monster.model instanceof BaseModelEntity) {
+            monster.model.Unglow();
+        }
+    }
+}
+
+/**
+ * @module 怪物系统/怪物技能/投掷石头
+ */
+
+class ThrowStoneSkill extends SkillTemplate {
+    /**
+     * @param {any|null} player
+     * @param {import("../../monster/monster/monster").Monster|null} monster
+     * @param {number} id
+     * @param {{
+     *   cooldown?: number;
+     *   events?: string[];
+     *   animation?: string | null;
+     *   distanceMin?: number;
+     *   distanceMax?: number;
+     *   damage?: number;
+     *   projectileSpeed?: number;
+     *   gravityScale?: number;
+     *   radius?: number;
+     *   maxTargets?: number;
+     * }} [params]
+     */
+    constructor(player, monster, id, params = {}) {
+        super(player, monster, "throwstone", id, params);
+        this.animation = params.animation ?? null;
+        this.events = params.events ?? [MonsterRuntimeEvents.Tick];
+        this.distanceMin = params.distanceMin ?? 0;
+        this.distanceMax = params.distanceMax ?? 600;
+        this.damage = params.damage ?? 10;
+        this.projectileSpeed = params.projectileSpeed ?? 500;
+        this.gravityScale = params.gravityScale ?? 1;
+        this.radius = params.radius ?? 32;
+        this.maxTargets = params.maxTargets ?? 1;
+    }
+
+    canTrigger(/** @type {any} */ event) {
+        if (!this.events.includes(event.type)) return false;
+        if (!this._cooldownReady()) return false;
+
+        const monster = this.monster;
+        if (monster) {
+            if (!monster.target) return false;
+            if (this.running) return false;
+            if (monster.isOccupied()) return false;
+
+            const distsq = monster.distanceTosq(monster.target);
+            const minDistSq = this.distanceMin * this.distanceMin;
+            const maxDistSq = this.distanceMax * this.distanceMax;
+            if (distsq < minDistSq || distsq > maxDistSq) return false;
+        }
+
+        if (this.animation === null) {
+            this.trigger();
+            return false;
+        }
+        return true;
+    }
+
+    tick() {
+        if (this.player) return;
+        this.running = false;
+    }
+
+    trigger() {
+        if (this.player) {
+            this._markTriggered();
+            return;
+        }
+        const monster = this.monster;
+        const target = monster?.target;
+        if (!monster || !target) return;
+
+        const distsq = monster.distanceTosq(target);
+        const minDistSq = this.distanceMin * this.distanceMin;
+        const maxDistSq = this.distanceMax * this.distanceMax;
+        if (distsq < minDistSq || distsq > maxDistSq) return;
+
+        this.running = true;
+        this._markTriggered();
+        monster.emitAttackEvent(this.damage, target);
+        this.running = false;
+    }
+}
+
+/**
+ * @module 怪物系统/怪物技能/激光
+ */
+
+class LaserBeamSkill extends SkillTemplate {
+    /**
+    * @param {import("../../player/player/player.js").Player|null} player
+    * @param {import("../../monster/monster/monster.js").Monster|null} monster
+     * @param {number} id
+     * @param {{
+     *   cooldown?: number;
+     *   events?: string[];
+     *   animation?: string | null;
+     *   distance?: number;
+     *   duration?: number;
+     *   damagePerSecond?: number;
+     *   tickInterval?: number;
+     *   width?: number;
+     *   pierce?: boolean;
+     *   maxTargets?: number;
+     *   startDelay?: number;
+     * }} [params]
+     */
+    constructor(player, monster, id, params = {}) {
+        super(player, monster, "laserbeam", id, params);
+        this.animation = params.animation ?? null;
+        this.events = params.events ?? [MonsterRuntimeEvents.Tick];
+        this.distance = params.distance ?? 500;
+        this.duration = params.duration ?? 0;
+        this.damagePerSecond = params.damagePerSecond ?? 20;
+        this.tickInterval = params.tickInterval ?? 0.25;
+        this.width = params.width ?? 8;
+        this.pierce = params.pierce ?? false;
+        this.maxTargets = params.maxTargets ?? 1;
+        this.startDelay = params.startDelay ?? 0;
+        this._beamStartedAt = 0;
+        this._nextDamageAt = 0;
+    }
+    /**
+        * @param {import("../../util/runtime_events.js").RuntimeEvent} event
+     */
+    canTrigger(event) {
+        if (!this.events.includes(event.type)) return false;
+        if (!this._cooldownReady()) return false;
+        if (!this.monster)return false;
+
+        if (!this.monster.target) return false;
+        if (this.running) return false;
+        if (this.monster.isOccupied()) return false;
+
+        const distsq = this.monster.distanceTosq(this.monster.target);
+        if (distsq > this.distance * this.distance) return false;
+
+        if (this.animation === null) {
+            this.trigger();
+            return false;
+        }
+        return true;
+    }
+
+    tick() {
+        if (this.player) return;
+        if (!this.running || !this.monster) return;
+
+        const now = Instance.GetGameTime();
+        if (this.duration > 0 && this._beamStartedAt + this.duration <= now) {
+            this._stopBeam();
+            return;
+        }
+
+        const target = this.monster.target;
+        if (!target || this.monster.distanceTosq(target) > this.distance * this.distance) {
+            this._stopBeam();
+            return;
+        }
+
+        const interval = this.tickInterval > 0 ? this.tickInterval : 0.25;
+        while (now >= this._nextDamageAt) {
+            this.monster.emitAttackEvent(Math.max(1, Math.round(this.damagePerSecond * interval)), target);
+            this._nextDamageAt += interval;
+        }
+    }
+
+    trigger() {
+        if (this.player) {
+            this._markTriggered();
+            return;
+        }
+        const monster = this.monster;
+        const target = monster?.target;
+        if (!monster || !target) return;
+        if (monster.distanceTosq(target) > this.distance * this.distance) return;
+
+        this._markTriggered();
+        this._beamStartedAt = Instance.GetGameTime();
+        const interval = this.tickInterval > 0 ? this.tickInterval : 0.25;
+        this._nextDamageAt = this._beamStartedAt + this.startDelay;
+
+        if (this.duration <= 0) {
+            monster.emitAttackEvent(Math.max(1, Math.round(this.damagePerSecond * interval)), target);
+            this._stopBeam();
+            return;
+        }
+
+        this.running = true;
+    }
+
+    onSkillDelete() {
+        this._stopBeam();
+    }
+
+    _stopBeam() {
+        this.running = false;
+        this._beamStartedAt = 0;
+        this._nextDamageAt = 0;
+    }
+}
+
+/**
+ * @module 怪物系统/怪物技能/声音实体
+ */
+
+class SoundSkill extends SkillTemplate {
+    /**
+     * @param {any|null} player
+     * @param {import("../../monster/monster/monster").Monster|null} monster
+     * @param {number} id
+     * @param {{
+     *   templateName?: string;
+     *   eventSoundMap?: Record<string, string>;
+     *   cooldown?: number;
+     *   events?: string[];
+     *   animation?: string | null;
+     * }} [params]
+     */
+    constructor(player, monster, id, params = {}) {
+        super(player, monster, "sound", id, params);
+        this.cooldown = params.cooldown ?? 0;
+        this.animation = params.animation ?? null;
+        this.templateName = typeof params.templateName === "string" ? params.templateName.trim() : "";
+        this.eventSoundMap = params.eventSoundMap ?? {};
+        const configuredEvents = Array.isArray(params.events) && params.events.length > 0
+            ? params.events
+            : Object.keys(this.eventSoundMap);
+        this.events = configuredEvents.length > 0
+            ? configuredEvents
+            : [MonsterRuntimeEvents.Spawn];
+        /** @type {import("cs_script/point_script").Entity[]} */
+        this._spawnedEntities = [];
+        /** @type {import("cs_script/point_script").Entity|null} */
+        this._soundEntity = null;
+        /** @type {string | null} */
+        this._pendingSoundEventName = null;
+    }
+
+    onSkillAdd() {
+        if (this.player || !this.monster) return;
+        this._ensureSoundEntity();
+    }
+
+    onSkillDelete() {
+        super.onSkillDelete();
+        this._pendingSoundEventName = null;
+        this._cleanupEntities();
+    }
+
+    /**
+     * @param {{ type: string }} event
+     * @returns {boolean}
+     */
+    canTrigger(event) {
+        if (this.player || !this.monster) return false;
+        if (!this.events.includes(event.type)) return false;
+        const soundEventName = this.eventSoundMap[event.type];
+        if (!soundEventName) return false;
+        if (!this._cooldownReady()) return false;
+        if (!this._ensureSoundEntity()) return false;
+        if (this.animation === null) {
+            this._pendingSoundEventName = soundEventName;
+            this.trigger();
+            return false;
+        }
+        if (this.monster.isOccupied()) return false;
+        this._pendingSoundEventName = soundEventName;
+        return true;
+    }
+
+    trigger() {
+        if (this.player || !this.monster) return false;
+        if (!this._ensureSoundEntity()) return false;
+
+        const soundEntity = this._soundEntity;
+        const soundEventName = this._pendingSoundEventName;
+        if (!soundEntity?.IsValid?.()) return false;
+        if (!soundEventName) return false;
+
+        Instance.EntFireAtTarget({
+            target: soundEntity,
+            input: "SetSoundEventName",
+            value: soundEventName,
+        });
+        Instance.EntFireAtTarget({
+            target: soundEntity,
+            input: "StartSound",
+        });
+        this._pendingSoundEventName = null;
+        this._markTriggered();
+        return true;
+    }
+    /**
+     * @returns {boolean}
+     */
+    _ensureSoundEntity() {
+        if (this._soundEntity?.IsValid?.()) {
+            return true;
+        }
+
+        const monster = this.monster;
+        const model = monster?.model;
+        if (!this.templateName) {
+            return false;
+        }
+        if (!model?.IsValid?.()) {
+            return false;
+        }
+
+        this._cleanupEntities();
+
+        const template = Instance.FindEntityByName(this.templateName);
+        if (!template || !(template instanceof PointTemplate)) {
+            return false;
+        }
+
+        const origin = model.GetAbsOrigin?.();
+        const spawned = template.ForceSpawn(origin);
+        if (!spawned || spawned.length === 0) {
+            return false;
+        }
+
+        this._spawnedEntities = spawned;
+        this._soundEntity = spawned.find((entity) => entity?.IsValid?.()) ?? null;
+        if (!this._soundEntity) {
+            this._cleanupEntities();
+            return false;
+        }
+        Instance.EntFireAtTarget({
+            target: this._soundEntity,
+            input: "Followentity",
+            value: "!activator",
+            activator: model,
+        });
+        return true;
+    }
+
+    _cleanupEntities() {
+        for (const entity of this._spawnedEntities) {
+            if (entity?.IsValid?.()) {
+                entity.Remove();
+            }
+        }
+        this._spawnedEntities = [];
+        this._soundEntity = null;
+    }
+}
+
+class PlayerPulseSkill extends SkillTemplate {
+    /**
+     * @param {import("../../player/player/player").Player | null} player
+     * @param {import("../../monster/monster/monster").Monster | null} monster
+     * @param {string} typeId
+     * @param {number} id
+     * @param {{
+     *   inputKey?: string;
+     *   cooldown?: number;
+     *   heal?: number;
+     *   armor?: number;
+     *   events?: string[];
+     * }} [params]
+     */
+    constructor(player, monster, typeId, id, params = {}) {
+        super(player, monster, typeId, id, params);
+        this.animation = null;
+        this.events = params.events ?? [PlayerRuntimeEvents.Input];
+        this.inputKey = params.inputKey ?? "InspectWeapon";
+        this.heal = params.heal ?? 0;
+        this.armor = params.armor ?? 0;
+    }
+
+    /**
+        * @param {import("../../util/runtime_events.js").RuntimeEvent} event
+     * @returns {boolean}
+     */
+    canTrigger(event) {
+        if (!this.player || this.monster) return false;
+        if (!this.events.includes(event.type)) return false;
+        const inputKey = "key" in event ? event.key : undefined;
+        if (event.type === PlayerRuntimeEvents.Input && inputKey !== this.inputKey) return false;
+        if (!this._cooldownReady()) return false;
+
+        this.trigger();
+        return false;
+    }
+
+    trigger() {
+        const player = this.player;
+        if (!player || this.monster) return;
+
+        let applied = false;
+        if (this.heal > 0) {
+            applied = player.heal(this.heal) || applied;
+        }
+        if (this.armor > 0) {
+            applied = player.giveArmor(this.armor) || applied;
+        }
+
+        if (!applied) return;
+        this._markTriggered();
+    }
+}
+
+class PlayerHealingFieldSkill extends SkillTemplate {
+    /**
+     * @param {import("../../player/player/player").Player | null} player
+     * @param {import("../../monster/monster/monster").Monster | null} monster
+     * @param {number} id
+     * @param {{
+     *   inputKey?: string;
+     *   cooldown?: number;
+     *   zoneDuration?: number;
+     *   zoneRadius?: number;
+     *   areaEffectStaticKey?: string;
+     *   targetTypes?: string[];
+     *   events?: string[];
+     * }} [params]
+     */
+    constructor(player, monster, id, params = {}) {
+        super(player, monster, "player_mend_field", id, params);
+        this.animation = null;
+        this.events = Array.isArray(params.events) && params.events.length > 0
+            ? params.events
+            : [PlayerRuntimeEvents.Input];
+        this.inputKey = params.inputKey ?? "InspectWeapon";
+        this.zoneDuration = params.zoneDuration ?? 5;
+        this.zoneRadius = params.zoneRadius ?? 150;
+        this.areaEffectStaticKey = params.areaEffectStaticKey ?? "healing_field";
+        this.targetTypes = Array.isArray(params.targetTypes) ? params.targetTypes : [Target.Player];
+        this.activeAreaEffectId = null;
+    }
+
+    /**
+        * @param {import("../../util/runtime_events.js").RuntimeEvent} eventPayload
+     * @returns {boolean}
+     */
+    canTrigger(eventPayload) {
+        if (!this.player || this.monster) return false;
+        if (!this.events.includes(eventPayload.type)) return false;
+        const inputKey = "key" in eventPayload ? eventPayload.key : undefined;
+        if (eventPayload.type === PlayerRuntimeEvents.Input && inputKey !== this.inputKey) return false;
+        if (!this._cooldownReady()) return false;
+
+        this.trigger();
+        return false;
+    }
+
+    trigger() {
+        const parentEntity = this._getParentEntity();
+        const position = parentEntity?.GetAbsOrigin?.();
+        if (!position) return false;
+
+        this._stopActiveAreaEffect();
+
+        /** @type {import("../../areaEffects/area_const").AreaEffectCreateRequest} */
+        const payload = {
+            areaEffectStaticKey: this.areaEffectStaticKey,
+            position: { x: position.x, y: position.y, z: position.z },
+            parentEntity,
+            radius: this.zoneRadius,
+            duration: this.zoneDuration,
+            targetTypes: this._resolveTargetTypes(),
+            result: -1,
+        };
+        eventBus.emit(event.AreaEffects.In.CreateRequest, payload);
+        if (payload.result <= 0) {
+            return false;
+        }
+
+        this.activeAreaEffectId = payload.result;
+        this._markTriggered();
+        return true;
+    }
+
+    onSkillDelete() {
+        super.onSkillDelete();
+        this._stopActiveAreaEffect();
+    }
+
+    _getParentEntity() {
+        const player = this.player;
+        const pawn = player?.entityBridge?.pawn;
+        if (!player || this.monster || !player.isAlive || !pawn?.IsValid?.()) {
+            return null;
+        }
+        return pawn;
+    }
+
+    _resolveTargetTypes() {
+        const resolved = this.targetTypes.filter((type) => type === Target.Player || type === Target.Monster);
+        return resolved.length > 0 ? Array.from(new Set(resolved)) : [Target.Player];
+    }
+
+    _stopActiveAreaEffect() {
+        const areaEffectId = this.activeAreaEffectId;
+        this.activeAreaEffectId = null;
+        if (areaEffectId == null || areaEffectId < 1) return false;
+
+        /** @type {import("../../areaEffects/area_const").AreaEffectStopRequest} */
+        const payload = {
+            areaEffectId,
+            result: false,
+        };
+        eventBus.emit(event.AreaEffects.In.StopRequest, payload);
+        return payload.result;
+    }
+}
+
+/**
+ * @module 怪物系统/技能工厂
+ */
+/*
+技能分类规则（唯一权威）：
+  有 animation 参数（非 null）= 有动作：canTrigger 返回 true 后 request 占用当前待执行槽，
+    Monster 进入 SKILL 状态，管理器先播放 animation，再调用 trigger()。
+  无 animation（null）       = 无动作：canTrigger 内直接执行业务并返回 false。
+  cooldown = -1              = 一次性：仅首次触发后永久失效。默认为 -1。
+  cooldown = 0               = 无冷却。
+  cooldown > 0               = 按秒间隔触发。
+
+实例 id 语义：
+  skill.typeId 是技能类型标识（即下方的 id 字段）。
+  skill.id 是运行时实例 id，由 MonsterSkillsManager.addSkill 按添加顺序分配，
+  id 越小优先级越高。同一怪物可同时拥有多个相同 typeId 的技能实例。
+
+所有技能均支持 params.events（string[]）配置多个触发事件，未提供则使用各技能自身默认。
+每个技能均支持可选 animation 参数，不传则默认 null（无动作）。
+每个技能均支持可选 cooldown 参数，不传则默认 -1（一次性）。
+
+技能列表（typeId 均为小写无前缀）：
+
+corestats   基础属性增加（默认 OnSpawn 执行一次，cooldown=-1）
+  { health_mult?, health_value?, damage_mult?, damage_value?,
+    speed_mult?, speed_value?, reward_mult?, reward_value?,
+    cooldown?, events?, animation? }
+
+pounce      飞扑（默认 OnTick 判断距离和冷却）
+  { distance: number, cooldown?, events?, animation? }
+
+initanim    初始动画（默认 OnSpawn 一次性）
+  { cooldown?, events?, animation? }
+
+doubleattack  双倍攻击（默认 AttackTrue 触发）
+  { cooldown?, events?, animation? }
+
+powerattack   重击（默认 AttackTrue 触发，可击飞玩家）
+  { cooldown?, events?, animation? }
+
+fire          燃烧区域（怪物默认 Die 触发；玩家默认 InspectWeapon 触发）
+  { cooldown?, events?, animation?, inputKey?, zoneDuration?, zoneRadius?, triggerDistance?/distance?, targetTypes? }
+
+shield      能量护盾（默认 [OnSpawn, OnTick]，Spawn 始终保留以初始化修饰器）
+  { runtime: number, value: number, cooldown?, events?, animation? }
+
+speedboost  急速（默认 OnTick，临时提升移动速度，超时后恢复）
+  { runtime: number, speed_mult?, speed_value?, cooldown?, events?, animation?,
+    glow?: {r,g,b} }
+
+throwstone  投掷石头（默认 OnTick，距离判定后投掷，trigger 待实现）
+  { distanceMin?, distanceMax?, damage?, projectileSpeed?, gravityScale?,
+    radius?, maxTargets?, cooldown?, events?, animation? }
+
+laserbeam   发射激光（默认 OnTick，distance 内判定，trigger 待实现）
+  { distance?, duration?, damagePerSecond?, tickInterval?, width?,
+    pierce?, maxTargets?, startDelay?, cooldown?, events?, animation? }
+
+sound       怪物声音实体（创建时生成跟随怪物模型的实体，命中事件时设置声音事件并播放）
+  { templateName: string, eventSoundMap?: Record<string, string>, cooldown?, events?, animation? }
+
+spawn       事件触发产卵（默认 OnDie）
+  { events?, event?(旧单值兄容), count?, typeName?, cooldown?,
+    maxSummons?, radiusMin?, radiusMax?, tries?, animation? }
+
+player_guard    玩家守护脉冲（InspectWeapon 触发，加护甲）
+player_mend     玩家治疗脉冲（InspectWeapon 触发，回血）
+player_mend_field 玩家治疗领域（InspectWeapon 触发，创建跟随玩家的持续回血区域）
+player_vanguard 玩家先锋脉冲（InspectWeapon 触发，回血+护甲）
+ */
+/**
+ * 技能工厂。根据 typeId 创建对应的技能实例。
+ *
+ * 当前支持的 typeId：
+ * corestats、pounce、initanim、doubleattack、powerattack、
+ * fire、spawn、shield、speedboost、throwstone、laserbeam、sound、
+ * player_guard、player_mend、player_mend_field、player_vanguard。
+ *
+ * 所有技能均支持 `params.events`、`params.animation`、`params.cooldown`。
+ * 详细参数见各技能类的 JSDoc。
+ */
+const SkillFactory = {
+    /**
+     * 根据 typeId 创建对应的技能实例。未识别的 id 返回 null。
+      * @param {import("../player/player/player.js").Player|null} player 施法玩家
+      * @param {import("../monster/monster/monster.js").Monster|null} monster 施法怪物
+     * @param {string} typeid 技能类型标识（如 "corestats"、"pounce"）
+     * @param {number} id 技能实例 id
+     * @param {any} params 技能配置参数
+      * @returns {import("./skill_template.js").SkillTemplate|null}
+     */
+  create(player, monster, typeid, id, params = {}) {
+        switch (typeid) {
+            case "corestats":
+        return new CoreStats(player, monster,id, params);
+            case "pounce":
+        return new PounceSkill(player, monster,id, params);
+            case "initanim":
+        return new InitAnimSkill(player, monster,id, params);
+            case "doubleattack":
+        return new DoubleAttackSkill(player, monster,id, params);
+            case "powerattack":
+        return new PowerAttackSkill(player, monster,id, params);
+            case "fire":
+          return new FireSkill(player, monster,id, params);
+            case "spawn":
+        return new SpawnSkill(player, monster,id, params);
+            case "shield":
+        return new ShieldSkill(player, monster,id, params);
+            case "speedboost":
+        return new SpeedBoostSkill(player, monster,id, params);
+            case "throwstone":
+        return new ThrowStoneSkill(player, monster,id, params);
+            case "laserbeam":
+        return new LaserBeamSkill(player, monster,id, params);
+            case "sound":
+          return new SoundSkill(player, monster,id, params);
+            case "player_guard":
+          return new PlayerPulseSkill(player, monster, "player_guard", id, { inputKey: "InspectWeapon", cooldown: 8, armor: 25, ...params });
+            case "player_mend":
+          return new PlayerPulseSkill(player, monster, "player_mend", id, { inputKey: "InspectWeapon", cooldown: 8, heal: 35, ...params });
+            case "player_mend_field":
+          return new PlayerHealingFieldSkill(player, monster, id, { inputKey: "InspectWeapon", cooldown: 10, zoneDuration: 5, zoneRadius: 150, ...params });
+            case "player_vanguard":
+          return new PlayerPulseSkill(player, monster, "player_vanguard", id, { inputKey: "InspectWeapon", cooldown: 10, heal: 20, armor: 15, ...params });
+            default:
+                return null;
+        } 
+    }
+};
+
+/** @typedef {import("../../../skill/skill_template").SkillTemplate & { animation?: string | null }} MonsterSkill */
+
+class MonsterSkillsManager {
+    /**
+     * @param {import("../monster").Monster} monster
+     */
+    constructor(monster) {
+        this.monster = monster;
+        /** @type {MonsterSkill | null} */
+        this._requestedSkill = null;
+    }
+
+    /**
+     * @param {import("../../../util/definition").skill_pool[] | undefined} skillPool
+     */
+    initSkills(skillPool) {
+        if (!skillPool) return;
+
+        for (const cfg of skillPool) {
+            if (Math.random() > cfg.chance) continue;
+            const skill = SkillFactory.create(null, this.monster, cfg.id, this.monster.skills.length, cfg.params);
+            if (!skill) continue;
+            this.addSkill(skill);
+        }
+    }
+
+    /**
+     * @param {MonsterSkill} skill
+     */
+    addSkill(skill) {
+        skill.id = this.monster.skills.length;
+        this.monster.skills.push(skill);
+        skill.onSkillAdd();
+    }
+
+    /**
+        * @param {import("../../../util/runtime_events.js").RuntimeEvent} event
+     */
+    emitEvent(event) {
+        for (const skill of this.monster.skills) {
+            if (!skill.canTrigger(event)) continue;
+            skill._request();
+            return true;
+        }
+        return false;
+    }
+
+    tickRunningSkills() {
+        for (const skill of this.monster.skills) {
+            if (!skill.running) continue;
+            skill.tick();
+        }
+    }
+
+    clear() {
+        this._requestedSkill = null;
+        for (const skill of this.monster.skills) {
+            skill.onSkillDelete();
+        }
+        this.monster.skills.length = 0;
+    }
+
+    /**
+     * @param {MonsterSkill} skill
+     */
+    requestSkill(skill) {
+        if (this.monster.movementStateMovemode === "ladder") {
+            this._requestedSkill = null;
+            return false;
+        }
+        if (this._requestedSkill) return false;
+        this._requestedSkill = skill;
+        return true;
+    }
+
+    hasRequestedSkill() {
+        if (this.monster.movementStateMovemode === "ladder") {
+            this._requestedSkill = null;
+            return false;
+        }
+        return this._requestedSkill !== null;
+    }
+
+    triggerRequestedSkill() {
+        if (this.monster.movementStateMovemode === "ladder") {
+            this._requestedSkill = null;
+            return;
+        }
+
+        const skill = this._requestedSkill;
+        this._requestedSkill = null;
+        if (!skill) return;
+
+        if (skill.animation) this.monster.animation.play(skill.animation);
+        skill.trigger();
+    }
+}
+
+/**
+ * @module 怪物系统/怪物组件/移动意图适配
+ */
+
+
+/**
+ * 怪物移动意图适配器（事件驱动）。
+ *
+ * 不再每帧推送 Move 请求，而是在状态变化点发出请求：
+ * - activate()   — 进入追击态时提交 Move
+ * - deactivate() — 进入技能/空闲/死亡时提交 Stop
+ * - onTargetChanged()      — 追击目标更换时重新提交
+ * - onOccupationChanged()  — 动画占用开始/结束时重新提交 Chase 请求，更新 usePathRefresh
+ *
+ * MovementManager 持有长期任务，无需每帧重复推送。
+ *
+ * @navigationTitle 怪物移动意图适配器
+ */
+class MonsterMovementPathAdapter {
+    /**
+     * @param {import("../monster").Monster} monster 所属怪物实例
+     */
+    constructor(monster) {
+        /** 所属怪物实例。 */
+        this.monster = monster;
+        /** 注册时的默认移动模式。由 init 保存。 */
+        this._defaultMode = "walk";
+        /** 当前是否有活跃的追击任务。 */
+        this._active = false;
+    }
+
+    /**
+     * 初始化：仅记录配置，不创建运动执行器。
+     * @param {import("../../../util/definition").monsterTypes} typeConfig 怪物类型配置
+     */
+    init(typeConfig) {
+        switch (typeConfig.movementmode) {
+            case "fly":
+                this._defaultMode = "fly";
+                break;
+            default:
+                this._defaultMode = "walk";
+                break;
+        }
+    }
+
+    /**
+     * 激活追击。进入 CHASE / ATTACK 等需要持续移动的状态时调用。
+     */
+    activate() {
+        if (!this._getMovementEntity() || !this.monster.target) return;
+        this._active = true;
+        this._submitChase();
+    }
+
+    /**
+     * 停止移动。进入 SKILL / IDLE / DEAD 或丢失目标时调用。
+     */
+    deactivate() {
+        if (!this._active) return;
+        const entity = this._getMovementEntity();
+        this._active = false;
+        if (!entity) return;
+        this.monster.submitMovementEvent({
+            type: MovementRequestType$1.Stop,
+            entity,
+            priority: MovementPriority$1.StateChange,
+            clearPath: false,
+        });
+    }
+
+    /**
+     * 追击目标实体变化时调用。若当前活跃则重新提交 Move；
+     * 若新目标为 null 则自动停止。
+     */
+    onTargetChanged() {
+        if (!this._active) return;
+        if (!this.monster.target) {
+            this.deactivate();
+            return;
+        }
+        this._submitChase();
+    }
+
+    /**
+     * 动画占用状态变化时调用（开始/结束）。
+     * 重新提交 Chase 请求，用 usePathRefresh 直接表达“当前是否允许刷新路径”。
+     */
+    onOccupationChanged() {
+        if (!this._active) return;
+        this._submitChase();
+    }
+
+    refreshMovement() {
+        if (!this._active) return;
+        if (this.monster.state === MonsterState.DEAD) {
+            this.deactivate();
+            return;
+        }
+        if (!this.monster.target) {
+            this.deactivate();
+            return;
+        }
+        this._submitChase();
+    }
+
+    /** 内部：提交一次 Chase Move 请求。 */
+    _submitChase() {
+        const entity = this._getMovementEntity();
+        const target = this.monster.target;
+        if (!entity || !target) return;
+
+        this.monster.submitMovementEvent({
+            type: MovementRequestType$1.Move,
+            entity,
+            priority: MovementPriority$1.Chase,
+            targetEntity: target,
+            usePathRefresh: !this.monster.isOccupied(),
+            useNPCSeparation: true,
+            maxSpeed: this.monster.speed,
+            Mode: this._defaultMode,
+        });
+    }
+
+    /** @returns {import("cs_script/point_script").Entity | null} */
+    _getMovementEntity() {
+        const entity = this.monster.model;
+        if (!entity?.IsValid()) return null;
+        return entity;
+    }
+
+    /** 获取注册用的默认模式。 */
+    getDefaultMode() {
+        return this._defaultMode;
+    }
+}
+
+/**
+ * @module 怪物系统/怪物组件/动画占用
+ */
+
+/**
+ * 怪物动画控制器。
+ *
+ * 封装 MonsterAnimator 并在攻击、技能、死亡动作播放期间
+ * 设置占用标志，禁止其他动作插入。
+ * 动作结束后自动取消占用并触发回调。
+ * 同时管理死亡动画/尸体降落流程。
+ *
+ * @navigationTitle 怪物动画控制器
+ */
+class MonsterAnimator {
+    /**
+     * 创建怪物动画控制器。
+     * @param {import("../monster").Monster} monster 所属怪物实例
+     * @param {Entity | null} model Source 2 怪物模型实体
+     * @param {import("../../../util/definition").animations} animConfig 动画配置表（idle/walk/attack/skill/dead 动画名数组）
+     */
+    constructor(monster,model,animConfig) {
+        /** 所属怪物实例。 */
+        this.monster = monster;
+        /** Source 2 怪物模型实体。 */
+        this.model = model;
+        /**
+         * 动画配置表。每个键对应一组可随机播放的动画名。
+         * @type {import("../../../util/definition").animations}
+         */
+        this.animConfig = animConfig;
+        /** 是否处于动作占用期。播放动画时置 true，`OnAnimationDone` 事件触发后置 false。 */
+        this.locked = false;
+        /** 当前动画对应的 MonsterState 值。由 `tick` / `enter` 设置。 */
+        this.currentstats=-1;
+        /** 动作结束回调。仅当 type 与当前占用一致时才清除。 */
+        this.onStateFinish = null;
+        /** @type {Entity | null} */
+        this._boundModel = null;
+
+        this._bindModelOutput();
+    }
+
+    _bindModelOutput() {
+        this.model = this.monster.model ?? this.model;
+        if (!this.model || this._boundModel === this.model) return;
+
+        this._boundModel = this.model;
+        Instance.ConnectOutput(this.model,"OnAnimationDone",()=>{
+            this.locked = false;
+            this.onStateFinish?.(this.currentstats);
+        });
+    }
+    /**
+     * 设置动画播放完成回调。当任一动画结束（`OnAnimationDone`）时触发，
+     * 传入当时的 MonsterState 值。
+     * @param {(state: number) => void} callback 状态回调
+     */
+    setonStateFinish(callback)
+    {
+        this.onStateFinish=callback;
+    }
+    /**
+     * 初始化动画控制器，并注册动画完成回调处理占用释放和死亡流程。
+     * @param {import("../../../util/definition").animations} animations 动画配置表
+     */
+    init(animations) {
+        this.animConfig = animations;
+        this._bindModelOutput();
+        this.setonStateFinish((/** @type {number} */ state) => {
+            if (state == MonsterState.ATTACK) this.monster.onOccupationEnd("attack");
+            else if (state == MonsterState.SKILL) this.monster.onOccupationEnd("skill");
+            else if (state == MonsterState.DEAD) this.monster.finalizeDeath(removeModelAfterDeathAnimation);
+        });
+    }
+
+    /**
+     * 当前是否被占用。
+     * @returns {boolean}
+     */
+    isOccupied() {
+        return this.monster.occupation != "";
+    }
+
+    /**
+     * 设置占用标记。占用期间状态切换被禁止。
+     * @param {string} type 占用类型（"attack" | "skill" | "pounce"）
+     */
+    setOccupation(type) {
+        this.monster.occupation = type;
+    }
+
+    /**
+     * 占用结束回调。仅当 type 与当前占用一致时才清除。
+     * @param {string} type 占用类型
+     */
+    onOccupationEnd(type) {
+        if (this.monster.occupation !== type) return;
+        this.monster.occupation = "";
+    }
+
+    /**
+     * 每帧更新。若 `locked` 则跳过；否则根据当前状态播放对应动画。
+     * @param {number} state 当前 MonsterState
+     */
+    tick(state) {
+        if (this.locked) return;
+        this.currentstats=state;
+        switch (state) {
+            case MonsterState.IDLE:
+                this.play("idle");
+                break;
+            case MonsterState.CHASE:
+                this.play("walk");
+                break;
+            case MonsterState.ATTACK:
+                this.play("attack");
+                break;
+            case MonsterState.SKILL:
+                this.play("skill");
+                break;
+            case MonsterState.DEAD:
+                this.play("dead");
+                break;
+        }
+    }
+
+    /**
+     * 未被占用时始终允许；占用期间仅当当前不是 ATTACK/SKILL 时允许。
+     * @returns {boolean}
+     */
+    canSwitch() {
+        if (!this.locked) {
+            return true;
+        }
+        if (this.currentstats==MonsterState.ATTACK||this.currentstats==MonsterState.SKILL) {
+            return false;
+        }
+        return true;
+    }
+
+    /**
+     * 强制播放指定状态对应的动画，无视 `locked` 状态。
+     * 由 `applyStateTransition` 在状态切换成功后调用。
+     * @param {number} nextState MonsterState
+     */
+    enter(nextState) {
+        this.currentstats=nextState;
+        switch (nextState) {
+            case MonsterState.IDLE:
+                this.play("idle");
+                break;
+            case MonsterState.CHASE:
+                this.play("walk");
+                break;
+            case MonsterState.ATTACK:
+                this.play("attack");
+                break;
+            case MonsterState.SKILL:
+                this.play("skill");
+                break;
+            case MonsterState.DEAD:
+                if (!this.play("dead")) {
+                    this.monster.finalizeDeath(removeModelAfterDeathAnimation);
+                }
+                break;
+        }
+    }
+    /**
+     * 播放指定类型的动画。从配置表中随机选择一个动画名，
+     * 通过 `EntFireAtTarget(SetAnimation)` 发送给引擎。
+     * @param {string} type 动画类型键（"idle"|"walk"|"attack"|"skill"|"dead"）
+     */
+    play(type) {
+        this._bindModelOutput();
+        const list = this.animConfig[type];
+        if (!this.model || !list || list.length === 0) return null;
+        const anim = list[Math.floor(Math.random() * list.length)];
+        if (!anim) return;
+        Instance.EntFireAtTarget({target:this.model,input:"SetAnimation",value:anim});
+        this.locked=true;
+        return anim;
+    }
+}
+
+/**
+ * @module 工具/向量工具
+ */
+/**
+ * 向量工具类，提供 2D/3D 向量的静态运算方法（加减、点积、叉积、归一化、插值等）。
+ * @navigationTitle 向量工具
+ */
+let vec$1 = class vec{
+    /**
+     * 返回向量vec1+vec2
+     * @param {import("cs_script/point_script").Vector} a
+     * @param {import("cs_script/point_script").Vector} b
+     * @returns {import("cs_script/point_script").Vector}
+     */
+    static add(a, b) {
+        return { x: a.x + b.x, y: a.y + b.y, z: a.z + b.z };
+    }
+    /**
+     * 添加 2D 分量
+     * @param {import("cs_script/point_script").Vector} a
+     * @param {import("cs_script/point_script").Vector} b
+     * @returns {import("cs_script/point_script").Vector}
+     */
+    static add2D(a, b) {
+        return { x: a.x + b.x, y: a.y + b.y, z: a.z};
+    }
+    /**
+     * 返回向量vec1-vec2
+     * @param {import("cs_script/point_script").Vector} a
+     * @param {import("cs_script/point_script").Vector} b
+     * @returns {import("cs_script/point_script").Vector}
+     */
+    static sub(a, b) {
+        return { x: a.x - b.x, y: a.y - b.y, z: a.z - b.z };
+    }
+    /**
+     * 返回向量vec1*s
+     * @param {import("cs_script/point_script").Vector} a
+     * @param {number} s
+     * @returns {import("cs_script/point_script").Vector}
+     */
+    static scale(a,s)
+    {
+        return {x:a.x*s,y:a.y*s,z:a.z*s}
+    }
+    /**
+     * 返回向量vec1*s
+     * @param {import("cs_script/point_script").Vector} a
+     * @param {number} s
+     * @returns {import("cs_script/point_script").Vector}
+     */
+    static scale2D(a,s) {
+        return {
+            x:a.x * s,
+            y:a.y * s,
+            z:a.z
+        };
+    }
+    /**
+     * 得到vector
+     * @param {number} [x]
+     * @param {number} [y]
+     * @param {number} [z]
+     * @returns {import("cs_script/point_script").Vector}
+     */
+    static get(x=0,y=0,z=0)
+    {
+        return {x,y,z};
+    }
+    /**
+     * 深复制
+     * @param {import("cs_script/point_script").Vector} a
+     * @returns {import("cs_script/point_script").Vector}
+     */
+    static clone(a)
+    {
+        return {x:a.x,y:a.y,z:a.z};
+    }
+    /**
+     * 计算空间两点之间的距离
+     * @param {import("cs_script/point_script").Vector} a
+     * @param {import("cs_script/point_script").Vector} [b]
+     * @returns {number}
+     */
+    static length(a, b={x:0,y:0,z:0}) {
+        const dx = a.x - b.x; const dy = a.y - b.y; const dz = a.z - b.z;
+        return Math.sqrt(dx * dx + dy * dy + dz * dz);
+    }
+    /**
+     * 计算xy平面两点之间的距离
+     * @param {import("cs_script/point_script").Vector} a
+     * @param {import("cs_script/point_script").Vector} [b]
+     * @returns {number}
+     */
+    static length2D(a, b={x:0,y:0,z:0}) {
+        const dx = a.x - b.x; const dy = a.y - b.y;
+        return Math.sqrt(dx * dx + dy * dy);
+    }
+    /**
+     * 计算空间两点之间的距离平方（无平方根，更快）
+     * @param {import("cs_script/point_script").Vector} a
+     * @param {import("cs_script/point_script").Vector} [b]
+     * @returns {number}
+     */
+    static lengthsq(a, b={x:0,y:0,z:0}) {
+        const dx = a.x - b.x; const dy = a.y - b.y; const dz = a.z - b.z;
+        return dx * dx + dy * dy + dz * dz;
+    }
+    /**
+     * 计算xy平面两点之间的距离平方（无平方根，更快）
+     * @param {import("cs_script/point_script").Vector} a
+     * @param {import("cs_script/point_script").Vector} [b]
+     * @returns {number}
+     */
+    static length2Dsq(a, b={x:0,y:0,z:0}) {
+        const dx = a.x - b.x; const dy = a.y - b.y;
+        return dx * dx + dy * dy;
+    }
+    /**
+     * 返回pos上方height高度的点
+     * @param {import("cs_script/point_script").Vector} pos
+     * @param {number} height
+     * @returns {import("cs_script/point_script").Vector}
+     */
+    static Zfly(pos, height) {
+        return { x: pos.x, y: pos.y, z: pos.z + height };
+    }
+    /**
+     * 输出点pos的坐标
+     * @param {import("cs_script/point_script").Vector} pos
+     */
+    static msg(pos) {
+        Instance.Msg(`{${pos.x} ${pos.y} ${pos.z}}`);
+    }
+    /**
+     * 计算两个三维向量的点积。
+     * @param {import("cs_script/point_script").Vector} a
+     * @param {import("cs_script/point_script").Vector} b
+     */
+    static dot(a,b) {
+        return a.x * b.x + a.y * b.y + a.z * b.z;
+    }
+
+    /**
+     * 计算两个向量在 XY 平面上的点积。
+     * @param {import("cs_script/point_script").Vector} a
+     * @param {import("cs_script/point_script").Vector} b
+     */
+    static dot2D(a,b) {
+        return a.x * b.x + a.y * b.y;
+    }
+
+    /**
+     * 计算两个三维向量的叉积。
+     * @param {import("cs_script/point_script").Vector} a
+     * @param {import("cs_script/point_script").Vector} b
+     */
+    static cross(a,b) {
+        return {
+            x:a.y * b.z - a.z * b.y,
+            y:a.z * b.x - a.x * b.z,
+            z:a.x * b.y - a.y * b.x
+        };
+    }
+    /**
+     * 返回三维向量的单位向量，零向量时返回原点。
+     * @param {import("cs_script/point_script").Vector} a
+     */
+    static normalize(a) {
+        const len = this.length(a);
+        if (len < 1e-6) {
+            return {x:0,y:0,z:0};
+        }
+        return this.scale(a,1 / len);
+    }
+    /**
+     * 返回向量在 XY 平面上的单位向量（z 置零），零向量时返回原点。
+     * @param {import("cs_script/point_script").Vector} a
+     */
+    static normalize2D(a) {
+        const len = this.length2D(a);
+        if (len < 1e-6) {
+            return {x:0,y:0,z:0};
+        }
+        return {
+            x:a.x / len,
+            y:a.y / len,
+            z:0
+        };
+    }
+    /**
+     * 判断向量是否为零向量（各分量绝对值小于 1e-6）。
+     * @param {import("cs_script/point_script").Vector} a
+     */
+    static isZero(a) {
+        return (
+            Math.abs(a.x) < 1e-6 &&
+            Math.abs(a.y) < 1e-6 &&
+            Math.abs(a.z) < 1e-6
+        );
+    }
+};
+
+/**
+ * @module 怪物系统/怪物实体
+ */
+
+/** @typedef {import("../../skill/skill_template").SkillTemplate} MonsterSkill */
+/** @typedef {import("../../util/definition").MovementRequest} MovementRequest */
+/**
+ * @typedef {{
+ *   buffId: number;
+ *   typeId: string;
+ *   params: Record<string, any>;
+ *   groupKey: string | null;
+ *   source: Record<string, any> | null;
+ *   context: Record<string, any> | null;
+ * }} MonsterBuffRuntime
+ */
+/** @typedef {import("../../util/runtime_events.js").RuntimeEvent} MonsterRuntimeEvent */
+
+class Monster {
+    /**
+     * @param {number} id
+     * @param {import("cs_script/point_script").Vector} position
+     * @param {import("../../util/definition").monsterTypes} typeConfig
+     */
+    constructor(id, position, typeConfig) {
+        this.id = id;
+        /** @type {Entity | null} */
+        this.model = null;
+        /** @type {Entity | null} */
+        this.breakable = null;
+        /** @type {MonsterSkill[]} */
+        this.skills = [];
+
+        this.type = typeConfig.name;
+
+        this.baseMaxHealth = typeConfig.baseHealth;
+        this.maxhealth = this.baseMaxHealth;
+        this.health = this.baseMaxHealth;
+        this.preBreakableHealth = 10000;
+
+        this.baseDamage = typeConfig.baseDamage;
+        this.damage = this.baseDamage;
+
+        this.baseSpeed = typeConfig.speed;
+        this.speed = this.baseSpeed;
+
+        this.attackdist = typeConfig.attackdist;
+        this.baseReward = typeConfig.reward;
+        this.atc = typeConfig.attackCooldown;
+
+        this.occupation = "";
+        /** @type {CSPlayerPawn | null} */
+        this.killer = null;
+
+        this.entityBridge = new MonsterEntityBridge(this);
+        this.healthCombat = new MonsterHealthCombat(this);
+        this.brainState = new MonsterBrainState(this);
+        this.skillsManager = new MonsterSkillsManager(this);
+        this.movementPath = new MonsterMovementPathAdapter(this);
+        /**
+         * key 为 buff 类型。
+         * value 为 buff id。
+         * @type {Map<string, number>}
+         */
+        this.buffMap = new Map();
+        /** @type {Map<string, MonsterBuffRuntime>} */
+        this.buffStateMap = new Map();
+        /** @type {Array<() => boolean>} */
+        this._buffUnsubscribers = [
+            eventBus.on(event.Buff.Out.OnBuffRemoved, (/** @type {import("../../buff/buff_const").OnBuffRemoved} */ payload) => {
+                this._removeRuntimeByBuffId(payload.buffId);
+            }),
+        ];
+
+        this.initEntities(position, typeConfig);
+        this.animation = new MonsterAnimator(this, this.model, typeConfig.animations);
+
+        this.state = MonsterState.IDLE;
+        /** @type {CSPlayerPawn | null} */
+        this.target = null;
+        this.lastTargetUpdate = 0;
+        this.attackCooldown = 0;
+        this.lasttick = 0;
+        this._runtimeReleased = false;
+        this._deathFinalized = false;
+
+        /** @type {string} */
+        this.movementStateMovemode ="walk";
+
+        this.initSkills(typeConfig.skill_pool);
+        this.movementPath.init(typeConfig);
+        this.animation.init(typeConfig.animations);
+        this.recomputeDerivedStats();
+    }
+
+    init() {
+        this.emitRuntimeEvent(MonsterRuntimeEvents.Spawn, { state: this.state });
+    }
+
+    /**
+     * @param {import("../../util/definition").skill_pool[] | undefined} skillPool
+     */
+    initSkills(skillPool) {
+        this.skillsManager.initSkills(skillPool);
+    }
+
+    /**
+     * @param {MonsterSkill} skill
+     */
+    addSkill(skill) {
+        this.skillsManager.addSkill(skill);
+    }
+
+    /**
+     * @param {import("cs_script/point_script").Vector} position
+     * @param {import("../../util/definition").monsterTypes} typeConfig
+     */
+    initEntities(position, typeConfig) {
+        this.entityBridge.init(position, typeConfig);
+    }
+
+    /**
+     * @param {number} amount
+     * @param {CSPlayerPawn | null} attacker
+     * @param {{ source?: Entity | null, reason?: string } | null} [meta]
+     * @returns {boolean}
+     */
+    takeDamage(amount, attacker, meta = null) {
+        return this.healthCombat.takeDamage(amount, attacker, meta);
+    }
+
+    /**
+     * @param {string} typeId
+     * @param {Record<string, any>} [params]
+     * @param {Record<string, any> | null} [source]
+     * @param {Record<string, any> | null} [context]
+     * @returns {boolean}
+     */
+    addBuff(typeId, params = {}, source = null, context = null) {
+        if (this.buffMap.has(typeId)) return false;
+        const normalizedParams = { ...(params ?? {}) };
+        /** @type {import("../../buff/buff_const").BuffAddRequest} */
+        const addRequest = {
+            configid: typeId,
+            target: this,
+            targetType: "monster",
+            result: -1,
+        };
+        eventBus.emit(event.Buff.In.BuffAddRequest, addRequest);
+        if (addRequest.result <= 0) return false;
+
+        this.buffMap.set(typeId, addRequest.result);
+        this.buffStateMap.set(typeId, {
+            buffId: addRequest.result,
+            typeId,
+            params: normalizedParams,
+            groupKey: typeof normalizedParams.groupKey === "string" ? normalizedParams.groupKey : null,
+            source,
+            context,
+        });
+        this.recomputeDerivedStats();
+        return true;
+    }
+
+    /**
+     * @param {string} typeId
+     * @param {Record<string, any>} [params]
+     * @returns {boolean}
+     */
+    refreshBuff(typeId, params = {}) {
+        const id = this.buffMap.get(typeId);
+        if (id == null) return this.addBuff(typeId, params);
+
+        /** @type {import("../../buff/buff_const").BuffRefreshRequest} */
+        const refreshRequest = {
+            buffId: id,
+            result: false,
+        };
+        eventBus.emit(event.Buff.In.BuffRefreshRequest, refreshRequest);
+        if (!refreshRequest.result) return false;
+
+        const runtime = this.buffStateMap.get(typeId);
+        if (runtime) {
+            runtime.params = { ...(params ?? runtime.params) };
+            runtime.groupKey = typeof runtime.params.groupKey === "string" ? runtime.params.groupKey : null;
+        }
+        this.recomputeDerivedStats();
+        return true;
+    }
+
+    /**
+     * @param {string | ((buff: MonsterBuffRuntime) => boolean)} typeIdOrFilter
+     * @returns {boolean}
+     */
+    removeBuff(typeIdOrFilter) {
+        if (typeof typeIdOrFilter === "string") {
+            return this._removeBuffByTypeId(typeIdOrFilter);
+        }
+
+        let removed = false;
+        for (const buff of this.getAllBuffs()) {
+            if (!typeIdOrFilter(buff)) continue;
+            removed = this._removeBuffByTypeId(buff.typeId) || removed;
+        }
+        return removed;
+    }
+
+    /**
+     * @param {string} typeId
+     * @returns {boolean}
+     */
+    hasBuff(typeId) {
+        return this.buffMap.has(typeId);
+    }
+
+    /**
+     * @returns {MonsterBuffRuntime[]}
+     */
+    getAllBuffs() {
+        return Array.from(this.buffStateMap.values());
+    }
+
+    clearBuffs() {
+        for (const typeId of Array.from(this.buffMap.keys())) {
+            this._removeBuffByTypeId(typeId);
+        }
+    }
+
+    dispose() {
+        if (this.state !== MonsterState.DEAD) {
+            this.state = MonsterState.DEAD;
+            this.clearBuffs();
+        }
+        this.finalizeDeath(true);
+    }
+
+    finalizeDeath(removeModelAfterDeathAnimation = true) {
+        if (this._deathFinalized) return false;
+        this._deathFinalized = true;
+        this.emitRuntimeEvent(MonsterRuntimeEvents.ModelRemove, { state: MonsterState.DEAD });
+        this._releaseRuntime();
+        this.entityBridge.removeAfterDeath(removeModelAfterDeathAnimation);
+        this.model = null;
+        this.breakable = null;
+        this.state = MonsterState.DEAD;
+        return true;
+    }
+
+    /**
+     * @param {string} eventName
+     * @param {any} params
+     */
+    emitBuffEvent(eventName, params) {
+        let handled = false;
+        for (const id of this.buffMap.values()) {
+            /** @type {import("../../buff/buff_const").BuffEmitRequest} */
+            const emitRequest = {
+                buffId: id,
+                eventName,
+                params,
+                result: { result: false },
+            };
+            eventBus.emit(event.Buff.In.BuffEmitRequest, emitRequest);
+            const emitResult = /** @type {{ result?: boolean }} */ (emitRequest.result);
+            handled = emitResult.result === true || handled;
+        }
+        return handled;
+    }
+
+    /**
+     * @param {string} eventName
+     * @param {import("../../util/runtime_events.js").RuntimeEventPayload} [params]
+     * @returns {boolean}
+     */
+    emitSkillEvent(eventName, params = {}) {
+        return this.skillsManager.emitEvent({ type: eventName, ...params });
+    }
+
+    /**
+     * @param {string} eventName
+     * @param {Record<string, any>} [params]
+     * @returns {boolean}
+     */
+    emitRuntimeEvent(eventName, params = {}) {
+        const buffHandled = this.emitBuffEvent(eventName, params);
+        const skillHandled = this.emitSkillEvent(eventName, params);
+        return buffHandled || skillHandled;
+    }
+
+    /**
+     * @param {string} typeId
+     * @returns {boolean}
+     */
+    _removeBuffByTypeId(typeId) {
+        const id = this.buffMap.get(typeId);
+        if (id == null) return false;
+
+        /** @type {import("../../buff/buff_const").BuffRemoveRequest} */
+        const removeRequest = {
+            buffId: id,
+            result: false,
+        };
+        eventBus.emit(event.Buff.In.BuffRemoveRequest, removeRequest);
+        return removeRequest.result;
+    }
+
+    recomputeDerivedStats() {
+        this.damage = this.baseDamage;
+        this.speed = this.baseSpeed;
+        this.emitRuntimeEvent(MonsterRuntimeEvents.Recompute, { recompute: true });
+        this.movementPath.refreshMovement();
+    }
+
+    /**
+     * @param {number} buffId
+     */
+    _removeRuntimeByBuffId(buffId) {
+        for (const [typeId, id] of this.buffMap.entries()) {
+            if (id !== buffId) continue;
+            this.buffMap.delete(typeId);
+            this.buffStateMap.delete(typeId);
+            this.recomputeDerivedStats();
+            break;
+        }
+    }
+
+    _releaseRuntime() {
+        if (this._runtimeReleased) return;
+        this._runtimeReleased = true;
+        for (const unsubscribe of this._buffUnsubscribers) {
+            unsubscribe();
+        }
+        this._buffUnsubscribers.length = 0;
+        this.skillsManager.clear();
+        this.buffMap.clear();
+        this.buffStateMap.clear();
+        this.target = null;
+        this.killer = null;
+    }
+
+    /**
+     * @param {Entity | null | undefined} killer
+     */
+    die(killer) {
+        this.healthCombat.die(killer);
+    }
+
+    /**
+     * @param {import("../monster_const").MonsterSpawnRequest["options"]} options
+     * @returns {boolean}
+     */
+    requestSpawn(options) {
+        /** @type {import("../monster_const").MonsterSpawnRequest} */
+        const payload = {
+            monster: this,
+            options,
+            result: false,
+        };
+        eventBus.emit(event.Monster.In.SpawnRequest, payload);
+        return payload.result;
+    }
+
+    /**
+     * @param {number} amount
+     * @param {CSPlayerPawn|null|undefined} attacker
+     * @returns {number|void}
+     */
+    requestBeforeTakeDamage(amount, attacker) {
+        /** @type {import("../monster_const").MonsterBeforeTakeDamageRequest} */
+        const payload = {
+            monster: this,
+            amount,
+            attacker: attacker ?? null,
+            result: amount,
+        };
+        eventBus.emit(event.Monster.In.BeforeTakeDamageRequest, payload);
+        return payload.result;
+    }
+
+    /**
+     * @param {number} damage
+     * @param {CSPlayerPawn} target
+     */
+    emitAttackEvent(damage, target) {
+        /** @type {import("../monster_const").OnMonsterAttack} */
+        const payload = { monster: this, damage, target };
+        eventBus.emit(event.Monster.Out.OnAttack, payload);
+    }
+
+    /**
+     * @param {Entity|null|undefined} killer
+     */
+    emitDeathEvent(killer) {
+        /** @type {import("../monster_const").OnMonsterDeath} */
+        const payload = { monster: this, killer, reward: this.baseReward };
+        eventBus.emit(event.Monster.Out.OnMonsterDeath, payload);
+    }
+
+    /**
+     * @param {CSPlayerPawn[]} allppos
+     */
+    tick(allppos) {
+        if (!this.model || !this.breakable?.IsValid()) return;
+        if (this.state === MonsterState.DEAD) return;
+
+        const now = Instance.GetGameTime();
+        const dt = this.lasttick > 0 ? now - this.lasttick : 0;
+        this.lasttick = now;
+
+        if (this.attackCooldown > 0) {
+            this.attackCooldown -= dt;
+        }
+
+        this.emitRuntimeEvent(MonsterRuntimeEvents.Tick, { dt });
+        if (this.state === MonsterState.DEAD) return;
+
+        this.skillsManager.tickRunningSkills();
+
+        if (now - this.lastTargetUpdate > 3.0 || !this.target) {
+            this.updateTarget(allppos);
+            this.lastTargetUpdate = now;
+        }
+        if (!this.target) return;
+        if (this.isOccupied()) return;
+
+        const intent = this.evaluateIntent();
+        this.resolveIntent(intent);
+        this.animation.tick(this.state);
+    }
+
+    /**
+     * @param {CSPlayerPawn[]} allppos
+     */
+    updateTarget(allppos) {
+        const prevTarget = this.target;
+        this.brainState.updateTarget(allppos);
+        if (this.target !== prevTarget) {
+            this.movementPath.onTargetChanged();
+        }
+    }
+
+    isOccupied() {
+        return this.animation.isOccupied();
+    }
+
+    /**
+     * @param {MonsterRuntimeEvent} event
+     */
+    emitEvent(event) {
+        if (!event || typeof event.type !== "string") return false;
+        const { type, ...payload } = event;
+        return this.emitRuntimeEvent(type, payload);
+    }
+
+    /**
+     * @returns {number}
+     */
+    evaluateIntent() {
+        return this.brainState.evaluateIntent();
+    }
+
+    /**
+     * @param {number} intent
+     */
+    resolveIntent(intent) {
+        this.brainState.resolveIntent(intent);
+    }
+
+    /**
+     * @param {number} nextState
+     * @returns {boolean}
+     */
+    trySwitchState(nextState) {
+        return this.brainState.trySwitchState(nextState);
+    }
+
+    /**
+     * @param {number} nextState
+     * @returns {boolean}
+     */
+    applyStateTransition(nextState) {
+        if (this.state === nextState) return true;
+        if (this.state === MonsterState.DEAD) return false;
+        if (this.isOccupied()) return false;
+        if (!this.animation.canSwitch()) return false;
+
+        const prevState = this.state;
+        this.state = nextState;
+        this.emitRuntimeEvent(MonsterRuntimeEvents.StateChange, { oldState: prevState, nextState });
+        this.animation.enter(nextState);
+
+        if (nextState === MonsterState.CHASE || nextState === MonsterState.ATTACK) {
+            this.movementPath.activate();
+        } else if (prevState === MonsterState.CHASE || prevState === MonsterState.ATTACK) {
+            this.movementPath.deactivate();
+        }
+        return true;
+    }
+
+    enterSkill() {
+        this.movementPath.deactivate();
+        this.animation.setOccupation("skill");
+        this.skillsManager.triggerRequestedSkill();
+    }
+
+    enterAttack() {
+        this.healthCombat.enterAttack();
+    }
+
+    /**
+     * @param {Entity} ent
+     * @returns {number}
+     */
+    distanceTosq(ent) {
+        if(!this.model)return Infinity;
+        const a = this.model.GetAbsOrigin();
+        const b = ent.GetAbsOrigin();
+        return vec$1.lengthsq(a, b);
+    }
+
+    /**
+     * @param {string} type
+     */
+    onOccupationEnd(type) {
+        this.animation.onOccupationEnd(type);
+        this.movementPath.onOccupationChanged();
+    }
+
+    /**
+     * @param {MonsterSkill} skill
+     */
+    requestSkill(skill) {
+        this.skillsManager.requestSkill(skill);
+    }
+
+    /**
+     * @param {MovementRequest} request
+     * @returns {boolean}
+     */
+    submitMovementEvent(request) {
+        switch (request?.type) {
+            case MovementRequestType$1.Move:
+                eventBus.emit(event.Movement.In.MoveRequest, request);
+                return true;
+            case MovementRequestType$1.Stop:
+                eventBus.emit(event.Movement.In.StopRequest, request);
+                return true;
+            case MovementRequestType$1.Remove:
+                eventBus.emit(event.Movement.In.RemoveRequest, request);
+                return true;
+            default:
+                return false;
+        }
+    }
+
+    /**
+     * @param {string} movemode
+     */
+    updateMovementMovemode(movemode) {
+        this.movementStateMovemode = movemode;
     }
 }
 
@@ -7826,6 +8358,33 @@ class SkillManager {
         }
     }
 
+    /**
+     * @param {number} skillId
+     * @param {Player|Monster|null} [target]
+     * @returns {{ id: number; typeId: string; cooldown: number; remainingCooldown: number; isReady: boolean; isConsumed: boolean; } | null}
+     */
+    getSkillSummary(skillId, target = null)
+    {
+        const skill = this.SkillMap.get(skillId);
+        if (skill === undefined) return null;
+        if (!this._matchTarget(skill, target)) return null;
+
+        const neverTriggered = skill.lastTriggerTime === -999;
+        const isConsumed = skill.cooldown === -1 && !neverTriggered;
+        const remainingCooldown = skill.cooldown > 0
+            ? Math.max(0, skill.cooldown - (Instance.GetGameTime() - skill.lastTriggerTime))
+            : 0;
+
+        return {
+            id: skill.id,
+            typeId: skill.typeId,
+            cooldown: skill.cooldown,
+            remainingCooldown,
+            isReady: !isConsumed && remainingCooldown <= 0,
+            isConsumed,
+        };
+    }
+
     clearAll()
     {
         for(const skill of this.SkillMap.values())
@@ -7837,7 +8396,7 @@ class SkillManager {
     /**
      * @param {number} skillId
      * @param {string} event 
-     * @param {import("./skill_const").EmitEventPayload} payload
+        * @param {import("../util/runtime_events.js").RuntimeEventPayload} payload
      * @param {Player|Monster|null} [target]
      * @returns {boolean}
      */
@@ -8216,6 +8775,7 @@ class BuffTemplate{
         this.target = target;
         this.targetType = targetType;
         this.typeId = typeId;
+        /**@type {number} */
         this.duration = params.duration;
         this.params = { ...(params ?? {}) };
         this.startTime = Instance.GetGameTime();
@@ -8270,7 +8830,7 @@ class BuffTemplate{
     }
 }
 
-class PoisonBuff extends BuffTemplate {
+class BurnBuff extends BuffTemplate {
     /**
      * @param {number} id
      * @param {import("../../monster/monster/monster").Monster|import("../../player/player/player").Player} target
@@ -8278,7 +8838,7 @@ class PoisonBuff extends BuffTemplate {
      * @param {{ duration?: number; tickInterval?: number; dps?: number }} [params]
      */
     constructor(id, target, targetType, params = {}) {
-        super(id, target, targetType, "poison", params);
+        super(id, target, targetType, "burn", params);
         this.duration = typeof params.duration === "number" ? params.duration : 1;
         this.tickInterval = Math.max(0.1, typeof params.tickInterval === "number" ? params.tickInterval : 0.5);
         this.dps = Math.max(0, typeof params.dps === "number" ? params.dps : 8);
@@ -8295,7 +8855,6 @@ class PoisonBuff extends BuffTemplate {
     refresh() {
         const refreshed = super.refresh();
         if (!refreshed) return false;
-        this._nextTickTime = Instance.GetGameTime() + this.tickInterval;
         return true;
     }
 
@@ -8321,12 +8880,14 @@ class PoisonBuff extends BuffTemplate {
      * @param {{ nextState?: number }} [params]
      */
     OnBuffEmit(eventName, params = {}) {
-        if (eventName === "OnDeath") {
+        const runtimeEvents = this.targetType === "player" ? PlayerRuntimeEvents : MonsterRuntimeEvents;
+
+        if (eventName === runtimeEvents.Die) {
             this.stop();
             return { result: true };
         }
 
-        if (eventName === "OnStateChange") {
+        if (eventName === runtimeEvents.StateChange) {
             if (this.targetType === "player" && params.nextState === PlayerState.DEAD) {
                 this.stop();
                 return { result: true };
@@ -8350,7 +8911,7 @@ class PoisonBuff extends BuffTemplate {
         if (this.targetType === "player") {
             this.target.takeDamage(damage, null);
         } else if (this.targetType === "monster") {
-            this.target.takeDamage(damage, null, { reason: "poison" });
+            this.target.takeDamage(damage, null, { reason: "burn" });
         }
 
         if (!this._isTargetAlive()) {
@@ -8367,6 +8928,87 @@ class PoisonBuff extends BuffTemplate {
             return this.target.state !== MonsterState.DEAD;
         }
         return false;
+    }
+}
+
+class RegenerationBuff extends BuffTemplate {
+    /**
+     * @param {number} id
+     * @param {import("../../player/player/player").Player} target
+     * @param {string} targetType
+     * @param {{ duration?: number; tickInterval?: number; healPerTick?: number }} [params]
+     */
+    constructor(id, target, targetType, params = {}) {
+        super(id, target, targetType, "regeneration", params);
+        this.duration = typeof params.duration === "number" ? params.duration : 1;
+        this.tickInterval = Math.max(0.1, typeof params.tickInterval === "number" ? params.tickInterval : 0.5);
+        this.healPerTick = Math.max(0, typeof params.healPerTick === "number" ? params.healPerTick : 5);
+        this._nextTickTime = Instance.GetGameTime() + this.tickInterval;
+    }
+
+    start() {
+        const started = super.start();
+        if (!started) return false;
+        this._nextTickTime = Instance.GetGameTime() + this.tickInterval;
+        return true;
+    }
+
+    refresh() {
+        return super.refresh();
+    }
+
+    tick() {
+        if (!this.use) return;
+        if (!this._isTargetAlive()) {
+            this.stop();
+            return;
+        }
+
+        super.tick();
+        if (!this.use) return;
+
+        const now = Instance.GetGameTime();
+        while (this.use && now >= this._nextTickTime) {
+            this._applyTickHeal();
+            this._nextTickTime += this.tickInterval;
+        }
+    }
+
+    /**
+     * @param {string} eventName
+     * @param {{ nextState?: number }} [params]
+     */
+    OnBuffEmit(eventName, params = {}) {
+        const runtimeEvents = this.targetType === "player" ? PlayerRuntimeEvents : MonsterRuntimeEvents;
+
+        if (eventName === runtimeEvents.Die) {
+            this.stop();
+            return { result: true };
+        }
+
+        if (eventName === runtimeEvents.StateChange) {
+            if (params.nextState === PlayerState.DEAD || params.nextState === PlayerState.DISCONNECTED) {
+                this.stop();
+                return { result: true };
+            }
+        }
+
+        return { result: false };
+    }
+
+    _applyTickHeal() {
+        if (this.healPerTick <= 0) return;
+        if (this.target instanceof Monster) return;
+        this.target.heal(this.healPerTick);
+        if (!this._isTargetAlive()) {
+            this.stop();
+        }
+    }
+
+    _isTargetAlive() {
+        return !!this.target
+            && this.target.state !== PlayerState.DEAD
+            && this.target.state !== PlayerState.DISCONNECTED;
     }
 }
 
@@ -8387,7 +9029,7 @@ class AttackUpBuff extends BuffTemplate {
      * @param {string} eventName
      */
     OnBuffEmit(eventName) {
-        if (eventName !== "OnRecompute") {
+        if (eventName !== PlayerRuntimeEvents.Recompute) {
             return { result: false };
         }
         if (this.targetType !== "player") {
@@ -8418,7 +9060,7 @@ class SpeedUpBuff extends BuffTemplate {
      * @param {string} eventName
      */
     OnBuffEmit(eventName) {
-        if (eventName !== "OnRecompute") {
+        if (eventName !== MonsterRuntimeEvents.Recompute) {
             return { result: false };
         }
         if (this.targetType !== "monster") {
@@ -8443,8 +9085,12 @@ const BuffFactory = {
      */
     create(target, targetType, typeid, id, params) {
         switch (typeid) {
-            case "poison":
-                return new PoisonBuff(id, target, targetType, params);
+            case "burn":
+                return new BurnBuff(id, target, targetType, params);
+            case "regeneration":
+                return targetType === "player"
+                    ? new RegenerationBuff(id, /** @type {import("../player/player/player").Player} */ (target), targetType, params)
+                    : null;
             case "attack_up":
                 return targetType === "player"
                     ? new AttackUpBuff(id, /** @type {import("../player/player/player").Player} */ (target), targetType, params)
@@ -8459,6 +9105,99 @@ const BuffFactory = {
                 return null;
         }
     }
+};
+
+/**
+ * @module Buff 系统/配置
+ */
+
+
+/**
+ * @typedef {Object} BuffConfig
+ * @property {string} configid Buff 配置 id
+ * @property {string} typeid Buff 种类
+ * @property {Object} params Buff 参数
+ */
+/**
+ * @typedef {Object} BuffAddRequest
+ * @property {string} configid Buff 配置 id
+ * @property {Monster|Player} target Buff 作用的目标
+ * @property {string} targetType Buff 作用的目标类型
+ * @property {number} result - 结果，返回buffid，失败返回-1
+ */
+/**
+ * @typedef {Object} BuffRemoveRequest
+ * @property {number} buffId Buff id
+ * @property {boolean} result - 结果，成功返回true，失败返回false
+ */
+/**
+ * @typedef {Object} BuffRefreshRequest
+ * @property {number} buffId Buff id
+ * @property {boolean} result - 结果，成功返回true，失败返回false
+ */
+/**
+ * @typedef {Object} BuffEmitRequest
+ * @property {number} buffId Buff id
+ * @property {string} eventName 事件名称
+ * @property {object} params - 事件参数
+ * @property {object} result - 结果
+ */
+/**
+ * @typedef {Object} OnBuffAdded
+ * @property {number} buffId Buff id
+ */
+/**
+ * @typedef {Object} OnBuffRefreshed
+ * @property {number} buffId Buff id
+ */
+/**
+ * @typedef {Object} OnBuffRemoved
+ * @property {number} buffId Buff id
+ */
+//=====================预制buff配置====================
+// Buff 构建参数的唯一来源。运行时只按 configid 查这里的预设，不接受外部附加参数。
+/**@type {Record<string, BuffConfig>} */
+const buffconfig={
+	burn:{
+		configid:"burn",
+		typeid:"burn",
+		params:{
+			duration:1,
+			tickInterval:0.5,
+			dps:8,
+		}
+	},
+	regeneration:{
+		configid:"regeneration",
+		typeid:"regeneration",
+		params:{
+			duration:1,
+			tickInterval:0.5,
+			healPerTick:5,
+		}
+	},
+	attack_up:{
+		configid:"attack_up",
+		typeid:"attack_up",
+		params:{
+			duration:30,
+			multiplier:1.35,
+		}
+	},
+	speed_up:{
+		configid:"speed_up",
+		typeid:"speed_up",
+		params:{
+			duration:5,
+			multiplier:1.8,
+			flatBonus:0,
+		}
+	},
+	aaa:{
+		configid:"aaa",
+		typeid:"bbb",
+		params:{}
+	}
 };
 
 /**
@@ -8574,6 +9313,34 @@ class BuffManager {
         }
         this.buffMap.clear();
     }
+
+    /**
+     * @param {Player|Monster} target
+     * @returns {{ id: number; typeId: string; remaining: number; }[]}
+     */
+    getActiveBuffSummaries(target)
+    {
+        if (!target) return [];
+
+        const now = Instance.GetGameTime();
+        /** @type {{ id: number; typeId: string; remaining: number; }[]} */
+        const summaries = [];
+
+        for (const buff of this.buffMap.values())
+        {
+            if (!buff.use || buff.target !== target) continue;
+
+            const remaining = buff.duration >= 0? Math.max(0, buff.duration - (now - buff.startTime)): -1;
+
+            summaries.push({
+                id: buff.id,
+                typeId: buff.typeId,
+                remaining,
+            });
+        }
+
+        return summaries;
+    }
 }
 
 /**
@@ -8584,6 +9351,7 @@ class BuffManager {
  * @typedef {object} ParticleCreateRequest
  * @property {string} particleName - 需要创建的粒子系统预制名字
  * @property {{x:number,y:number,z:number}} position - 粒子生成位置
+ * @property {import("cs_script/point_script").Entity | null} [parentEntity] - 粒子跟随的父实体；null 时原地生成位置播放
  * @property {number} lifetime - 粒子持续时间
  * @property {number} result - 管理器返回的粒子id
  */
@@ -8593,27 +9361,20 @@ class BuffManager {
  * @property {number} particleId - 需要停止的粒子系统ID
  * @property {boolean} result - 管理器返回的操作结果
  */
-/**
- * 粒子系统创建成功后的通知负载。
- * @typedef {object} OnParticleCreated
- * @property {number} particleId - 创建成功的粒子ID
- * @property {string} particleName - 粒子配置ID
- * @property {{x:number,y:number,z:number}} position - 粒子生成位置
- * @property {number} lifetime - 粒子生命周期
- */
-/**
- * 粒子系统停止后的通知负载。
- * @typedef {object} OnParticleStopped
- * @property {number} particleId - 被停止的粒子ID
- * @property {string} particleName - 粒子配置ID
- */
 //===================预制粒子配置========================
+
 /** @type {Record<string, import("../util/definition").particleConfig>} */
 const particleConfigs = {
-    poisongas: {
-        id: "poisongas",
-        spawnTemplateName: "poisongas_particle_template",
-        middleEntityName: "poisongas_particle",
+    fire: {
+        id: "fire",
+        // 运行时键已迁到 fire，底层模板资源名继续沿用现有预制体。
+        spawnTemplateName: "fire_particle_template",
+        middleEntityName: "fire_particle",
+    },
+    healing_field: {
+        id: "healing_field",
+        spawnTemplateName: "healing_field_particle_template",
+        middleEntityName: "healing_field_particle",
     },
     // 后续在此添加更多粒子，例如：
     // explosion: { id: "explosion", spawnTemplateName: "explosion_particle_template" },
@@ -8641,7 +9402,8 @@ class Particle {
         this._particleEntity = null;
         /** @type {boolean} 粒子当前是否处于存活状态 */
         this._alive = false;
-
+        /** @type {Entity | null} */
+        this.parentEntity = options.parentEntity??null;
         /** 活动时间（秒），-1 = 无限期，仅外部 stop */
         this.lifetime = options.lifetime;
         /** 创建时的游戏时间戳 */
@@ -8678,6 +9440,14 @@ class Particle {
 
         this._startTime = Instance.GetGameTime();
         this._alive = true;
+        if (this.parentEntity?.IsValid?.()) {
+            Instance.EntFireAtTarget({
+                target: this._particleEntity,
+                input: "Followentity",
+                value: "!activator",
+                activator: this.parentEntity,
+            });
+        }
         return true;
     }
 
@@ -8693,7 +9463,12 @@ class Particle {
             return;
         }
 
-        if (this.lifetime != null && now - this._startTime >= this.lifetime) {
+        if (this.parentEntity && !this.parentEntity.IsValid?.()) {
+            eventBus.emit(event.Particle.In.StopRequest, { particleId: this.id });
+            return;
+        }
+
+        if (this.lifetime != -1 && now - this._startTime >= this.lifetime) {
             eventBus.emit(event.Particle.In.StopRequest, { particleId: this.id });
         }
     }
@@ -8720,13 +9495,10 @@ class Particle {
 
         for (const ent of entities) {
             if (ent.GetClassName() !== "info_particle_system") continue;
-            if (targetName && ent.GetEntityName() === targetName) return ent;
-            if (!fallback) fallback = ent;
+            if (ent.GetEntityName() === targetName) return ent;
+            fallback = ent;
         }
 
-        if (fallback && targetName) {
-            Instance.Msg(`Particle: 未精确匹配 middleEntityName "${targetName}"，使用第一个 info_particle_system\n`);
-        }
         return fallback;
     }
 
@@ -8771,14 +9543,6 @@ class ParticleManager {
             eventBus.on(event.Particle.In.StopRequest, (/**@type {import("../particle/particle_const").ParticleStopRequest}*/ payload) => {
                 const particle=this.activeParticles.get(payload.particleId);
                 payload.result=particle?.stop()??false;
-                if (payload.result && particle) {
-                    /** @type {import("../particle/particle_const").OnParticleStopped} */
-                    const stoppedPayload = {
-                        particleId: payload.particleId,
-                        particleName: particle.config.id,
-                    };
-                    eventBus.emit(event.Particle.Out.OnStopped, stoppedPayload);
-                }
                 this.activeParticles.delete(payload.particleId);
             })
         ];
@@ -8799,15 +9563,6 @@ class ParticleManager {
         const p = new Particle(this._nextParticleId++,config, particleCreateRequest);
         if (!p.start(particleCreateRequest.position)) return -1;
         this.activeParticles.set(p.id, p);
-
-        /** @type {import("../particle/particle_const").OnParticleCreated} */
-        const createdPayload = {
-            particleId: p.id,
-            particleName: particleCreateRequest.particleName,
-            position: { ...particleCreateRequest.position },
-            lifetime: particleCreateRequest.lifetime ?? -1,
-        };
-        eventBus.emit(event.Particle.Out.OnCreated, createdPayload);
         return p.id;
     }
 
@@ -20936,91 +21691,6 @@ class _MinHeap {
 }
 
 /**
- * @module 区域效果/效果配置
- */
-/**
- * 区域效果配置
- * @typedef {object} areaEffectStatic
- * @property {string} effectName - 区域预制效果名称
- * @property {string} buffName - 命中后要施加的预制 Buff 名字
- * @property {string} particleName - 需要创建的粒子系统预制名字
- */
-/**
- * @typedef {object} AreaEffectCreateRequest
- * @property {string} areaEffectStaticKey - 预制区域效果配置的 key
- * @property {{x:number,y:number,z:number}} position - 区域中心点
- * @property {number} radius - 区域半径
- * @property {number} duration - 总持续时间（秒）
- * @property {string[]} targetTypes - 该区域效果可命中的目标类型
- * @property {boolean} result - 结果是否成功
- */
-/**
- * @typedef {object} AreaEffectStopRequest
- * @property {number} areaEffectId - 区域效果实例 id
- * @property {boolean} result - 结果是否成功
- */
-
-/**
- * 区域效果每帧检测上下文。
- * @typedef {object} areaEffectTickContext
- * @property {import("../player/player/player").Player[]} players - 当帧可被命中的玩家列表
- * @property {import("../monster/monster/monster").Monster[]} monsters - 当帧可被命中的怪物列表
- */
-/**
- * @typedef {object} OnAreaEffectCreated
- * @property {number} effectId - 区域效果实例 id
- */
-/**
- * @typedef {object} OnAreaEffectStopped
- * @property {number} effectId - 区域效果实例 id
- */
-/**
- * @typedef {object} OnAreaEffectHitPlayer
- * @property {import("../player/player/player").Player} player - 命中的玩家实例
- * @property {number} effectId - 区域效果实例 id
- * @property {string} targetType - 命中的目标类型
- * @property {number} hit -  玩家：`slot`  怪物：`monsterId`
- * @property {string} buffName - 命中后要施加的预制 Buff 名称
- */
-/**
- * @typedef {object} OnAreaEffectHitMonster
- * @property {import("../monster/monster/monster").Monster} monster - 命中的怪物实例
- * @property {number} effectId - 区域效果实例 id
- * @property {string} targetType - 命中的目标类型
- * @property {number} hit -  玩家：`slot`  怪物：`monsterId`
- * @property {string} buffName - 命中后要施加的预制 Buff 名称
- */
-/**
- * 区域效果目标类型常量。
- */
-const Target={
-    Player:"player",
-    Monster:"monster",
-};
-//export const AreaEffectTargetType = Object.freeze({
-//    Player: "player",
-//    Monster: "monster",
-//});
-//
-///**
-// * 默认命中的目标类型。当前为了兼容 poisongas，默认只命中玩家。
-// */
-//export const DEFAULT_AREA_EFFECT_TARGET_TYPES = Object.freeze([
-//    AreaEffectTargetType.Player,
-//]);
-//===================预制区域效果配置========================
-/** @type {Record<string, areaEffectStatic>} */
-const areaEffectStatics = {
-    "poisongas": {
-        effectName: "poisongas_area_effect",
-        buffName: "poison",
-        particleName: "poisongas",
-    },
-    // 后续在此添加更多预制区域效果，例如：
-    // firezone: { effectName: "firezone_area_effect", position: { x: 0, y: 0, z: 0 }, radius: 100, duration: 3, buffName: "burn", particleName: "firezone", targetTypes: [Target.Player, Target.Monster] },
-};
-
-/**
  * @module 区域效果/单个区域效果
  */
 
@@ -21044,16 +21714,19 @@ class AreaEffect {
     constructor(desc) {
         /** 自增唯一 ID。 */
         this.id = AreaEffect._nextId++;
-        /** 效果类型标识（如 "poisongas"）。 */
+        /** 效果类型标识（如 "fire"）。 */
         this.effectName = areaEffectStatics[desc.areaEffectStaticKey].effectName;
         /** Buff 类型名字。 */
         this.buffName = areaEffectStatics[desc.areaEffectStaticKey].buffName;
         /** 关联的粒子效果名字。
          * @type {string} */
         this.particleName = areaEffectStatics[desc.areaEffectStaticKey].particleName;
+        /** 可选的父实体；有效时区域中心会跟随它的世界坐标。
+         * @type {import("cs_script/point_script").Entity | null} */
+        this.parentEntity = desc.parentEntity ?? null;
 
         /** 效果中心世界坐标。 */
-        this.position = desc.position;
+        this.position = { ...desc.position };
         /** 影响半径。 */
         this.radius = desc.radius;
         /** 总持续时间（秒）。 */
@@ -21091,6 +21764,9 @@ class AreaEffect {
         if (this.alive) {
             this.stop();
         }
+        if (!this._syncPositionFromParentEntity()) {
+            return false;
+        }
         this._buffid.clear();
         this._hitCooldowns.clear();
         this.startTime = Instance.GetGameTime();
@@ -21111,6 +21787,11 @@ class AreaEffect {
      */
     tick(now, tickContext) {
         if (!this.alive) return;
+
+        if (!this._syncPositionFromParentEntity()) {
+            this.stop();
+            return;
+        }
 
         if (now - this.startTime >= this.duration) {
             this.stop();
@@ -21265,11 +21946,38 @@ class AreaEffect {
         const payload = {
             particleName: this.particleName,
             position: { ...this.position },
+            parentEntity: this.parentEntity,
             lifetime: this.duration,
             result:-1,
         };
         eventBus.emit(event.Particle.In.CreateRequest, payload);
         this.particleId = payload.result;
+    }
+
+    /**
+     * 若存在父实体，则用其同步当前位置。
+     * @returns {boolean}
+     */
+    _syncPositionFromParentEntity() {
+        if (!this.parentEntity) {
+            return true;
+        }
+
+        if (!this.parentEntity.IsValid?.()) {
+            return false;
+        }
+
+        const nextPosition = this.parentEntity.GetAbsOrigin?.();
+        if (!nextPosition) {
+            return false;
+        }
+
+        this.position = {
+            x: nextPosition.x,
+            y: nextPosition.y,
+            z: nextPosition.z,
+        };
+        return true;
     }
 
     /** 停止并释放粒子句柄。 */
@@ -21322,13 +22030,15 @@ class AreaEffectManager {
     /**
      * 创建一个新的区域效果。
      * @param {import("./area_const").AreaEffectCreateRequest} desc
-     * @returns {boolean} 是否成功创建
+     * @returns {number} 成功时返回区域效果实例 id，失败返回 -1
      */
     create(desc) {
         const effect = new AreaEffect(desc);
-        effect.start();
+        if (!effect.start()) {
+            return -1;
+        }
         this._effects.set(effect.id, effect);
-        return true;
+        return effect.id;
     }
 
     /**
@@ -21807,11 +22517,22 @@ Instance.SetThink(() => {
     shopManager.tick();
     if (gameManager.gameState === GameState.PLAYING) {
         const waveProgress = waveManager.getProgress();
+        const playerRuntimeSummary = new Map(
+            alivePlayers.map((player) => [
+                player.slot,
+                {
+                    buffs: buffManager.getActiveBuffSummaries(player),
+                    skill: player.skillId != null
+                        ? skillManager.getSkillSummary(player.skillId, player)
+                        : null,
+                },
+            ])
+        );
         hudManager.tick(alivePlayers.map(p => p.getSummary()), {
             remainingMonsters: monsterManager.getRemainingMonsters(waveProgress.wave?.totalMonsters),
             currentWave: waveProgress.current,
             totalWaves: waveProgress.total,
-        });
+        }, playerRuntimeSummary);
     } else if (gameManager.gameState === GameState.WON || gameManager.gameState === GameState.LOST) {
         hudManager.clearAllSessions();
     }

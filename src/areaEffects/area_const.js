@@ -15,7 +15,8 @@
  * @property {number} radius - 区域半径
  * @property {number} duration - 总持续时间（秒）
  * @property {string[]} targetTypes - 该区域效果可命中的目标类型
- * @property {boolean} result - 结果是否成功
+ * @property {import("cs_script/point_script").Entity | null} [parentEntity] - 跟随的父实体；无效时区域自动停止
+ * @property {number} result - 结果，成功返回区域效果实例 id，失败返回 -1
  */
 /**
  * @typedef {object} AreaEffectStopRequest
@@ -66,7 +67,7 @@ export const Target={
 //});
 //
 ///**
-// * 默认命中的目标类型。当前为了兼容 poisongas，默认只命中玩家。
+// * 默认命中的目标类型。当前为了兼容燃烧区域，默认只命中玩家。
 // */
 //export const DEFAULT_AREA_EFFECT_TARGET_TYPES = Object.freeze([
 //    AreaEffectTargetType.Player,
@@ -74,10 +75,15 @@ export const Target={
 //===================预制区域效果配置========================
 /** @type {Record<string, areaEffectStatic>} */
 export const areaEffectStatics = {
-    "poisongas": {
-        effectName: "poisongas_area_effect",
-        buffName: "poison",
-        particleName: "poisongas",
+    "fire": {
+        effectName: "fire_area_effect",
+        buffName: "burn",
+        particleName: "fire",
+    },
+    "healing_field": {
+        effectName: "healing_field_area_effect",
+        buffName: "regeneration",
+        particleName: "healing_field",
     },
     // 后续在此添加更多预制区域效果，例如：
     // firezone: { effectName: "firezone_area_effect", position: { x: 0, y: 0, z: 0 }, radius: 100, duration: 3, buffName: "burn", particleName: "firezone", targetTypes: [Target.Player, Target.Monster] },

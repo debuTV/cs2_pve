@@ -2,8 +2,6 @@
  * @module 怪物系统/技能基类
  */
 import { Instance } from "cs_script/point_script";
-import { Monster } from "../monster/monster/monster";
-import { Player } from "../player/player/player";
 /*
 技能分类规则（唯一权威）：
   有 animation 字段（非 null/undefined）= 主动技能：canTrigger 通过后占用当前待执行槽，
@@ -29,36 +27,17 @@ import { Player } from "../player/player/player";
   对 spawn 等技能：旧的单值 params.event 仍向后兼容（会被包装为单元素数组）。
 
 原 onAdd() 生命周期已移除；需要在生成时执行的初始化逻辑，
-请在 canTrigger 中响应 MonsterEvents.Spawn 并 return false。
+请在 canTrigger 中响应宿主对应的 Spawn 运行时事件并 return false。
 
 新增技能时不要手写 this.id（实例 id 由 addSkill 自动分配）；
 在子类构造函数里设置 this.typeId（技能类型标识）；
 isActive() 由基类根据 this.animation 自动判断。
 
-事件大全（统一使用 MonsterEvents 常量，见 monster_events.js）
-//怪物生成完后
-MonsterEvents.Spawn        → "OnSpawn"
-
-//当受到伤害后(伤害值，最后血量)
-MonsterEvents.TakeDamage   → "OnTakeDamage"   { value, health }
-
-//怪物死亡前，这时候实体还未销毁
-MonsterEvents.Die          → "OnDie"
-
-//当前TICK(tick间隔，所有怪物breakable实体)
-MonsterEvents.Tick         → "OnTick"          { dt, allmpos }
-
-//目标更新后
-MonsterEvents.TargetUpdate → "OnupdateTarget"
-
-//没有攻击到目标
-MonsterEvents.AttackFalse  → "OnAttackFalse"
-
-//对目标造成伤害后
-MonsterEvents.AttackTrue   → "OnAttackTrue"
-
-//模型移除后（动画结束）
-MonsterEvents.ModelRemove  → "OnModelRemove"
+运行时事件约定：
+- 玩家技能与玩家 buff 共用 `PlayerRuntimeEvents`
+- 怪物技能与怪物 buff 共用 `MonsterRuntimeEvents`
+- 事件名统一来自 `src/util/runtime_events.js`
+- `TakeDamage` 事件负载统一包含 `damage`，兼容字段 `value` / `health` 仍可读取
  */
 /**
  * 技能基类。所有具体技能继承此类，并在子类中按宿主类型重写专用入口。
@@ -76,14 +55,16 @@ MonsterEvents.ModelRemove  → "OnModelRemove"
  * 子类在构造函数中设置 `this.typeId`，运行时实例 id `this.id` 由
  * MonsterSkillsManager.addSkill 自动分配，id 越小优先级越高。
  *
+ * 运行时事件 payload 约束见 `src/util/runtime_events.js`。
+ *
  * @navigationTitle 技能基类
  */
 export class SkillTemplate
 {
     /**
      * 创建技能基类实例，绑定所属施法者。
-     * @param {Player|null} player
-     * @param {Monster|null} monster
+    * @param {import("../player/player/player.js").Player|null} player
+    * @param {import("../monster/monster/monster.js").Monster|null} monster
      * @param {string} typeid 
      * @param {number} id
      * @param {any} params
@@ -110,7 +91,7 @@ export class SkillTemplate
     }
     /**
      * @param {string} eventType
-     * @param {import("./skill_const").EmitEventPayload} payload
+     * @param {import("../util/runtime_events.js").RuntimeEventPayload} payload
      */
     _emitEvent(eventType, payload = {}) {
         if(this.canTrigger({ type: eventType, ...payload })) {
@@ -121,7 +102,7 @@ export class SkillTemplate
      * 这个事件能否执行。
     * - 有 animation（isActive=true）：做条件判断通过后返回 true，由 emitEvent 调用 request 锁定当前待执行技能。
     * - 无 animation（isActive=false）：在此处直接执行业务逻辑并返回 false，不占用待执行槽也不切换状态。
-     * @param {any} event
+     * @param {import("../util/runtime_events.js").RuntimeEvent} event
      */
     canTrigger(event) {
         if(this.player)return false;
