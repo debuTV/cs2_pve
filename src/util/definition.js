@@ -1,4 +1,4 @@
-/**
+﻿/**
  * @module 工具/定义
  */
 /**
@@ -7,20 +7,21 @@
  * @property {number} delay - 距波次开始的延迟时间（秒）
  */
 /**
- * @typedef {object} skill_pool - 技能池配置对象。同类型技能可重复出现多次。所有技能均支持：params.events（触发事件数组，可选）, params.cooldown（可选，默认-1一次性）, params.animation（可选）。
+ * @typedef {object} skill_pool - 技能池配置对象。同类型技能可重复出现多次。
+ * 所有技能均支持：params.events（触发事件数组，可选）、params.cooldown（可选，默认 -1，一次性）、params.animation（可选）。
  * @property {string} id - 技能类型名称，必须在 SkillFactory 中注册（同类型可重复出现多次）
  * @property {number} chance - 技能获得概率（0~1）
  * @property {object} params - 技能参数（各技能自定义，详见 skill_factory.js 注释）
  */
 /**
  * 通用动画集合类型：任意键对应动画名数组。
- * 例如 `{ idle: string[], walk: string[] }`。"idle"、"walk"、"attack"、"skill"、"dead" 在对应状态切换时播放。
+ * 例如 `{ idle: string[], walk: string[] }`。`idle`、`walk`、`attack`、`skill`、`dead` 在对应状态切换时播放。
  * @typedef {{ [key: string]: string[] }} animations
  */
 /**
  * @typedef {object} monsterTypes - 怪物类型配置对象。每个怪物实例对应一个 monsterTypes 配置项，包含其属性、技能池和动画列表。
  * @property {string} template_name - 怪物模板名称，对应地图中 PointTemplate 的实体名称
- * @property {string} model_name - 模型名称，对应游戏内模型资源路径（不含前缀 "models/" 和后缀 ".mdl"）
+ * @property {string} model_name - 模型名称，对应游戏内模型资源路径（不含前缀 `models/` 和后缀 `.mdl`）
  * @property {string} name - 怪物名称（仅作记录/展示）
  * @property {number} baseHealth - 基础生命值
  * @property {number} baseDamage - 基础伤害
@@ -28,9 +29,9 @@
  * @property {number} reward - 击杀奖励
  * @property {number} attackdist - 攻击距离
  * @property {number} attackCooldown - 攻击冷却时间（秒）
- * @property {string} movementmode - 移动模式（例如 "walk"、"fly" 等，具体逻辑由怪物系统实现）
+ * @property {string} movementmode - 移动模式（例如 `walk`、`fly` 等，具体逻辑由怪物系统实现）
  * @property {skill_pool[]} skill_pool - 技能池配置数组
- * @property {animations} animations - 动画配置对象，键为状态名（如 "idle"、"walk"、"attack"、"skill"、"dead" 等），值为对应动画名数组
+ * @property {animations} animations - 动画配置对象，键为状态名，值为对应动画名数组
  */
 /**
  * @typedef {object} waveConfig - 波次配置对象。每波包含一个或多个 monsterTypes 配置项，定义该波次的怪物类型和属性。
@@ -50,7 +51,7 @@
  * @typedef {object} particleConfig - 粒子配置项。每个粒子对应一个地图中的 PointTemplate，ForceSpawn 后生成 info_particle_system。
  * @property {string} id - 业务粒子 id（代码中引用的 key）
  * @property {string} spawnTemplateName - 地图中 PointTemplate 的实体名称
- * @property {string} middleEntityName - PointTemplate 内目标 info_particle_system 的实体名称，如果是范围特效，选择范围中心点的实体，用于精确匹配
+ * @property {string} middleEntityName - PointTemplate 内目标 info_particle_system 的实体名称；如果是范围特效，选择范围中心点的实体用于精确匹配
  */
 /**
  * @typedef {object} Adapter - 外部适配器接口
@@ -83,9 +84,9 @@ export const MovementRequestType = {
  * @property {Entity}  [targetEntity] - 追击目标实体（与 targetPosition 互斥）
  * @property {Vector}  [targetPosition] - 目标坐标（与 targetEntity 互斥）
  * @property {boolean} [usePathRefresh] - 是否允许刷新路径（默认 true）
- * @property {boolean} [useNPCSeparation] - 是否启用NPC分离速度；false 时每 tick 传空分离上下文
+ * @property {boolean} [useNPCSeparation] - 是否启用 NPC 分离速度；false 时每 tick 传空分离上下文
  * @property {string}  [Mode] - 切换移动模式（walk / air / fly 等）
- * @property {Vector}  [Velocity] - 设置速度向量（技能位移用,例如飞扑就需要）
+ * @property {Vector}  [Velocity] - 设置速度向量（技能位移用，例如飞扑就需要）
  * @property {number}  [maxSpeed] - 速度上限
  * @property {boolean} [clearPath] - 是否清空现有路径
  */
@@ -100,142 +101,153 @@ export const MovementPriority = {
     Chase:       2,
 };
 
-export const event={
-    AreaEffects:{
-        In:{
-            CreateRequest:"AreaEffects_OnCreateRequest",    //请求创建区域效果，payload 包含 {effectType: string, position: Vector, radius: number, duration: number, applyInterval: number, buffTypeId: string, buffParams: any, source: {monsterId: number, monsterType: string, skillId: string}, targetTypes: areaEffectTargetType[]}
-            StopRequest:"AreaEffects_OnStopRequest",        //请求停止区域效果，payload 包含 {areaEffectId: number}
+export const event = {
+    AreaEffects: {
+        In: {
+            CreateRequest: "AreaEffects_OnCreateRequest",    // 请求创建区域效果，payload 包含 {areaEffectStaticKey: string, position: Vector, radius: number, duration: number, parentEntity?: Entity|null, targetTypes: string[]}
+            StopRequest: "AreaEffects_OnStopRequest",        // 请求停止区域效果，payload 包含 {areaEffectId: number}
         },
-        Out:{
-            OnCreated:"AreaEffects_OnCreated",                    //区域效果创建后
-            OnHitPlayer:"AreaEffects_OnHitPlayer",                //玩家被范围伤害击中
-            OnHitMonster:"AreaEffects_OnHitMonster",              //怪物被范围伤害击中
-            OnStopped:"AreaEffects_OnStopped",                    //区域效果停止后
-        }
-    },
-    Buff:{
-        In:{
-            BuffAddRequest:"Buff_OnBuffAddRequest",                //请求Buff 添加
-            BuffRefreshRequest:"Buff_OnBuffRefreshRequest",        //请求Buff 刷新
-            BuffRemoveRequest:"Buff_OnBuffRemoveRequest",          //请求Buff 移除
-            BuffEmitRequest:"Buff_OnBuffEmitRequest",              //其他模块发生事件告诉buff
+        Out: {
+            OnCreated: "AreaEffects_OnCreated",              // 区域效果创建后
+            OnHitPlayer: "AreaEffects_OnHitPlayer",          // 玩家被范围效果命中
+            OnHitMonster: "AreaEffects_OnHitMonster",        // 怪物被范围效果命中
+            OnStopped: "AreaEffects_OnStopped",              // 区域效果停止后
         },
-        Out:{
-            OnBuffAdded:"Buff_OnBuffAdded",                //Buff 添加后
-            OnBuffRefreshed:"Buff_OnBuffRefreshed",        //Buff 刷新后
-            OnBuffRemoved:"Buff_OnBuffRemoved",            //Buff 移除后
-        }
     },
-    Game:{
-        In:{
-            StartGameRequest:"Game_OnStartGameRequest",    //请求开始游戏
-            EnterPreparePhaseRequest:"Game_OnEnterPreparePhaseRequest",    //请求进入准备阶段
-            ResetGameRequest:"Game_OnResetGameRequest",    //请求重置游戏
-            GameWinRequest:"Game_OnGameWinRequest",    //请求游戏胜利
-            GameLoseRequest:"Game_OnGameLoseRequest",    //请求游戏失败
+    Buff: {
+        In: {
+            BuffAddRequest: "Buff_OnBuffAddRequest",          // 请求添加 Buff
+            BuffRefreshRequest: "Buff_OnBuffRefreshRequest",  // 请求刷新 Buff
+            BuffRemoveRequest: "Buff_OnBuffRemoveRequest",    // 请求移除 Buff
+            BuffEmitRequest: "Buff_OnBuffEmitRequest",        // 其他模块发生活动时转发给 Buff
         },
-        Out:{
-            OnStartGame:"Game_OnStartGame",    //开始游戏后
-            OnEnterPreparePhase:"Game_OnEnterPreparePhase",    //进入准备阶段后
-            OnResetGame:"Game_OnResetGame",    //重置游戏后
-            OnGameWin:"Game_OnGameWin",    //游戏胜利后
-            OnGameLost:"Game_OnGameLost",    //游戏失败后
-        }
-    },
-    Hud:{
-        In:{
-            ShowHudRequest:"Hud_OnShowHudRequest",    //显示 Hud 请求，payload 包含 {slot: number, pawn: CSPlayerPawn, text: string, channel: number}
-            HideHudRequest:"Hud_OnHideHudRequest",    //隐藏 Hud 请求，payload 包含 {slot: number, channel?: number}
+        Out: {
+            OnBuffAdded: "Buff_OnBuffAdded",                 // Buff 添加后
+            OnBuffRefreshed: "Buff_OnBuffRefreshed",         // Buff 刷新后
+            OnBuffRemoved: "Buff_OnBuffRemoved",             // Buff 移除后
         },
-        Out:{
-            OnHudShown:"Hud_OnHudShown",    //Hud 显示后，payload 包含 {slot: number, channel: number, text: string}
-            OnHudUpdated:"Hud_OnHudUpdated",    //Hud 文本或渠道更新后，payload 包含 {slot: number, channel: number, text: string, previousChannel?: number}
-            OnHudHidden:"Hud_OnHudHidden",    //Hud 隐藏后，payload 包含 {slot: number, channel: number}
-        }
     },
-    Input:{
-        In:{
-            StartRequest:"Input_OnStartRequest",    //请求开始输入检测，payload 包含 {slot: number, pawn: CSPlayerPawn}
-            StopRequest:"Input_OnStopRequest",    //请求停止输入检测，payload 包含 {slot: number}
+    Game: {
+        In: {
+            StartGameRequest: "Game_OnStartGameRequest",                    // 请求开始游戏
+            EnterPreparePhaseRequest: "Game_OnEnterPreparePhaseRequest",    // 请求进入准备阶段
+            ResetGameRequest: "Game_OnResetGameRequest",                    // 请求重置游戏
+            GameWinRequest: "Game_OnGameWinRequest",                        // 请求游戏胜利
+            GameLoseRequest: "Game_OnGameLoseRequest",                      // 请求游戏失败
         },
-        Out:{
-            OnInput:"Input_OnInput",    //输入事件，payload 包含 {slot: number, key: string}
-        }
-    },
-    Monster:{
-        In:{
-            SpawnRequest:"Monster_OnSpawnRequest",    //请求由怪物施法者触发产卵，payload 使用 MonsterSpawnRequest
-            BeforeTakeDamageRequest:"Monster_OnBeforeTakeDamageRequest",    //请求怪物受伤前修正伤害，payload 使用 MonsterBeforeTakeDamageRequest
+        Out: {
+            OnStartGame: "Game_OnStartGame",                // 开始游戏后
+            OnEnterPreparePhase: "Game_OnEnterPreparePhase",// 进入准备阶段后
+            OnResetGame: "Game_OnResetGame",                // 重置游戏后
+            OnGameWin: "Game_OnGameWin",                    // 游戏胜利后
+            OnGameLost: "Game_OnGameLost",                  // 游戏失败后
         },
-        Out:{
-            OnMonsterSpawn:"Monster_OnMonsterSpawn",    //怪物创建并注册后，payload 使用 OnMonsterSpawn
-            OnMonsterDamaged:"Monster_OnMonsterDamaged",    //怪物实际扣血后，payload 使用 OnMonsterDamaged
-            OnMonsterDeath:"Monster_OnMonsterDeath",    //怪物死亡后，payload 使用 OnMonsterDeath
-            OnAllMonstersDead:"Monster_OnAllMonstersDead",    //当前波次全部怪物死亡后
-            OnAttack:"Monster_OnAttack",    //怪物普攻命中后，payload 使用 OnMonsterAttack
-        }
     },
-    Movement:{
-        In:{
-            MoveRequest:"Movement_OnMoveRequest",    //请求移动，payload 使用 MovementRequest
-            StopRequest:"Movement_OnStopRequest",    //请求停止移动，payload 使用 MovementRequest
-            RemoveRequest:"Movement_OnRemoveRequest",    //请求移除 Movement 实例，payload 使用 MovementRequest
+    Hud: {
+        In: {
+            ShowHudRequest: "Hud_OnShowHudRequest",        // 显示 Hud 请求，payload 包含 {slot: number, pawn: CSPlayerPawn, text: string, channel: number}
+            HideHudRequest: "Hud_OnHideHudRequest",        // 隐藏 Hud 请求，payload 包含 {slot: number, channel?: number}
         },
-        Out:{
-            OnRegistered:"Movement_OnRegistered",    //Movement 实例注册后
-            OnStopped:"Movement_OnStopped",          //Movement 停止后
-            OnRemoved:"Movement_OnRemoved",          //Movement 实例移除后
-        }
-    },
-    Particle:{
-        In:{
-            CreateRequest:"Particle_OnCreateRequest",    //粒子特效创建请求
-            StopRequest:"Particle_OnStopRequest",        //粒子特效停止请求
-        }
-    },
-    Player:{
-        In:{
-            GetPlayerSummaryRequest:"Player_OnGetPlayerSummaryRequest",    //请求玩家信息摘要，payload 包含 {slot: number, result?: any}
-            DispatchRewardRequest:"Player_OnDispatchRewardRequest",    //请求分发玩家奖励，payload 包含 {slot: number|null, reward?: any, rewards?: any[], result?: boolean}
+        Out: {
+            OnHudShown: "Hud_OnHudShown",                  // Hud 显示后，payload 包含 {slot: number, channel: number, text: string}
+            OnHudUpdated: "Hud_OnHudUpdated",              // Hud 文本或渠道更新后，payload 包含 {slot: number, channel: number, text: string, previousChannel?: number}
+            OnHudHidden: "Hud_OnHudHidden",                // Hud 隐藏后，payload 包含 {slot: number, channel: number}
         },
-        Out:{
-            OnPlayerJoin:"Player_OnPlayerJoin",    //玩家加入后，payload 包含 {player: Player, slot: number}
-            OnPlayerLeave:"Player_OnPlayerLeave",  //玩家离开后，payload 包含 {player: Player, slot: number}
-            OnPlayerReadyChanged:"Player_OnPlayerReadyChanged",    //玩家准备状态变化后
-            OnAllPlayersReady:"Player_OnAllPlayersReady",    //全员准备后
-            OnPlayerDeath:"Player_OnPlayerDeath",  //玩家死亡后
-            OnPlayerRespawn:"Player_OnPlayerRespawn",    //玩家重生后
-        }
     },
-    Shop:{
-        In:{
-            ShopOpenRequest:"Shop_OnShopOpenRequest",    //请求打开商店，payload 包含 {slot: number, pawn?: CSPlayerPawn, result?: boolean}
-            ShopCloseRequest:"Shop_OnShopCloseRequest",  //请求关闭商店，payload 包含 {slot: number, result?: boolean}
+    Input: {
+        In: {
+            StartRequest: "Input_OnStartRequest",          // 请求开始输入检测，payload 包含 {slot: number, pawn: CSPlayerPawn}
+            StopRequest: "Input_OnStopRequest",            // 请求停止输入检测，payload 包含 {slot: number}
         },
-        Out:{
-            OnShopOpen:"Shop_OnShopOpen",    //商店打开后，payload 包含 {slot: number}
-            OnShopClose:"Shop_OnShopClose",  //商店关闭后，payload 包含 {slot: number}
-            OnBought:"Shop_OnBought",    //购买商品后，payload 包含 {slot: number, itemId: string, price: number}
-        }
+        Out: {
+            OnInput: "Input_OnInput",                      // 输入事件，payload 包含 {slot: number, key: string}
+        },
     },
-    Skill:{
-        In:{
-            SkillAddRequest:"Skill_OnSkillAddRequest",    //请求为目标添加技能，payload 使用 SkillAddRequest
-            SkillRemoveRequest:"Skill_OnSkillRemoveRequest",    //请求移除技能，payload 使用 SkillRemoveRequest
-            SkillUseRequest:"Skill_OnSkillUseRequest",    //请求直接触发技能，payload 使用 SkillUseRequest
-            SkillEmitRequest:"Skill_OnSkillEmitRequest",    //请求向技能转发运行时事件，payload 使用 SkillEmitRequest
+    Monster: {
+        In: {
+            SpawnRequest: "Monster_OnSpawnRequest",                        // 请求由怪物施法者触发产卵，payload 使用 MonsterSpawnRequest
+            BeforeTakeDamageRequest: "Monster_OnBeforeTakeDamageRequest",  // 请求怪物受伤前修正伤害，payload 使用 MonsterBeforeTakeDamageRequest
         },
-        Out:{
-        }
+        Out: {
+            OnMonsterSpawn: "Monster_OnMonsterSpawn",            // 怪物创建并注册后，payload 使用 OnMonsterSpawn
+            OnMonsterDamaged: "Monster_OnMonsterDamaged",        // 怪物实际扣血后，payload 使用 OnMonsterDamaged
+            OnMonsterDeath: "Monster_OnMonsterDeath",            // 怪物死亡后，payload 使用 OnMonsterDeath
+            OnAllMonstersDead: "Monster_OnAllMonstersDead",      // 当前波次全部怪物死亡后
+            OnAttack: "Monster_OnAttack",                        // 怪物普攻命中后，payload 使用 OnMonsterAttack
+        },
     },
-    Wave:{
-        In:{
-            WaveStartRequest:"Wave_OnWaveStartRequest",    //请求开始波次，payload 包含 {waveIndex: number}
-            WaveEndRequest:"Wave_OnWaveEndRequest",        //请求结束波次，payload 包含 {waveIndex: number, survived: boolean}
+    Movement: {
+        In: {
+            MoveRequest: "Movement_OnMoveRequest",          // 请求移动，payload 使用 MovementRequest
+            StopRequest: "Movement_OnStopRequest",          // 请求停止移动，payload 使用 MovementRequest
+            RemoveRequest: "Movement_OnRemoveRequest",      // 请求移除 Movement 实例，payload 使用 MovementRequest
         },
-        Out:{
-            OnWaveStart:"Wave_OnWaveStart",    //波次开始后，payload 包含 {waveIndex: number}
-            OnWaveEnd:"Wave_OnWaveEnd",        //波次结束后，payload 包含 {waveIndex: number, survived: boolean}
-        }
-    }
+        Out: {
+            OnRegistered: "Movement_OnRegistered",          // Movement 实例注册后
+            OnStopped: "Movement_OnStopped",                // Movement 停止后
+            OnRemoved: "Movement_OnRemoved",                // Movement 实例移除后
+        },
+    },
+    Particle: {
+        In: {
+            CreateRequest: "Particle_OnCreateRequest",      // 粒子特效创建请求
+            StopRequest: "Particle_OnStopRequest",          // 粒子特效停止请求
+        },
+    },
+    Player: {
+        In: {
+            GetPlayerSummaryRequest: "Player_OnGetPlayerSummaryRequest",      // 请求玩家信息摘要，payload 包含 {slot: number, result?: any}
+            DispatchRewardRequest: "Player_OnDispatchRewardRequest",          // 请求分发玩家奖励，payload 包含 {slot: number|null, reward?: any, rewards?: any[], result?: boolean}
+        },
+        Out: {
+            OnPlayerJoin: "Player_OnPlayerJoin",                // 玩家加入后，payload 包含 {player: Player, slot: number}
+            OnPlayerLeave: "Player_OnPlayerLeave",              // 玩家离开后，payload 包含 {player: Player, slot: number}
+            OnPlayerReadyChanged: "Player_OnPlayerReadyChanged",// 玩家准备状态变化后
+            OnAllPlayersReady: "Player_OnAllPlayersReady",      // 全员准备后
+            OnPlayerDeath: "Player_OnPlayerDeath",              // 玩家死亡后
+            OnPlayerRespawn: "Player_OnPlayerRespawn",          // 玩家重生后
+        },
+    },
+    Shop: {
+        In: {
+            ShopOpenRequest: "Shop_OnShopOpenRequest",      // 请求打开商店，payload 包含 {slot: number, pawn?: CSPlayerPawn, result?: boolean}
+            ShopCloseRequest: "Shop_OnShopCloseRequest",    // 请求关闭商店，payload 包含 {slot: number, result?: boolean}
+        },
+        Out: {
+            OnShopOpen: "Shop_OnShopOpen",                  // 商店打开后，payload 包含 {slot: number}
+            OnShopClose: "Shop_OnShopClose",                // 商店关闭后，payload 包含 {slot: number}
+            OnBought: "Shop_OnBought",                      // 购买商品后，payload 包含 {slot: number, itemId: string, price: number}
+        },
+    },
+    Skill: {
+        In: {
+            SkillAddRequest: "Skill_OnSkillAddRequest",          // 请求为目标添加技能，payload 使用 SkillAddRequest
+            SkillRemoveRequest: "Skill_OnSkillRemoveRequest",    // 请求移除技能，payload 使用 SkillRemoveRequest
+            SkillUseRequest: "Skill_OnSkillUseRequest",          // 请求直接触发技能，payload 使用 SkillUseRequest
+            SkillEmitRequest: "Skill_OnSkillEmitRequest",        // 请求向技能转发运行时事件，payload 使用 SkillEmitRequest
+        },
+        Out: {
+        },
+    },
+    Throw: {
+        In: {
+            CreateRequest: "Throw_OnCreateRequest",         // 请求创建投掷物，payload 使用 ThrowCreateRequest
+            StopRequest: "Throw_OnStopRequest",             // 请求停止投掷物，payload 使用 ThrowStopRequest
+        },
+        Out: {
+            OnProjectileCreated: "Throw_OnProjectileCreated",  // 投掷物创建后，payload 使用 OnProjectileCreated
+            OnProjectileHit: "Throw_OnProjectileHit",          // 投掷物结束并产生命中结果后，payload 使用 OnProjectileHit
+            OnProjectileStopped: "Throw_OnProjectileStopped",  // 投掷物停止后，payload 使用 OnProjectileStopped
+        },
+    },
+    Wave: {
+        In: {
+            WaveStartRequest: "Wave_OnWaveStartRequest",    // 请求开始波次，payload 包含 {waveIndex: number}
+            WaveEndRequest: "Wave_OnWaveEndRequest",        // 请求结束波次，payload 包含 {waveIndex: number, survived: boolean}
+        },
+        Out: {
+            OnWaveStart: "Wave_OnWaveStart",                // 波次开始后，payload 包含 {waveIndex: number}
+            OnWaveEnd: "Wave_OnWaveEnd",                    // 波次结束后，payload 包含 {waveIndex: number, survived: boolean}
+        },
+    },
 };

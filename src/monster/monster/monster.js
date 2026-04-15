@@ -20,10 +20,6 @@ import { MonsterRuntimeEvents } from "../../util/runtime_events.js";
  * @typedef {{
  *   buffId: number;
  *   typeId: string;
- *   params: Record<string, any>;
- *   groupKey: string | null;
- *   source: Record<string, any> | null;
- *   context: Record<string, any> | null;
  * }} MonsterBuffRuntime
  */
 /** @typedef {import("../../util/runtime_events.js").RuntimeEvent} MonsterRuntimeEvent */
@@ -143,14 +139,10 @@ export class Monster {
 
     /**
      * @param {string} typeId
-     * @param {Record<string, any>} [params]
-     * @param {Record<string, any> | null} [source]
-     * @param {Record<string, any> | null} [context]
      * @returns {boolean}
      */
-    addBuff(typeId, params = {}, source = null, context = null) {
+    addBuff(typeId) {
         if (this.buffMap.has(typeId)) return false;
-        const normalizedParams = { ...(params ?? {}) };
         /** @type {import("../../buff/buff_const").BuffAddRequest} */
         const addRequest = {
             configid: typeId,
@@ -165,10 +157,6 @@ export class Monster {
         this.buffStateMap.set(typeId, {
             buffId: addRequest.result,
             typeId,
-            params: normalizedParams,
-            groupKey: typeof normalizedParams.groupKey === "string" ? normalizedParams.groupKey : null,
-            source,
-            context,
         });
         this.recomputeDerivedStats();
         return true;
@@ -176,12 +164,11 @@ export class Monster {
 
     /**
      * @param {string} typeId
-     * @param {Record<string, any>} [params]
      * @returns {boolean}
      */
-    refreshBuff(typeId, params = {}) {
+    refreshBuff(typeId) {
         const id = this.buffMap.get(typeId);
-        if (id == null) return this.addBuff(typeId, params);
+        if (id == null) return this.addBuff(typeId);
 
         /** @type {import("../../buff/buff_const").BuffRefreshRequest} */
         const refreshRequest = {
@@ -190,12 +177,6 @@ export class Monster {
         };
         eventBus.emit(event.Buff.In.BuffRefreshRequest, refreshRequest);
         if (!refreshRequest.result) return false;
-
-        const runtime = this.buffStateMap.get(typeId);
-        if (runtime) {
-            runtime.params = { ...(params ?? runtime.params) };
-            runtime.groupKey = typeof runtime.params.groupKey === "string" ? runtime.params.groupKey : null;
-        }
         this.recomputeDerivedStats();
         return true;
     }

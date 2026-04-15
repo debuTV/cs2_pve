@@ -83,17 +83,18 @@ export class MoveProbe {
      */
     tryStep(start, move, step, ignoreEntities) {
         const up = vec.Zfly(start, step);
-        const trUp = this.traceMove(start, up, ignoreEntities);
-        if (trUp.hit) return { success: false, endPos: trUp.hitPos };
 
         const forwardEnd = vec.add(up, move);
         const trForward = this.traceMove(up, forwardEnd, ignoreEntities);
-        if (trForward.hit) return { success: false, endPos: trUp.hitPos };
+        if (trForward.hit) return { success: false, endPos: start };
+
+        const trUp = this.traceMove(start, up, ignoreEntities);
+        if (trUp.hit) return { success: false, endPos: start };
 
         const downEnd = vec.Zfly(forwardEnd, -step);
         const trDown = this.traceMove(forwardEnd, downEnd, ignoreEntities);
         if (!trDown.hit) return { success: false, endPos: trDown.hitPos };
-        if (trDown.normal.z < 0.5) return { success: false, endPos: trDown.hitPos };
+        if (trDown.normal.z < 0.5) return { success: false, endPos: start };
 
         return { success: true, endPos: trDown.hitPos };
     }

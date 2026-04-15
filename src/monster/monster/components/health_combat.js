@@ -103,7 +103,7 @@ export class MonsterHealthCombat {
             attacker: attacker instanceof CSPlayerPawn ? attacker : null,
         };
         eventBus.emit(event.Monster.Out.OnMonsterDamaged, payload);
-        Instance.Msg(`鎬墿 #${this.monster.id} 鍙楀埌 ${finalAmount} 鐐逛激瀹?(鍘熷:${amount}) (${previousHealth} -> ${this.monster.health})`);
+        Instance.Msg(`怪物 #${this.monster.id} 受到 ${finalAmount} 点伤害 (原始:${amount}) (${previousHealth} -> ${this.monster.health})`);
 
         if (this.monster.health <= 0) {
             this.die(attacker);
@@ -138,7 +138,7 @@ export class MonsterHealthCombat {
         this.monster.killer = killer instanceof CSPlayerPawn ? killer : null;
         this.monster.emitDeathEvent(killer);
         this.monster.animation.enter(MonsterState.DEAD);
-        Instance.Msg(`鎬墿 #${this.monster.id} 姝讳骸`);
+        Instance.Msg(`怪物 #${this.monster.id} 死亡`);
     }
 
     enterAttack() {

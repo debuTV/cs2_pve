@@ -137,106 +137,419 @@ export const MonsterState = {
  * @type {{ [key: string]: import("../util/definition").monsterTypes }} 
  */
 export const MonsterType={
-    "Zombie":{            
-            template_name:"headcrab_classic_template",
-            model_name:"headcrab_classic_model",//模型本体，animations播放的是这个模型的动画
-            name: "Zombie",
-            baseHealth: 100,
-            baseDamage: 10,
-            speed: 150,
-            reward: 100,
-            attackdist:80,
-            attackCooldown:0.1,
-            movementmode:"walk",
-            skill_pool:[
-                {
-                    id:"sound",
-                    chance: 1,
-                    params:{ cooldown:5, templateName:"headcrab_classic_sound", eventSoundMap:{ OnSpawn:"Headcrab.Classic.Spawn", OnTakeDamage:"Headcrab.Classic.Hurt" } }
-                },
-                //// 示例：同类型技能重复（分别叠加不同属性）
-                //{
-                //    id:"corestats",
-                //    chance: 1,
-                //    params:{ health_value:200 }          // 实例 id=0
-                //},
-                //{
-                //    id:"corestats",
-                //    chance: 1,
-                //    params:{ speed_mult:1.5 }            // 实例 id=1，两个 corestats 独立生效
-                //},
-                //// 示例：单个技能绑定多个触发事件
-                //{
-                //    id:"spawn",
-                //    chance: 1,
-                //    params:{ events:["OnSpawn","OnTakeDamage"], count:1, typeName:"Zombie", maxSummons:3 }
-                //},
-                //// 示例：有动画的 pounce
-                //{
-                //    id:"pounce",
-                //    chance: 1,
-                //    params:{ cooldown:5, distance:250, animation:"pounce" }
-                //},
-                //// 示例：无动画的 pounce（在 canTrigger 内直接执行）
-                //{
-                //    id:"pounce",
-                //    chance: 1,
-                //    params:{ cooldown:10, distance:400 }  // 无 animation → 无动画直触发
-                //},
-                //// 示例：护盾
-                //{
-                //    id: "shield",
-                //    chance: 1,
-                //    params: { cooldown:15, runtime:-1, value:50 }
-                //},
-                //// 示例：急速（5秒内速度×1.8，冷却10秒，可选发光）
-                //{
-                //    id: "speedboost",
-                //    chance: 1,
-                //    params: { cooldown:10, runtime:5, speed_mult:1.8, glow:{r:255,g:128,b:0} }
-                //},
-                //// 示例：投掷石头（trigger 待实现）
-                //{
-                //    id: "throwstone",
-                //    chance: 1,
-                //    params: { cooldown:6, distanceMin:100, distanceMax:500, damage:15, projectileSpeed:600 }
-                //},
-                //// 示例：持续激光（trigger 待实现，2秒持续，每0.25秒结算一次）
-                //{
-                //    id: "laserbeam",
-                //    chance: 1,
-                //    params: { cooldown:8, distance:400, duration:2, damagePerSecond:30, tickInterval:0.25 }
-                //},
-                //// 示例：死亡时产卵
-                //{
-                //    id: "spawn",
-                //    chance: 1,
-                //    params: { count:1, typeName:"Zombie", maxSummons:3, radiusMin:24, radiusMax:96, tries:6 }
-                //}
+    "headcrab_classic":{            
+        template_name:"headcrab_classic_template",
+        model_name:"headcrab_classic_model",//模型本体，animations播放的是这个模型的动画
+        name: "headcrab_classic",
+        baseHealth: 100,
+        baseDamage: 10,
+        speed: 150,
+        reward: 100,
+        attackdist:80,
+        attackCooldown:0.1,
+        movementmode:"walk",
+        skill_pool:[
+            //{
+            //    id:"sound",
+            //    chance: 1,
+            //    params:{ cooldown:5, templateName:"headcrab_classic_sound", eventSoundMap:{ OnSpawn:"Headcrab.Classic.Spawn", OnTakeDamage:"Headcrab.Classic.Hurt" } }
+            //},
+            //// 示例：同类型技能重复（分别叠加不同属性）
+            //{
+            //    id:"corestats",
+            //    chance: 1,
+            //    params:{ health_value:200 }          // 实例 id=0
+            //},
+            //{
+            //    id:"corestats",
+            //    chance: 1,
+            //    params:{ speed_mult:1.5 }            // 实例 id=1，两个 corestats 独立生效
+            //},
+            //// 示例：单个技能绑定多个触发事件
+            //{
+            //    id:"spawn",
+            //    chance: 1,
+            //    params:{ events:["OnSpawn","OnTakeDamage"], count:1, typeName:"Zombie", maxSummons:3 }
+            //},
+            //// 示例：有动画的 pounce
+            //{
+            //    id:"pounce",
+            //    chance: 1,
+            //    params:{ cooldown:5, distance:250, animation:"pounce" }
+            //},
+            //// 示例：无动画的 pounce（在 canTrigger 内直接执行）
+            //{
+            //    id:"pounce",
+            //    chance: 1,
+            //    params:{ cooldown:10, distance:400 }  // 无 animation → 无动画直触发
+            //},
+            //// 示例：护盾
+            //{
+            //    id: "shield",
+            //    chance: 1,
+            //    params: { cooldown:15, runtime:-1, value:50 }
+            //},
+            //// 示例：急速（5秒内速度×1.8，冷却10秒，可选发光）
+            //{
+            //    id: "speedboost",
+            //    chance: 1,
+            //    params: { cooldown:10, buffConfigId:"speed_up", glow:{r:255,g:128,b:0} }
+            //},
+            //// 示例：投掷石头（通过投掷物管理器创建运行时投掷物）
+            //{
+            //    id: "throwstone",
+            //    chance: 1,
+            //    params: { cooldown:6, distanceMin:100, distanceMax:500, damage:15, projectileSpeed:600, templateName:"throwstone_projectile_template" }
+            //},
+            //// 示例：持续激光（trigger 待实现，2秒持续，每0.25秒结算一次）
+            //{
+            //    id: "laserbeam",
+            //    chance: 1,
+            //    params: { cooldown:8, distance:400, duration:2, damagePerSecond:30, tickInterval:0.25 }
+            //},
+            //// 示例：死亡时产卵
+            //{
+            //    id: "spawn",
+            //    chance: 1,
+            //    params: { count:1, typeName:"Zombie", maxSummons:3, radiusMin:24, radiusMax:96, tries:6 }
+            //}
+        ],
+        animations:{
+            "idle":[
+                "headcrab_classic_idle",
+                "headcrab_classic_idle_b",
+                "headcrab_classic_idle_c"
             ],
-            animations:{
-                "idle":[
-                    "headcrab_classic_idle",
-                    "headcrab_classic_idle_b",
-                    "headcrab_classic_idle_c"
-                ],
-                "walk":[
-                    "headcrab_classic_walk",
-                    "headcrab_classic_run"
-                ],
-                "attack":[
-                    "headcrab_classic_attack_antic_02",
-                    "headcrab_classic_attack_antic_03",
-                    "headcrab_classic_attack_antic_04"
-                ],
-                "skill":[
-                    "headcrab_classic_attack_antic_02",
-                    "headcrab_classic_attack_antic_03",
-                    "headcrab_classic_attack_antic_04"
-                ],
-                "pounce":[
-                    "headcrab_classic_jumpattack"
-                ]
-            }
+            "walk":[
+                "headcrab_classic_walk",
+                "headcrab_classic_run"
+            ],
+            "attack":[
+                "headcrab_classic_attack_antic_02",
+                "headcrab_classic_attack_antic_03",
+                "headcrab_classic_attack_antic_04"
+            ],
+            "skill":[
+                "headcrab_classic_attack_antic_02",
+                "headcrab_classic_attack_antic_03",
+                "headcrab_classic_attack_antic_04"
+            ],
+            "dead":[
+                "headcrab_classic_death_directional_0",
+                "headcrab_classic_death_directional_180",
+                "headcrab_classic_death_directional_90_left",
+                "headcrab_classic_death_directional_90_right"
+            ],
+            "pounce":[
+                "headcrab_classic_jumpattack"
+            ]
         }
+    },
+    "headcrab_reviver":{            
+        template_name:"headcrab_reviver_template",
+        model_name:"headcrab_reviver_model",//模型本体，animations播放的是这个模型的动画
+        name: "headcrab_reviver",
+        baseHealth: 100,
+        baseDamage: 10,
+        speed: 150,
+        reward: 100,
+        attackdist:80,
+        attackCooldown:0.1,
+        movementmode:"walk",
+        skill_pool:[],
+        animations:{
+            "idle":[
+                "rhc_aggro_idle",
+                "rhc_aggro_idle_twitch_01",
+                "rhc_sneak_idle_lookaround"
+            ],
+            "walk":[
+                "rhc_scorpion_run_angled"
+            ],
+            "attack":[
+                "rhc_aggro_jumpattack"
+            ],
+            "skill":[
+                "rhc_aggro_jumpattack"
+            ],
+            "dead":[
+                "rhc_die"
+            ]
+        }
+    },
+    "headcrab_black":{            
+        template_name:"headcrab_black_template",
+        model_name:"headcrab_black_model",//模型本体，animations播放的是这个模型的动画
+        name: "headcrab_black",
+        baseHealth: 100,
+        baseDamage: 10,
+        speed: 150,
+        reward: 100,
+        attackdist:80,
+        attackCooldown:0.1,
+        movementmode:"walk",
+        skill_pool:[],
+        animations:{
+            "idle":[
+                "headcrabblack_idlesniff"
+            ],
+            "walk":[
+                "walk_n",
+                "headcrabblack_scurry"
+            ],
+            "attack":[
+                "headcrabblack_spitattack"
+            ],
+            "skill":[
+                "headcrabblack_idle_b"
+            ],
+            "dead":[
+                "headcrabblack_dieplaceholder"
+            ],
+            "pounce":[
+                "headcrabblack_jumpattack"
+            ]
+        }
+    },
+    "headcrab_armored":{            
+        template_name:"headcrab_armored_template",
+        model_name:"headcrab_armored_model",//模型本体，animations播放的是这个模型的动画
+        name: "headcrab_armored",
+        baseHealth: 100,
+        baseDamage: 10,
+        speed: 150,
+        reward: 100,
+        attackdist:80,
+        attackCooldown:0.1,
+        movementmode:"walk",
+        skill_pool:[],
+        animations:{
+            "idle":[
+                "headcrab_classic_idle",
+                "headcrab_classic_idle_b",
+                "headcrab_classic_idle_c"
+            ],
+            "walk":[
+                "headcrab_classic_walk",
+                "headcrab_classic_run"
+            ],
+            "attack":[
+                "headcrab_classic_attack_antic_02",
+                "headcrab_classic_attack_antic_03",
+                "headcrab_classic_attack_antic_04"
+            ],
+            "skill":[
+                "headcrab_classic_attack_antic_02",
+                "headcrab_classic_attack_antic_03",
+                "headcrab_classic_attack_antic_04"
+            ],
+            "dead":[
+                "headcrab_classic_death_directional_0",
+                "headcrab_classic_death_directional_180",
+                "headcrab_classic_death_directional_90_left",
+                "headcrab_classic_death_directional_90_right"
+            ],
+            "pounce":[
+                "headcrab_classic_jumpattack"
+            ]
+        }
+    },
+    "headcrab":{            
+        template_name:"headcrab_template",
+        model_name:"headcrab_model",//模型本体，animations播放的是这个模型的动画
+        name: "headcrab",
+        baseHealth: 100,
+        baseDamage: 10,
+        speed: 150,
+        reward: 100,
+        attackdist:80,
+        attackCooldown:0.1,
+        movementmode:"walk",
+        skill_pool:[],
+        animations:{
+            "idle":[
+                "headcrab_idle",
+                "headcrab_idlesearch"
+            ],
+            "walk":[
+                "headcrab_walk",
+                "headcrab_run"
+            ],
+            "attack":[
+                "headcrab_rearup"
+            ],
+            "skill":[
+                "headcrab_jumpflinch"
+            ],
+            "dead":[
+                "headcrab_die"
+            ],
+            "pounce":[
+                "headcrab_jumpattack"
+            ]
+        }
+    },
+    "zombie_classic":{            
+        template_name:"zombie_classic_template",
+        model_name:"zombie_classic_model",//模型本体，animations播放的是这个模型的动画
+        name: "zombie_classic",
+        baseHealth: 100,
+        baseDamage: 10,
+        speed: 150,
+        reward: 100,
+        attackdist:80,
+        attackCooldown:0.1,
+        movementmode:"walk",
+        skill_pool:[],
+        animations:{
+            "idle":[
+                "ragdoll"
+            ],
+            "walk":[
+                "walk4",
+                "a_walk1",
+                "a_walk2",
+                "a_walk3"
+            ],
+            "attack":[
+                "swatleftmid",
+                "swatrightmid",
+                "swatleftlow",
+                "swatrightlow"
+            ],
+            "skill":[],
+            "dead":[]
+        }
+    },
+    "zombie_fast":{            
+        template_name:"zombie_fast_template",
+        model_name:"zombie_fast_model",//模型本体，animations播放的是这个模型的动画
+        name: "zombie_fast",
+        baseHealth: 100,
+        baseDamage: 10,
+        speed: 150,
+        reward: 100,
+        attackdist:80,
+        attackCooldown:0.1,
+        movementmode:"walk",
+        skill_pool:[],
+        animations:{
+            "idle":[
+                "idle_angry"
+            ],
+            "walk":[
+                "Run"
+            ],
+            "attack":[
+                "BR2_Attack",
+                "Melee"
+            ],
+            "skill":[
+                "idle_angry"
+            ],
+            "dead":[],
+            "pounce":[
+                "JumpNavMove"
+            ]
+        }
+    },
+    "zombie_poison":{            
+        template_name:"zombie_poison_template",
+        model_name:"zombie_poison_model",//模型本体，animations播放的是这个模型的动画
+        name: "zombie_poison",
+        baseHealth: 100,
+        baseDamage: 10,
+        speed: 150,
+        reward: 100,
+        attackdist:80,
+        attackCooldown:0.1,
+        movementmode:"walk",
+        skill_pool:[],
+        animations:{
+            "idle":[
+                "Idle01"
+            ],
+            "walk":[
+                "Run",
+                "Walk"
+            ],
+            "attack":[
+                "melee_01"
+            ],
+            "skill":[],
+            "dead":[
+                "releasecrab"
+            ]
+        }
+    },
+    "antlion_worker":{            
+        template_name:"antlion_worker_template",
+        model_name:"antlion_worker_model",//模型本体，animations播放的是这个模型的动画
+        name: "antlion_worker",
+        baseHealth: 100,
+        baseDamage: 10,
+        speed: 150,
+        reward: 100,
+        attackdist:80,
+        attackCooldown:0.1,
+        movementmode:"walk",
+        skill_pool:[],
+        animations:{
+            "idle":[
+                "distractidle01",
+                "distractidle03",
+                "idle01"
+            ],
+            "walk":[
+                "runn"
+            ],
+            "attack":[
+                "attack_02",
+                "attack_03"
+            ],
+            "skill":[
+                "flyattack05all"
+            ],
+            "dead":[],
+            "pounce":[
+                "flyattack01all",
+                "flyattack02all"
+            ]
+        }
+    },
+    "antlion":{            
+        template_name:"antlion_template",
+        model_name:"antlion_model",//模型本体，animations播放的是这个模型的动画
+        name: "antlion",
+        baseHealth: 100,
+        baseDamage: 10,
+        speed: 150,
+        reward: 100,
+        attackdist:80,
+        attackCooldown:0.1,
+        movementmode:"walk",
+        skill_pool:[],
+        animations:{
+            "idle":[
+                "distractidle01",
+                "distractidle03",
+                "idle01"
+            ],
+            "walk":[
+                "runn"
+            ],
+            "attack":[
+                "attack_02",
+                "attack_03"
+            ],
+            "skill":[
+                "flyattack05all"
+            ],
+            "dead":[],
+            "pounce":[
+                "flyattack01all",
+                "flyattack02all"
+            ]
+        }
+    }
 }

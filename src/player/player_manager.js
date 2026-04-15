@@ -10,9 +10,7 @@ import { getPlayerProfessionConfig, getPlayerProfessionIds, PlayerState } from "
 /**
  * @typedef {object} TP_playerRewardPayload - 玩家奖励分发载荷
  * @property {"buff"|"money"|"exp"|"heal"|"armor"|"damage"|"weapon"|"ready"|"respawn"|"resetGameStatus"} type - 奖励类型
- * @property {string} [buffTypeId] - Buff 类型 ID（仅 type="buff" 时适用）
- * @property {Record<string, any>} [params] - Buff 参数（仅 type="buff" 时适用）
- * @property {Record<string, any>|null} [source] - Buff 来源（仅 type="buff" 时适用）
+ * @property {string} [buffConfigId] - Buff 配置 ID（仅 type="buff" 时适用）
  * @property {number} [amount] - 数值（仅 type="money"、"exp"、"heal"、"armor"、"damage" 时适用）
  * @property {string} [weaponName] - 武器名称（仅 type="weapon" 时适用）
  * @property {string} [reason] - 原因描述（仅 type="money"、"exp" 时适用）
@@ -72,8 +70,8 @@ export class PlayerManager {
         /** @type {Record<string, (player: Player, payload: TP_playerRewardPayload) => boolean>} */
         this._rewardHandlers = {
             buff: (player, payload) => {
-                if (!payload.buffTypeId) return false;
-                return player.addBuff(payload.buffTypeId);
+                if (!payload.buffConfigId) return false;
+                return player.addBuff(payload.buffConfigId);
             },
             money: (player, payload) => {
                 return player.addMoney(payload.amount ?? 0) !== 0;

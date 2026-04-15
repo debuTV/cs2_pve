@@ -12,9 +12,7 @@ export class SpeedBoostSkill extends SkillTemplate {
      * @param {number} id
      * @param {{
      *   cooldown?: number;
-     *   runtime?: number;
-     *   speed_mult?: number;
-     *   speed_value?: number;
+    *   buffConfigId?: string;
      *   events?: string[];
      *   animation?: string | null;
      *   glow?: {r:number, g:number, b:number} | null;
@@ -24,6 +22,9 @@ export class SpeedBoostSkill extends SkillTemplate {
         super(player, monster, "speedboost", id, params);
         this.animation = params.animation ?? null;
         this.events = params.events ?? [MonsterRuntimeEvents.Tick];
+        this.buffConfigId = typeof params.buffConfigId === "string" && params.buffConfigId.trim().length > 0
+            ? params.buffConfigId.trim()
+            : "speed_up";
         this.glow = params.glow ?? null;
     }
 
@@ -54,7 +55,7 @@ export class SpeedBoostSkill extends SkillTemplate {
         const monster = this.monster;
         if (!this.running || !monster) return;
 
-        if (!monster.hasBuff("speed_up")) {
+        if (!monster.hasBuff(this.buffConfigId)) {
             this._endBoost();
         }
     }
@@ -68,7 +69,7 @@ export class SpeedBoostSkill extends SkillTemplate {
         const monster = this.monster;
         if (!monster) return;
 
-        const buff = monster.addBuff("speed_up");
+        const buff = monster.addBuff(this.buffConfigId);
 
         if (!buff) return;
 

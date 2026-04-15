@@ -201,20 +201,21 @@ const eventBus=new EventBus();
  * @property {number} delay - 距波次开始的延迟时间（秒）
  */
 /**
- * @typedef {object} skill_pool - 技能池配置对象。同类型技能可重复出现多次。所有技能均支持：params.events（触发事件数组，可选）, params.cooldown（可选，默认-1一次性）, params.animation（可选）。
+ * @typedef {object} skill_pool - 技能池配置对象。同类型技能可重复出现多次。
+ * 所有技能均支持：params.events（触发事件数组，可选）、params.cooldown（可选，默认 -1，一次性）、params.animation（可选）。
  * @property {string} id - 技能类型名称，必须在 SkillFactory 中注册（同类型可重复出现多次）
  * @property {number} chance - 技能获得概率（0~1）
  * @property {object} params - 技能参数（各技能自定义，详见 skill_factory.js 注释）
  */
 /**
  * 通用动画集合类型：任意键对应动画名数组。
- * 例如 `{ idle: string[], walk: string[] }`。"idle"、"walk"、"attack"、"skill"、"dead" 在对应状态切换时播放。
+ * 例如 `{ idle: string[], walk: string[] }`。`idle`、`walk`、`attack`、`skill`、`dead` 在对应状态切换时播放。
  * @typedef {{ [key: string]: string[] }} animations
  */
 /**
  * @typedef {object} monsterTypes - 怪物类型配置对象。每个怪物实例对应一个 monsterTypes 配置项，包含其属性、技能池和动画列表。
  * @property {string} template_name - 怪物模板名称，对应地图中 PointTemplate 的实体名称
- * @property {string} model_name - 模型名称，对应游戏内模型资源路径（不含前缀 "models/" 和后缀 ".mdl"）
+ * @property {string} model_name - 模型名称，对应游戏内模型资源路径（不含前缀 `models/` 和后缀 `.mdl`）
  * @property {string} name - 怪物名称（仅作记录/展示）
  * @property {number} baseHealth - 基础生命值
  * @property {number} baseDamage - 基础伤害
@@ -222,9 +223,9 @@ const eventBus=new EventBus();
  * @property {number} reward - 击杀奖励
  * @property {number} attackdist - 攻击距离
  * @property {number} attackCooldown - 攻击冷却时间（秒）
- * @property {string} movementmode - 移动模式（例如 "walk"、"fly" 等，具体逻辑由怪物系统实现）
+ * @property {string} movementmode - 移动模式（例如 `walk`、`fly` 等，具体逻辑由怪物系统实现）
  * @property {skill_pool[]} skill_pool - 技能池配置数组
- * @property {animations} animations - 动画配置对象，键为状态名（如 "idle"、"walk"、"attack"、"skill"、"dead" 等），值为对应动画名数组
+ * @property {animations} animations - 动画配置对象，键为状态名，值为对应动画名数组
  */
 /**
  * @typedef {object} waveConfig - 波次配置对象。每波包含一个或多个 monsterTypes 配置项，定义该波次的怪物类型和属性。
@@ -244,7 +245,7 @@ const eventBus=new EventBus();
  * @typedef {object} particleConfig - 粒子配置项。每个粒子对应一个地图中的 PointTemplate，ForceSpawn 后生成 info_particle_system。
  * @property {string} id - 业务粒子 id（代码中引用的 key）
  * @property {string} spawnTemplateName - 地图中 PointTemplate 的实体名称
- * @property {string} middleEntityName - PointTemplate 内目标 info_particle_system 的实体名称，如果是范围特效，选择范围中心点的实体，用于精确匹配
+ * @property {string} middleEntityName - PointTemplate 内目标 info_particle_system 的实体名称；如果是范围特效，选择范围中心点的实体用于精确匹配
  */
 /**
  * @typedef {object} Adapter - 外部适配器接口
@@ -277,9 +278,9 @@ const MovementRequestType$1 = {
  * @property {Entity}  [targetEntity] - 追击目标实体（与 targetPosition 互斥）
  * @property {Vector}  [targetPosition] - 目标坐标（与 targetEntity 互斥）
  * @property {boolean} [usePathRefresh] - 是否允许刷新路径（默认 true）
- * @property {boolean} [useNPCSeparation] - 是否启用NPC分离速度；false 时每 tick 传空分离上下文
+ * @property {boolean} [useNPCSeparation] - 是否启用 NPC 分离速度；false 时每 tick 传空分离上下文
  * @property {string}  [Mode] - 切换移动模式（walk / air / fly 等）
- * @property {Vector}  [Velocity] - 设置速度向量（技能位移用,例如飞扑就需要）
+ * @property {Vector}  [Velocity] - 设置速度向量（技能位移用，例如飞扑就需要）
  * @property {number}  [maxSpeed] - 速度上限
  * @property {boolean} [clearPath] - 是否清空现有路径
  */
@@ -293,141 +294,152 @@ const MovementPriority$1 = {
     Chase:       2,
 };
 
-const event={
-    AreaEffects:{
-        In:{
-            CreateRequest:"AreaEffects_OnCreateRequest",    //请求创建区域效果，payload 包含 {effectType: string, position: Vector, radius: number, duration: number, applyInterval: number, buffTypeId: string, buffParams: any, source: {monsterId: number, monsterType: string, skillId: string}, targetTypes: areaEffectTargetType[]}
-            StopRequest:"AreaEffects_OnStopRequest",        //请求停止区域效果，payload 包含 {areaEffectId: number}
+const event = {
+    AreaEffects: {
+        In: {
+            CreateRequest: "AreaEffects_OnCreateRequest",    // 请求创建区域效果，payload 包含 {areaEffectStaticKey: string, position: Vector, radius: number, duration: number, parentEntity?: Entity|null, targetTypes: string[]}
+            StopRequest: "AreaEffects_OnStopRequest",        // 请求停止区域效果，payload 包含 {areaEffectId: number}
         },
-        Out:{
-            OnCreated:"AreaEffects_OnCreated",                    //区域效果创建后
-            OnHitPlayer:"AreaEffects_OnHitPlayer",                //玩家被范围伤害击中
-            OnHitMonster:"AreaEffects_OnHitMonster",              //怪物被范围伤害击中
-            OnStopped:"AreaEffects_OnStopped",                    //区域效果停止后
-        }
-    },
-    Buff:{
-        In:{
-            BuffAddRequest:"Buff_OnBuffAddRequest",                //请求Buff 添加
-            BuffRefreshRequest:"Buff_OnBuffRefreshRequest",        //请求Buff 刷新
-            BuffRemoveRequest:"Buff_OnBuffRemoveRequest",          //请求Buff 移除
-            BuffEmitRequest:"Buff_OnBuffEmitRequest",              //其他模块发生事件告诉buff
+        Out: {
+            OnCreated: "AreaEffects_OnCreated",              // 区域效果创建后
+            OnHitPlayer: "AreaEffects_OnHitPlayer",          // 玩家被范围效果命中
+            OnHitMonster: "AreaEffects_OnHitMonster",        // 怪物被范围效果命中
+            OnStopped: "AreaEffects_OnStopped",              // 区域效果停止后
         },
-        Out:{
-            OnBuffAdded:"Buff_OnBuffAdded",                //Buff 添加后
-            OnBuffRefreshed:"Buff_OnBuffRefreshed",        //Buff 刷新后
-            OnBuffRemoved:"Buff_OnBuffRemoved",            //Buff 移除后
-        }
     },
-    Game:{
-        In:{
-            StartGameRequest:"Game_OnStartGameRequest",    //请求开始游戏
-            EnterPreparePhaseRequest:"Game_OnEnterPreparePhaseRequest",    //请求进入准备阶段
-            ResetGameRequest:"Game_OnResetGameRequest",    //请求重置游戏
-            GameWinRequest:"Game_OnGameWinRequest",    //请求游戏胜利
-            GameLoseRequest:"Game_OnGameLoseRequest",    //请求游戏失败
+    Buff: {
+        In: {
+            BuffAddRequest: "Buff_OnBuffAddRequest",          // 请求添加 Buff
+            BuffRefreshRequest: "Buff_OnBuffRefreshRequest",  // 请求刷新 Buff
+            BuffRemoveRequest: "Buff_OnBuffRemoveRequest",    // 请求移除 Buff
+            BuffEmitRequest: "Buff_OnBuffEmitRequest",        // 其他模块发生活动时转发给 Buff
         },
-        Out:{
-            OnStartGame:"Game_OnStartGame",    //开始游戏后
-            OnEnterPreparePhase:"Game_OnEnterPreparePhase",    //进入准备阶段后
-            OnResetGame:"Game_OnResetGame",    //重置游戏后
-            OnGameWin:"Game_OnGameWin",    //游戏胜利后
-            OnGameLost:"Game_OnGameLost",    //游戏失败后
-        }
-    },
-    Hud:{
-        In:{
-            ShowHudRequest:"Hud_OnShowHudRequest",    //显示 Hud 请求，payload 包含 {slot: number, pawn: CSPlayerPawn, text: string, channel: number}
-            HideHudRequest:"Hud_OnHideHudRequest",    //隐藏 Hud 请求，payload 包含 {slot: number, channel?: number}
+        Out: {
+            OnBuffAdded: "Buff_OnBuffAdded",                 // Buff 添加后
+            OnBuffRefreshed: "Buff_OnBuffRefreshed",         // Buff 刷新后
+            OnBuffRemoved: "Buff_OnBuffRemoved",             // Buff 移除后
         },
-        Out:{
-            OnHudShown:"Hud_OnHudShown",    //Hud 显示后，payload 包含 {slot: number, channel: number, text: string}
-            OnHudUpdated:"Hud_OnHudUpdated",    //Hud 文本或渠道更新后，payload 包含 {slot: number, channel: number, text: string, previousChannel?: number}
-            OnHudHidden:"Hud_OnHudHidden",    //Hud 隐藏后，payload 包含 {slot: number, channel: number}
-        }
     },
-    Input:{
-        In:{
-            StartRequest:"Input_OnStartRequest",    //请求开始输入检测，payload 包含 {slot: number, pawn: CSPlayerPawn}
-            StopRequest:"Input_OnStopRequest",    //请求停止输入检测，payload 包含 {slot: number}
+    Game: {
+        In: {
+            StartGameRequest: "Game_OnStartGameRequest",                    // 请求开始游戏
+            EnterPreparePhaseRequest: "Game_OnEnterPreparePhaseRequest",    // 请求进入准备阶段
+            ResetGameRequest: "Game_OnResetGameRequest",                    // 请求重置游戏
+            GameWinRequest: "Game_OnGameWinRequest",                        // 请求游戏胜利
+            GameLoseRequest: "Game_OnGameLoseRequest",                      // 请求游戏失败
         },
-        Out:{
-            OnInput:"Input_OnInput",    //输入事件，payload 包含 {slot: number, key: string}
-        }
-    },
-    Monster:{
-        In:{
-            SpawnRequest:"Monster_OnSpawnRequest",    //请求由怪物施法者触发产卵，payload 使用 MonsterSpawnRequest
-            BeforeTakeDamageRequest:"Monster_OnBeforeTakeDamageRequest",    //请求怪物受伤前修正伤害，payload 使用 MonsterBeforeTakeDamageRequest
+        Out: {
+            OnStartGame: "Game_OnStartGame",                // 开始游戏后
+            OnEnterPreparePhase: "Game_OnEnterPreparePhase",// 进入准备阶段后
+            OnResetGame: "Game_OnResetGame",                // 重置游戏后
+            OnGameWin: "Game_OnGameWin",                    // 游戏胜利后
+            OnGameLost: "Game_OnGameLost",                  // 游戏失败后
         },
-        Out:{
-            OnMonsterSpawn:"Monster_OnMonsterSpawn",    //怪物创建并注册后，payload 使用 OnMonsterSpawn
-            OnMonsterDamaged:"Monster_OnMonsterDamaged",    //怪物实际扣血后，payload 使用 OnMonsterDamaged
-            OnMonsterDeath:"Monster_OnMonsterDeath",    //怪物死亡后，payload 使用 OnMonsterDeath
-            OnAllMonstersDead:"Monster_OnAllMonstersDead",    //当前波次全部怪物死亡后
-            OnAttack:"Monster_OnAttack",    //怪物普攻命中后，payload 使用 OnMonsterAttack
-        }
     },
-    Movement:{
-        In:{
-            MoveRequest:"Movement_OnMoveRequest",    //请求移动，payload 使用 MovementRequest
-            StopRequest:"Movement_OnStopRequest",    //请求停止移动，payload 使用 MovementRequest
-            RemoveRequest:"Movement_OnRemoveRequest",    //请求移除 Movement 实例，payload 使用 MovementRequest
+    Hud: {
+        In: {
+            ShowHudRequest: "Hud_OnShowHudRequest",        // 显示 Hud 请求，payload 包含 {slot: number, pawn: CSPlayerPawn, text: string, channel: number}
+            HideHudRequest: "Hud_OnHideHudRequest",        // 隐藏 Hud 请求，payload 包含 {slot: number, channel?: number}
         },
-        Out:{
-            OnRegistered:"Movement_OnRegistered",    //Movement 实例注册后
-            OnStopped:"Movement_OnStopped",          //Movement 停止后
-            OnRemoved:"Movement_OnRemoved",          //Movement 实例移除后
-        }
-    },
-    Particle:{
-        In:{
-            CreateRequest:"Particle_OnCreateRequest",    //粒子特效创建请求
-            StopRequest:"Particle_OnStopRequest",        //粒子特效停止请求
-        }
-    },
-    Player:{
-        In:{
-            GetPlayerSummaryRequest:"Player_OnGetPlayerSummaryRequest",    //请求玩家信息摘要，payload 包含 {slot: number, result?: any}
-            DispatchRewardRequest:"Player_OnDispatchRewardRequest",    //请求分发玩家奖励，payload 包含 {slot: number|null, reward?: any, rewards?: any[], result?: boolean}
+        Out: {
+            OnHudShown: "Hud_OnHudShown",                  // Hud 显示后，payload 包含 {slot: number, channel: number, text: string}
+            OnHudUpdated: "Hud_OnHudUpdated",              // Hud 文本或渠道更新后，payload 包含 {slot: number, channel: number, text: string, previousChannel?: number}
+            OnHudHidden: "Hud_OnHudHidden",                // Hud 隐藏后，payload 包含 {slot: number, channel: number}
         },
-        Out:{
-            OnPlayerJoin:"Player_OnPlayerJoin",    //玩家加入后，payload 包含 {player: Player, slot: number}
-            OnPlayerLeave:"Player_OnPlayerLeave",  //玩家离开后，payload 包含 {player: Player, slot: number}
-            OnPlayerReadyChanged:"Player_OnPlayerReadyChanged",    //玩家准备状态变化后
-            OnAllPlayersReady:"Player_OnAllPlayersReady",    //全员准备后
-            OnPlayerDeath:"Player_OnPlayerDeath",  //玩家死亡后
-            OnPlayerRespawn:"Player_OnPlayerRespawn",    //玩家重生后
-        }
     },
-    Shop:{
-        In:{
-            ShopOpenRequest:"Shop_OnShopOpenRequest",    //请求打开商店，payload 包含 {slot: number, pawn?: CSPlayerPawn, result?: boolean}
-            ShopCloseRequest:"Shop_OnShopCloseRequest",  //请求关闭商店，payload 包含 {slot: number, result?: boolean}
+    Input: {
+        In: {
+            StartRequest: "Input_OnStartRequest",          // 请求开始输入检测，payload 包含 {slot: number, pawn: CSPlayerPawn}
+            StopRequest: "Input_OnStopRequest",            // 请求停止输入检测，payload 包含 {slot: number}
         },
-        Out:{
-            OnShopOpen:"Shop_OnShopOpen",    //商店打开后，payload 包含 {slot: number}
-            OnShopClose:"Shop_OnShopClose",  //商店关闭后，payload 包含 {slot: number}
-            OnBought:"Shop_OnBought",    //购买商品后，payload 包含 {slot: number, itemId: string, price: number}
-        }
+        Out: {
+            OnInput: "Input_OnInput",                      // 输入事件，payload 包含 {slot: number, key: string}
+        },
     },
-    Skill:{
-        In:{
-            SkillAddRequest:"Skill_OnSkillAddRequest",    //请求为目标添加技能，payload 使用 SkillAddRequest
-            SkillRemoveRequest:"Skill_OnSkillRemoveRequest",    //请求移除技能，payload 使用 SkillRemoveRequest
-            SkillUseRequest:"Skill_OnSkillUseRequest",    //请求直接触发技能，payload 使用 SkillUseRequest
-            SkillEmitRequest:"Skill_OnSkillEmitRequest",    //请求向技能转发运行时事件，payload 使用 SkillEmitRequest
+    Monster: {
+        In: {
+            SpawnRequest: "Monster_OnSpawnRequest",                        // 请求由怪物施法者触发产卵，payload 使用 MonsterSpawnRequest
+            BeforeTakeDamageRequest: "Monster_OnBeforeTakeDamageRequest",  // 请求怪物受伤前修正伤害，payload 使用 MonsterBeforeTakeDamageRequest
+        },
+        Out: {
+            OnMonsterSpawn: "Monster_OnMonsterSpawn",            // 怪物创建并注册后，payload 使用 OnMonsterSpawn
+            OnMonsterDamaged: "Monster_OnMonsterDamaged",        // 怪物实际扣血后，payload 使用 OnMonsterDamaged
+            OnMonsterDeath: "Monster_OnMonsterDeath",            // 怪物死亡后，payload 使用 OnMonsterDeath
+            OnAllMonstersDead: "Monster_OnAllMonstersDead",      // 当前波次全部怪物死亡后
+            OnAttack: "Monster_OnAttack",                        // 怪物普攻命中后，payload 使用 OnMonsterAttack
+        },
+    },
+    Movement: {
+        In: {
+            MoveRequest: "Movement_OnMoveRequest",          // 请求移动，payload 使用 MovementRequest
+            StopRequest: "Movement_OnStopRequest",          // 请求停止移动，payload 使用 MovementRequest
+            RemoveRequest: "Movement_OnRemoveRequest",      // 请求移除 Movement 实例，payload 使用 MovementRequest
+        },
+        Out: {
+            OnRegistered: "Movement_OnRegistered",          // Movement 实例注册后
+            OnStopped: "Movement_OnStopped",                // Movement 停止后
+            OnRemoved: "Movement_OnRemoved",                // Movement 实例移除后
+        },
+    },
+    Particle: {
+        In: {
+            CreateRequest: "Particle_OnCreateRequest",      // 粒子特效创建请求
+            StopRequest: "Particle_OnStopRequest",          // 粒子特效停止请求
+        },
+    },
+    Player: {
+        In: {
+            GetPlayerSummaryRequest: "Player_OnGetPlayerSummaryRequest",      // 请求玩家信息摘要，payload 包含 {slot: number, result?: any}
+            DispatchRewardRequest: "Player_OnDispatchRewardRequest",          // 请求分发玩家奖励，payload 包含 {slot: number|null, reward?: any, rewards?: any[], result?: boolean}
+        },
+        Out: {
+            OnPlayerJoin: "Player_OnPlayerJoin",                // 玩家加入后，payload 包含 {player: Player, slot: number}
+            OnPlayerLeave: "Player_OnPlayerLeave",              // 玩家离开后，payload 包含 {player: Player, slot: number}
+            OnPlayerReadyChanged: "Player_OnPlayerReadyChanged",// 玩家准备状态变化后
+            OnAllPlayersReady: "Player_OnAllPlayersReady",      // 全员准备后
+            OnPlayerDeath: "Player_OnPlayerDeath",              // 玩家死亡后
+            OnPlayerRespawn: "Player_OnPlayerRespawn",          // 玩家重生后
+        },
+    },
+    Shop: {
+        In: {
+            ShopOpenRequest: "Shop_OnShopOpenRequest",      // 请求打开商店，payload 包含 {slot: number, pawn?: CSPlayerPawn, result?: boolean}
+            ShopCloseRequest: "Shop_OnShopCloseRequest",    // 请求关闭商店，payload 包含 {slot: number, result?: boolean}
+        },
+        Out: {
+            OnShopOpen: "Shop_OnShopOpen",                  // 商店打开后，payload 包含 {slot: number}
+            OnShopClose: "Shop_OnShopClose",                // 商店关闭后，payload 包含 {slot: number}
+            OnBought: "Shop_OnBought",                      // 购买商品后，payload 包含 {slot: number, itemId: string, price: number}
+        },
+    },
+    Skill: {
+        In: {
+            SkillAddRequest: "Skill_OnSkillAddRequest",          // 请求为目标添加技能，payload 使用 SkillAddRequest
+            SkillRemoveRequest: "Skill_OnSkillRemoveRequest",    // 请求移除技能，payload 使用 SkillRemoveRequest
+            SkillUseRequest: "Skill_OnSkillUseRequest",          // 请求直接触发技能，payload 使用 SkillUseRequest
+            SkillEmitRequest: "Skill_OnSkillEmitRequest",        // 请求向技能转发运行时事件，payload 使用 SkillEmitRequest
         }},
-    Wave:{
-        In:{
-            WaveStartRequest:"Wave_OnWaveStartRequest",    //请求开始波次，payload 包含 {waveIndex: number}
-            WaveEndRequest:"Wave_OnWaveEndRequest",        //请求结束波次，payload 包含 {waveIndex: number, survived: boolean}
+    Throw: {
+        In: {
+            CreateRequest: "Throw_OnCreateRequest",         // 请求创建投掷物，payload 使用 ThrowCreateRequest
+            StopRequest: "Throw_OnStopRequest",             // 请求停止投掷物，payload 使用 ThrowStopRequest
         },
-        Out:{
-            OnWaveStart:"Wave_OnWaveStart",    //波次开始后，payload 包含 {waveIndex: number}
-            OnWaveEnd:"Wave_OnWaveEnd",        //波次结束后，payload 包含 {waveIndex: number, survived: boolean}
-        }
-    }
+        Out: {
+            OnProjectileCreated: "Throw_OnProjectileCreated",  // 投掷物创建后，payload 使用 OnProjectileCreated
+            OnProjectileHit: "Throw_OnProjectileHit",          // 投掷物结束并产生命中结果后，payload 使用 OnProjectileHit
+            OnProjectileStopped: "Throw_OnProjectileStopped",  // 投掷物停止后，payload 使用 OnProjectileStopped
+        },
+    },
+    Wave: {
+        In: {
+            WaveStartRequest: "Wave_OnWaveStartRequest",    // 请求开始波次，payload 包含 {waveIndex: number}
+            WaveEndRequest: "Wave_OnWaveEndRequest",        // 请求结束波次，payload 包含 {waveIndex: number, survived: boolean}
+        },
+        Out: {
+            OnWaveStart: "Wave_OnWaveStart",                // 波次开始后，payload 包含 {waveIndex: number}
+            OnWaveEnd: "Wave_OnWaveEnd",                    // 波次结束后，payload 包含 {waveIndex: number, survived: boolean}
+        },
+    },
 };
 
 /**
@@ -718,108 +730,421 @@ const MonsterState = {
  * @type {{ [key: string]: import("../util/definition").monsterTypes }} 
  */
 const MonsterType={
-    "Zombie":{            
-            template_name:"headcrab_classic_template",
-            model_name:"headcrab_classic_model",//模型本体，animations播放的是这个模型的动画
-            name: "Zombie",
-            baseHealth: 100,
-            baseDamage: 10,
-            speed: 150,
-            reward: 100,
-            attackdist:80,
-            attackCooldown:0.1,
-            movementmode:"walk",
-            skill_pool:[
-                {
-                    id:"sound",
-                    chance: 1,
-                    params:{ cooldown:5, templateName:"headcrab_classic_sound", eventSoundMap:{ OnSpawn:"Headcrab.Classic.Spawn", OnTakeDamage:"Headcrab.Classic.Hurt" } }
-                },
-                //// 示例：同类型技能重复（分别叠加不同属性）
-                //{
-                //    id:"corestats",
-                //    chance: 1,
-                //    params:{ health_value:200 }          // 实例 id=0
-                //},
-                //{
-                //    id:"corestats",
-                //    chance: 1,
-                //    params:{ speed_mult:1.5 }            // 实例 id=1，两个 corestats 独立生效
-                //},
-                //// 示例：单个技能绑定多个触发事件
-                //{
-                //    id:"spawn",
-                //    chance: 1,
-                //    params:{ events:["OnSpawn","OnTakeDamage"], count:1, typeName:"Zombie", maxSummons:3 }
-                //},
-                //// 示例：有动画的 pounce
-                //{
-                //    id:"pounce",
-                //    chance: 1,
-                //    params:{ cooldown:5, distance:250, animation:"pounce" }
-                //},
-                //// 示例：无动画的 pounce（在 canTrigger 内直接执行）
-                //{
-                //    id:"pounce",
-                //    chance: 1,
-                //    params:{ cooldown:10, distance:400 }  // 无 animation → 无动画直触发
-                //},
-                //// 示例：护盾
-                //{
-                //    id: "shield",
-                //    chance: 1,
-                //    params: { cooldown:15, runtime:-1, value:50 }
-                //},
-                //// 示例：急速（5秒内速度×1.8，冷却10秒，可选发光）
-                //{
-                //    id: "speedboost",
-                //    chance: 1,
-                //    params: { cooldown:10, runtime:5, speed_mult:1.8, glow:{r:255,g:128,b:0} }
-                //},
-                //// 示例：投掷石头（trigger 待实现）
-                //{
-                //    id: "throwstone",
-                //    chance: 1,
-                //    params: { cooldown:6, distanceMin:100, distanceMax:500, damage:15, projectileSpeed:600 }
-                //},
-                //// 示例：持续激光（trigger 待实现，2秒持续，每0.25秒结算一次）
-                //{
-                //    id: "laserbeam",
-                //    chance: 1,
-                //    params: { cooldown:8, distance:400, duration:2, damagePerSecond:30, tickInterval:0.25 }
-                //},
-                //// 示例：死亡时产卵
-                //{
-                //    id: "spawn",
-                //    chance: 1,
-                //    params: { count:1, typeName:"Zombie", maxSummons:3, radiusMin:24, radiusMax:96, tries:6 }
-                //}
+    "headcrab_classic":{            
+        template_name:"headcrab_classic_template",
+        model_name:"headcrab_classic_model",//模型本体，animations播放的是这个模型的动画
+        name: "headcrab_classic",
+        baseHealth: 100,
+        baseDamage: 10,
+        speed: 150,
+        reward: 100,
+        attackdist:80,
+        attackCooldown:0.1,
+        movementmode:"walk",
+        skill_pool:[
+            //{
+            //    id:"sound",
+            //    chance: 1,
+            //    params:{ cooldown:5, templateName:"headcrab_classic_sound", eventSoundMap:{ OnSpawn:"Headcrab.Classic.Spawn", OnTakeDamage:"Headcrab.Classic.Hurt" } }
+            //},
+            //// 示例：同类型技能重复（分别叠加不同属性）
+            //{
+            //    id:"corestats",
+            //    chance: 1,
+            //    params:{ health_value:200 }          // 实例 id=0
+            //},
+            //{
+            //    id:"corestats",
+            //    chance: 1,
+            //    params:{ speed_mult:1.5 }            // 实例 id=1，两个 corestats 独立生效
+            //},
+            //// 示例：单个技能绑定多个触发事件
+            //{
+            //    id:"spawn",
+            //    chance: 1,
+            //    params:{ events:["OnSpawn","OnTakeDamage"], count:1, typeName:"Zombie", maxSummons:3 }
+            //},
+            //// 示例：有动画的 pounce
+            //{
+            //    id:"pounce",
+            //    chance: 1,
+            //    params:{ cooldown:5, distance:250, animation:"pounce" }
+            //},
+            //// 示例：无动画的 pounce（在 canTrigger 内直接执行）
+            //{
+            //    id:"pounce",
+            //    chance: 1,
+            //    params:{ cooldown:10, distance:400 }  // 无 animation → 无动画直触发
+            //},
+            //// 示例：护盾
+            //{
+            //    id: "shield",
+            //    chance: 1,
+            //    params: { cooldown:15, runtime:-1, value:50 }
+            //},
+            //// 示例：急速（5秒内速度×1.8，冷却10秒，可选发光）
+            //{
+            //    id: "speedboost",
+            //    chance: 1,
+            //    params: { cooldown:10, buffConfigId:"speed_up", glow:{r:255,g:128,b:0} }
+            //},
+            //// 示例：投掷石头（通过投掷物管理器创建运行时投掷物）
+            //{
+            //    id: "throwstone",
+            //    chance: 1,
+            //    params: { cooldown:6, distanceMin:100, distanceMax:500, damage:15, projectileSpeed:600, templateName:"throwstone_projectile_template" }
+            //},
+            //// 示例：持续激光（trigger 待实现，2秒持续，每0.25秒结算一次）
+            //{
+            //    id: "laserbeam",
+            //    chance: 1,
+            //    params: { cooldown:8, distance:400, duration:2, damagePerSecond:30, tickInterval:0.25 }
+            //},
+            //// 示例：死亡时产卵
+            //{
+            //    id: "spawn",
+            //    chance: 1,
+            //    params: { count:1, typeName:"Zombie", maxSummons:3, radiusMin:24, radiusMax:96, tries:6 }
+            //}
+        ],
+        animations:{
+            "idle":[
+                "headcrab_classic_idle",
+                "headcrab_classic_idle_b",
+                "headcrab_classic_idle_c"
             ],
-            animations:{
-                "idle":[
-                    "headcrab_classic_idle",
-                    "headcrab_classic_idle_b",
-                    "headcrab_classic_idle_c"
-                ],
-                "walk":[
-                    "headcrab_classic_walk",
-                    "headcrab_classic_run"
-                ],
-                "attack":[
-                    "headcrab_classic_attack_antic_02",
-                    "headcrab_classic_attack_antic_03",
-                    "headcrab_classic_attack_antic_04"
-                ],
-                "skill":[
-                    "headcrab_classic_attack_antic_02",
-                    "headcrab_classic_attack_antic_03",
-                    "headcrab_classic_attack_antic_04"
-                ],
-                "pounce":[
-                    "headcrab_classic_jumpattack"
-                ]
-            }
+            "walk":[
+                "headcrab_classic_walk",
+                "headcrab_classic_run"
+            ],
+            "attack":[
+                "headcrab_classic_attack_antic_02",
+                "headcrab_classic_attack_antic_03",
+                "headcrab_classic_attack_antic_04"
+            ],
+            "skill":[
+                "headcrab_classic_attack_antic_02",
+                "headcrab_classic_attack_antic_03",
+                "headcrab_classic_attack_antic_04"
+            ],
+            "dead":[
+                "headcrab_classic_death_directional_0",
+                "headcrab_classic_death_directional_180",
+                "headcrab_classic_death_directional_90_left",
+                "headcrab_classic_death_directional_90_right"
+            ],
+            "pounce":[
+                "headcrab_classic_jumpattack"
+            ]
         }
+    },
+    "headcrab_reviver":{            
+        template_name:"headcrab_reviver_template",
+        model_name:"headcrab_reviver_model",//模型本体，animations播放的是这个模型的动画
+        name: "headcrab_reviver",
+        baseHealth: 100,
+        baseDamage: 10,
+        speed: 150,
+        reward: 100,
+        attackdist:80,
+        attackCooldown:0.1,
+        movementmode:"walk",
+        skill_pool:[],
+        animations:{
+            "idle":[
+                "rhc_aggro_idle",
+                "rhc_aggro_idle_twitch_01",
+                "rhc_sneak_idle_lookaround"
+            ],
+            "walk":[
+                "rhc_scorpion_run_angled"
+            ],
+            "attack":[
+                "rhc_aggro_jumpattack"
+            ],
+            "skill":[
+                "rhc_aggro_jumpattack"
+            ],
+            "dead":[
+                "rhc_die"
+            ]
+        }
+    },
+    "headcrab_black":{            
+        template_name:"headcrab_black_template",
+        model_name:"headcrab_black_model",//模型本体，animations播放的是这个模型的动画
+        name: "headcrab_black",
+        baseHealth: 100,
+        baseDamage: 10,
+        speed: 150,
+        reward: 100,
+        attackdist:80,
+        attackCooldown:0.1,
+        movementmode:"walk",
+        skill_pool:[],
+        animations:{
+            "idle":[
+                "headcrabblack_idlesniff"
+            ],
+            "walk":[
+                "walk_n",
+                "headcrabblack_scurry"
+            ],
+            "attack":[
+                "headcrabblack_spitattack"
+            ],
+            "skill":[
+                "headcrabblack_idle_b"
+            ],
+            "dead":[
+                "headcrabblack_dieplaceholder"
+            ],
+            "pounce":[
+                "headcrabblack_jumpattack"
+            ]
+        }
+    },
+    "headcrab_armored":{            
+        template_name:"headcrab_armored_template",
+        model_name:"headcrab_armored_model",//模型本体，animations播放的是这个模型的动画
+        name: "headcrab_armored",
+        baseHealth: 100,
+        baseDamage: 10,
+        speed: 150,
+        reward: 100,
+        attackdist:80,
+        attackCooldown:0.1,
+        movementmode:"walk",
+        skill_pool:[],
+        animations:{
+            "idle":[
+                "headcrab_classic_idle",
+                "headcrab_classic_idle_b",
+                "headcrab_classic_idle_c"
+            ],
+            "walk":[
+                "headcrab_classic_walk",
+                "headcrab_classic_run"
+            ],
+            "attack":[
+                "headcrab_classic_attack_antic_02",
+                "headcrab_classic_attack_antic_03",
+                "headcrab_classic_attack_antic_04"
+            ],
+            "skill":[
+                "headcrab_classic_attack_antic_02",
+                "headcrab_classic_attack_antic_03",
+                "headcrab_classic_attack_antic_04"
+            ],
+            "dead":[
+                "headcrab_classic_death_directional_0",
+                "headcrab_classic_death_directional_180",
+                "headcrab_classic_death_directional_90_left",
+                "headcrab_classic_death_directional_90_right"
+            ],
+            "pounce":[
+                "headcrab_classic_jumpattack"
+            ]
+        }
+    },
+    "headcrab":{            
+        template_name:"headcrab_template",
+        model_name:"headcrab_model",//模型本体，animations播放的是这个模型的动画
+        name: "headcrab",
+        baseHealth: 100,
+        baseDamage: 10,
+        speed: 150,
+        reward: 100,
+        attackdist:80,
+        attackCooldown:0.1,
+        movementmode:"walk",
+        skill_pool:[],
+        animations:{
+            "idle":[
+                "headcrab_idle",
+                "headcrab_idlesearch"
+            ],
+            "walk":[
+                "headcrab_walk",
+                "headcrab_run"
+            ],
+            "attack":[
+                "headcrab_rearup"
+            ],
+            "skill":[
+                "headcrab_jumpflinch"
+            ],
+            "dead":[
+                "headcrab_die"
+            ],
+            "pounce":[
+                "headcrab_jumpattack"
+            ]
+        }
+    },
+    "zombie_classic":{            
+        template_name:"zombie_classic_template",
+        model_name:"zombie_classic_model",//模型本体，animations播放的是这个模型的动画
+        name: "zombie_classic",
+        baseHealth: 100,
+        baseDamage: 10,
+        speed: 150,
+        reward: 100,
+        attackdist:80,
+        attackCooldown:0.1,
+        movementmode:"walk",
+        skill_pool:[],
+        animations:{
+            "idle":[
+                "ragdoll"
+            ],
+            "walk":[
+                "walk4",
+                "a_walk1",
+                "a_walk2",
+                "a_walk3"
+            ],
+            "attack":[
+                "swatleftmid",
+                "swatrightmid",
+                "swatleftlow",
+                "swatrightlow"
+            ],
+            "skill":[],
+            "dead":[]
+        }
+    },
+    "zombie_fast":{            
+        template_name:"zombie_fast_template",
+        model_name:"zombie_fast_model",//模型本体，animations播放的是这个模型的动画
+        name: "zombie_fast",
+        baseHealth: 100,
+        baseDamage: 10,
+        speed: 150,
+        reward: 100,
+        attackdist:80,
+        attackCooldown:0.1,
+        movementmode:"walk",
+        skill_pool:[],
+        animations:{
+            "idle":[
+                "idle_angry"
+            ],
+            "walk":[
+                "Run"
+            ],
+            "attack":[
+                "BR2_Attack",
+                "Melee"
+            ],
+            "skill":[
+                "idle_angry"
+            ],
+            "dead":[],
+            "pounce":[
+                "JumpNavMove"
+            ]
+        }
+    },
+    "zombie_poison":{            
+        template_name:"zombie_poison_template",
+        model_name:"zombie_poison_model",//模型本体，animations播放的是这个模型的动画
+        name: "zombie_poison",
+        baseHealth: 100,
+        baseDamage: 10,
+        speed: 150,
+        reward: 100,
+        attackdist:80,
+        attackCooldown:0.1,
+        movementmode:"walk",
+        skill_pool:[],
+        animations:{
+            "idle":[
+                "Idle01"
+            ],
+            "walk":[
+                "Run",
+                "Walk"
+            ],
+            "attack":[
+                "melee_01"
+            ],
+            "skill":[],
+            "dead":[
+                "releasecrab"
+            ]
+        }
+    },
+    "antlion_worker":{            
+        template_name:"antlion_worker_template",
+        model_name:"antlion_worker_model",//模型本体，animations播放的是这个模型的动画
+        name: "antlion_worker",
+        baseHealth: 100,
+        baseDamage: 10,
+        speed: 150,
+        reward: 100,
+        attackdist:80,
+        attackCooldown:0.1,
+        movementmode:"walk",
+        skill_pool:[],
+        animations:{
+            "idle":[
+                "distractidle01",
+                "distractidle03",
+                "idle01"
+            ],
+            "walk":[
+                "runn"
+            ],
+            "attack":[
+                "attack_02",
+                "attack_03"
+            ],
+            "skill":[
+                "flyattack05all"
+            ],
+            "dead":[],
+            "pounce":[
+                "flyattack01all",
+                "flyattack02all"
+            ]
+        }
+    },
+    "antlion":{            
+        template_name:"antlion_template",
+        model_name:"antlion_model",//模型本体，animations播放的是这个模型的动画
+        name: "antlion",
+        baseHealth: 100,
+        baseDamage: 10,
+        speed: 150,
+        reward: 100,
+        attackdist:80,
+        attackCooldown:0.1,
+        movementmode:"walk",
+        skill_pool:[],
+        animations:{
+            "idle":[
+                "distractidle01",
+                "distractidle03",
+                "idle01"
+            ],
+            "walk":[
+                "runn"
+            ],
+            "attack":[
+                "attack_02",
+                "attack_03"
+            ],
+            "skill":[
+                "flyattack05all"
+            ],
+            "dead":[],
+            "pounce":[
+                "flyattack01all",
+                "flyattack02all"
+            ]
+        }
+    }
 };
 
 /**
@@ -872,17 +1197,17 @@ const WaveState = {
 const wavesConfig=[
         { 
             name: "训练波", 
-            totalMonsters: 5, 
+            totalMonsters: 500, 
             reward: 500, 
             spawnInterval: 0.1, 
             preparationTime: 0, //波次开始到第一个怪物出现时间，这段时间可以用来发消息
-            aliveMonster:1, //同时存在的怪物数量
+            aliveMonster:50, //同时存在的怪物数量
             monster_spawn_points_name:["monster_spawnpoint"],//这一波生成点
             monster_breakablemins:{x:-30,y:-30,z:0},//最大怪物的breakable的mins
             monster_breakablemaxs:{x:30,y:30,z:75},//最大怪物的breakable的maxs
             broadcastmessage:[{message:"",delay:1}],
             // monster 系统已独立拆出，主工程仅保留波次元数据。
-            monsterTypes:[MonsterType.Zombie]
+            monsterTypes:[MonsterType.headcrab_classic]
         },{ 
             name: "训练波", 
             totalMonsters: 5, 
@@ -894,7 +1219,7 @@ const wavesConfig=[
             monster_breakablemins:{x:-30,y:-30,z:0},//最大怪物的breakable的mins
             monster_breakablemaxs:{x:30,y:30,z:75},//最大怪物的breakable的maxs
             broadcastmessage:[{message:"",delay:1}],
-            monsterTypes:[MonsterType.Zombie]
+            monsterTypes:[MonsterType.headcrab_classic]
         },
     ];
 
@@ -1167,8 +1492,23 @@ class WaveManager {
  */
 
 /**
- * 玩家宿主内统一运行时事件。
- * buff 与 skill 都只应订阅这组玩家事件。
+ * 玩家宿主内统一运行时事件表。
+ *
+ * 约定：
+ * - 玩家宿主上的 buff 与 skill 只能订阅这组事件，不再混用旧的模块级事件名。
+ * - 业务代码应通过 `player.emitRuntimeEvent(...)` 分发这些事件，而不是手写字符串。
+ * - 这里的字符串值属于稳定运行时契约；新增事件时应同步补充 payload typedef。
+ *
+ * 字段说明：
+ * - `Spawn`：玩家激活、重生或重绑技能后触发，用于初始化一次性效果。
+ * - `Input`：玩家输入事件，目前主要用于职业技能主动施放。
+ * - `Tick`：玩家存活期间的逐帧心跳。
+ * - `StateChange`：玩家状态切换时触发，负载为 `RuntimeStateChangePayload`。
+ * - `Recompute`：派生属性重算时触发，供 buff/skill 重新写入修正值。
+ * - `BeforeTakeDamage`：玩家受伤前触发，允许同步修改 `damage`。
+ * - `TakeDamage`：玩家受伤后触发，只用于读取最终结果，不应再回写结算。
+ * - `Attack`：玩家攻击伤害结算时触发，供修正最终输出伤害。
+ * - `Die`：玩家进入死亡流程时触发。
  */
 const PlayerRuntimeEvents = {
     Spawn: "OnSpawn",
@@ -1183,8 +1523,26 @@ const PlayerRuntimeEvents = {
 };
 
 /**
- * 怪物宿主内统一运行时事件。
- * buff 与 skill 都只应订阅这组怪物事件。
+ * 怪物宿主内统一运行时事件表。
+ *
+ * 约定：
+ * - 怪物宿主上的 buff 与 skill 只能订阅这组事件，不再复用旧的 `MonsterBuffEvents` 或 `SkillEvents`。
+ * - 业务代码应通过 `monster.emitRuntimeEvent(...)` 分发这些事件，由宿主同时路由到 buff 与 skill。
+ * - 该表覆盖怪物的生命周期、AI、战斗和技能施放通知；不要求与玩家事件集完全同构。
+ *
+ * 字段说明：
+ * - `Spawn`：怪物实例完成初始化后触发。
+ * - `Tick`：怪物存活期间的逐帧心跳。
+ * - `TargetUpdate`：怪物仇恨目标更新后触发。
+ * - `StateChange`：怪物状态切换时触发，负载为 `RuntimeStateChangePayload`。
+ * - `Recompute`：怪物派生属性重算时触发。
+ * - `BeforeTakeDamage`：怪物受伤前触发，允许同步修改 `damage`。
+ * - `TakeDamage`：怪物受伤后触发，提供最终伤害与血量变化结果。
+ * - `AttackTrue`：怪物本次普通攻击成功命中目标。
+ * - `AttackFalse`：怪物本次普通攻击未命中目标。
+ * - `SkillCast`：怪物技能成功施放后的运行时通知。
+ * - `Die`：怪物进入死亡流程时触发。
+ * - `ModelRemove`：怪物死亡动画结束、模型即将移除时触发。
  */
 const MonsterRuntimeEvents = {
     Spawn: "OnSpawn",
@@ -1259,7 +1617,7 @@ const MonsterRuntimeEvents = {
  * @typedef {Object} RuntimeSkillCastPayload
  * @property {number} [skillId]
  * @property {string} [skillTypeId]
- * @property {string} [buffTypeId]
+ * @property {string} [buffConfigId]
  * @property {import("cs_script/point_script").Entity|null} [source]
  * @property {import("cs_script/point_script").Entity|null} [target]
  */
@@ -1562,7 +1920,7 @@ const PlayerState = {
  */
 
 /** 默认职业。 */
-const DEFAULT_PLAYER_PROFESSION = "medic";
+const DEFAULT_PLAYER_PROFESSION = "engineer";
 
 /** @type {Record<string, PlayerProfessionConfig>} */
 const PLAYER_PROFESSIONS = {
@@ -1596,6 +1954,17 @@ const PLAYER_PROFESSIONS = {
             cooldown: 10,
             heal: 20,
             armor: 15,
+        },
+    },
+    engineer: {
+        id: "engineer",
+        displayName: "工程师",
+        skillTypeId: "player_turret",
+        skillParams: {
+            cooldown: 0,
+            damage: 200,
+            lifetime: 120,
+            searchRadius: 640,
         },
     },
 };
@@ -3130,9 +3499,7 @@ class Player {
 /**
  * @typedef {object} TP_playerRewardPayload - 玩家奖励分发载荷
  * @property {"buff"|"money"|"exp"|"heal"|"armor"|"damage"|"weapon"|"ready"|"respawn"|"resetGameStatus"} type - 奖励类型
- * @property {string} [buffTypeId] - Buff 类型 ID（仅 type="buff" 时适用）
- * @property {Record<string, any>} [params] - Buff 参数（仅 type="buff" 时适用）
- * @property {Record<string, any>|null} [source] - Buff 来源（仅 type="buff" 时适用）
+ * @property {string} [buffConfigId] - Buff 配置 ID（仅 type="buff" 时适用）
  * @property {number} [amount] - 数值（仅 type="money"、"exp"、"heal"、"armor"、"damage" 时适用）
  * @property {string} [weaponName] - 武器名称（仅 type="weapon" 时适用）
  * @property {string} [reason] - 原因描述（仅 type="money"、"exp" 时适用）
@@ -3192,8 +3559,8 @@ class PlayerManager {
         /** @type {Record<string, (player: Player, payload: TP_playerRewardPayload) => boolean>} */
         this._rewardHandlers = {
             buff: (player, payload) => {
-                if (!payload.buffTypeId) return false;
-                return player.addBuff(payload.buffTypeId);
+                if (!payload.buffConfigId) return false;
+                return player.addBuff(payload.buffConfigId);
             },
             money: (player, payload) => {
                 return player.addMoney(payload.amount ?? 0) !== 0;
@@ -4089,7 +4456,7 @@ const BASE_SHOP_ITEMS = [
     { id: "heal_large",  displayName: "大型治疗包", cost: 500,  requiredLevel: 3, payload: { type: "heal",  amount: 80 } },
     { id: "armor_small", displayName: "轻型护甲",   cost: 300,  requiredLevel: 1, payload: { type: "armor", amount: 50 } },
     { id: "armor_full",  displayName: "重型护甲",   cost: 800,  requiredLevel: 5, payload: { type: "armor", amount: 100 } },
-    { id: "buff_attack", displayName: "强攻增益",   cost: 600,  requiredLevel: 2, payload: { type: "buff",  buffTypeId: "attack_up" } },
+    { id: "buff_attack", displayName: "强攻增益",   cost: 600,  requiredLevel: 2, payload: { type: "buff",  buffConfigId: "attack_up" } },
     { id: "weapon_ak47", displayName: "AK-47",      cost: 2700, requiredLevel: 4, payload: { type: "weapon", weaponName: "weapon_ak47" } },
 ];
 
@@ -4431,14 +4798,14 @@ class ShopSession {
             case "armor":
                 return { reward: { type: "armor", amount: payload.amount ?? 0 } };
             case "buff":
-                if (!payload.buffTypeId) {
+                if (!payload.buffConfigId) {
                     return { reward: null, message: "商品无 Buff 定义" };
                 }
 
                 return {
                     reward: {
                         type: "buff",
-                        buffTypeId: payload.buffTypeId,
+                        buffConfigId: payload.buffConfigId,
                     },
                 };
             case "money":
@@ -5248,7 +5615,7 @@ class MonsterHealthCombat {
             attacker: attacker instanceof CSPlayerPawn ? attacker : null,
         };
         eventBus.emit(event.Monster.Out.OnMonsterDamaged, payload);
-        Instance.Msg(`鎬墿 #${this.monster.id} 鍙楀埌 ${finalAmount} 鐐逛激瀹?(鍘熷:${amount}) (${previousHealth} -> ${this.monster.health})`);
+        Instance.Msg(`怪物 #${this.monster.id} 受到 ${finalAmount} 点伤害 (原始:${amount}) (${previousHealth} -> ${this.monster.health})`);
 
         if (this.monster.health <= 0) {
             this.die(attacker);
@@ -5283,7 +5650,7 @@ class MonsterHealthCombat {
         this.monster.killer = killer instanceof CSPlayerPawn ? killer : null;
         this.monster.emitDeathEvent(killer);
         this.monster.animation.enter(MonsterState.DEAD);
-        Instance.Msg(`鎬墿 #${this.monster.id} 姝讳骸`);
+        Instance.Msg(`怪物 #${this.monster.id} 死亡`);
     }
 
     enterAttack() {
@@ -5553,8 +5920,8 @@ class SkillTemplate
 
     /**
      * 标记技能已触发——更新 `lastTriggerTime` 为当前游戏时间。
-     * 若技能配置了 `buffTypeId` 且怪物当前有目标，还会通过事件系统发布 `SkillCast` 事件，
-     * 携带构建好的 buff 负载供玩家 buff 系统接收。
+     * 需要附带 Buff 的技能应自行按 `configid` 调用对应宿主的 Buff 入口；
+     * 基类这里只负责更新时间戳。
      */
     _markTriggered() {
         this.lastTriggerTime = Instance.GetGameTime();
@@ -5809,7 +6176,7 @@ class InitAnimSkill extends SkillTemplate {
         if (!this._cooldownReady()) return false;
         // 怪物专属技能
         if (!this.monster)return false;
-        if (this.monster && !this.monster.isOccupied()) return false;
+        if (this.monster && this.monster.isOccupied()) return false;
         if (this.animation === null) {
             this.trigger();
             return false;
@@ -5892,21 +6259,16 @@ class PowerAttackSkill extends SkillTemplate {
      *   cooldown?: number;
      *   events?: string[];
      *   animation?: string | null;
-     *   impulse?: number;
-     *   verticalBoost?: number;
-     *   buffDuration?: number;
+     *   buffConfigId?: string;
      * }} [params]
      */
     constructor(player, monster, id, params = {}) {
         super(player, monster, "powerattack", id, params);
         this.animation = params.animation ?? null;
         this.events = params.events ?? [MonsterRuntimeEvents.AttackTrue];
-        this.buffTypeId = "knockup";
-        this.buffParams = {
-            impulse: params.impulse ?? 300,
-            verticalBoost: params.verticalBoost ?? 400,
-            duration: params.buffDuration ?? 0.6,
-        };
+        this.buffConfigId = typeof params.buffConfigId === "string"
+            ? params.buffConfigId.trim()
+            : "";
     }
 
     canTrigger(/** @type {any} */ event) {
@@ -5937,7 +6299,30 @@ class PowerAttackSkill extends SkillTemplate {
         if (monster.distanceTosq(target) > monster.attackdist * monster.attackdist) return;
 
         this._markTriggered();
+        this._applyTargetBuff(target);
         monster.emitAttackEvent(Math.max(1, Math.round(monster.damage * 2)), target);
+    }
+
+    /**
+     * @param {import("cs_script/point_script").CSPlayerPawn} target
+     * @returns {boolean}
+     */
+    _applyTargetBuff(target) {
+        if (!this.buffConfigId) return false;
+
+        const slot = target?.GetPlayerController?.()?.GetPlayerSlot?.();
+        if (typeof slot !== "number" || slot < 0) return false;
+
+        const rewardRequest = {
+            slot,
+            reward: {
+                type: "buff",
+                buffConfigId: this.buffConfigId,
+            },
+            result: false,
+        };
+        eventBus.emit(event.Player.In.DispatchRewardRequest, rewardRequest);
+        return rewardRequest.result === true;
     }
 }
 
@@ -5948,7 +6333,7 @@ class PowerAttackSkill extends SkillTemplate {
  * 区域效果配置
  * @typedef {object} areaEffectStatic
  * @property {string} effectName - 区域预制效果名称
- * @property {string} buffName - 命中后要施加的预制 Buff 名字
+ * @property {string} buffConfigId - 命中后要施加的 Buff 配置 id
  * @property {string} particleName - 需要创建的粒子系统预制名字
  */
 /**
@@ -5987,7 +6372,7 @@ class PowerAttackSkill extends SkillTemplate {
  * @property {number} effectId - 区域效果实例 id
  * @property {string} targetType - 命中的目标类型
  * @property {number} hit -  玩家：`slot`  怪物：`monsterId`
- * @property {string} buffName - 命中后要施加的预制 Buff 名称
+ * @property {string} buffConfigId - 命中后要施加的 Buff 配置 id
  */
 /**
  * @typedef {object} OnAreaEffectHitMonster
@@ -5995,7 +6380,7 @@ class PowerAttackSkill extends SkillTemplate {
  * @property {number} effectId - 区域效果实例 id
  * @property {string} targetType - 命中的目标类型
  * @property {number} hit -  玩家：`slot`  怪物：`monsterId`
- * @property {string} buffName - 命中后要施加的预制 Buff 名称
+ * @property {string} buffConfigId - 命中后要施加的 Buff 配置 id
  */
 /**
  * 区域效果目标类型常量。
@@ -6020,16 +6405,16 @@ const Target={
 const areaEffectStatics = {
     "fire": {
         effectName: "fire_area_effect",
-        buffName: "burn",
+        buffConfigId: "burn",
         particleName: "fire",
     },
     "healing_field": {
         effectName: "healing_field_area_effect",
-        buffName: "regeneration",
+        buffConfigId: "regeneration",
         particleName: "healing_field",
     },
     // 后续在此添加更多预制区域效果，例如：
-    // firezone: { effectName: "firezone_area_effect", position: { x: 0, y: 0, z: 0 }, radius: 100, duration: 3, buffName: "burn", particleName: "firezone", targetTypes: [Target.Player, Target.Monster] },
+    // firezone: { effectName: "firezone_area_effect", position: { x: 0, y: 0, z: 0 }, radius: 100, duration: 3, buffConfigId: "burn", particleName: "firezone", targetTypes: [Target.Player, Target.Monster] },
 };
 
 /**
@@ -6348,9 +6733,7 @@ class SpeedBoostSkill extends SkillTemplate {
      * @param {number} id
      * @param {{
      *   cooldown?: number;
-     *   runtime?: number;
-     *   speed_mult?: number;
-     *   speed_value?: number;
+    *   buffConfigId?: string;
      *   events?: string[];
      *   animation?: string | null;
      *   glow?: {r:number, g:number, b:number} | null;
@@ -6360,6 +6743,9 @@ class SpeedBoostSkill extends SkillTemplate {
         super(player, monster, "speedboost", id, params);
         this.animation = params.animation ?? null;
         this.events = params.events ?? [MonsterRuntimeEvents.Tick];
+        this.buffConfigId = typeof params.buffConfigId === "string" && params.buffConfigId.trim().length > 0
+            ? params.buffConfigId.trim()
+            : "speed_up";
         this.glow = params.glow ?? null;
     }
 
@@ -6390,7 +6776,7 @@ class SpeedBoostSkill extends SkillTemplate {
         const monster = this.monster;
         if (!this.running || !monster) return;
 
-        if (!monster.hasBuff("speed_up")) {
+        if (!monster.hasBuff(this.buffConfigId)) {
             this._endBoost();
         }
     }
@@ -6404,7 +6790,7 @@ class SpeedBoostSkill extends SkillTemplate {
         const monster = this.monster;
         if (!monster) return;
 
-        const buff = monster.addBuff("speed_up");
+        const buff = monster.addBuff(this.buffConfigId);
 
         if (!buff) return;
 
@@ -6423,6 +6809,142 @@ class SpeedBoostSkill extends SkillTemplate {
         }
     }
 }
+
+/**
+ * @module 投掷物系统/投掷物常量
+ */
+
+/**
+ * 投掷物可命中的目标类型。
+ *
+ * 约定：
+ * - `Player` 表示玩家宿主对象，对应 `Player` 实例。
+ * - `Monster` 表示怪物宿主对象，对应 `Monster` 实例。
+ * - 创建请求中的 `targetType` 决定本次投掷物只会命中玩家或怪物中的一种。
+ */
+const ThrowTarget = {
+    Player: "player",
+    Monster: "monster",
+};
+
+/**
+ * 投掷物创建请求。
+ *
+ * 约定：
+ * - `entity` 由调用方负责提供，Throw 模块只接管其飞行、命中和回收。
+ * - `gravityScale=0` 表示直线飞行；`gravityScale>0` 表示使用世界重力并按倍率缩放。
+ * - `maxTargets<=0` 表示不限制命中数量；否则按距离升序保留最近的若干目标。
+ * - `payload.result` 由管理器同步写回，成功返回投掷物 id，失败返回 -1。
+ *
+ * @typedef {object} ThrowCreateRequest
+ * @property {import("cs_script/point_script").Vector} startPos - 投掷起点
+ * @property {import("cs_script/point_script").Vector} endPos - 目标点，用于反解初速度或直线方向
+ * @property {import("cs_script/point_script").Entity} entity - 已存在的投掷物实体
+ * @property {number} speed - 飞行速度
+ * @property {number} [gravityScale] - 重力倍率；0 时不受重力影响
+ * @property {number} [radius] - 落点命中半径
+ * @property {number} [maxLifetime] - 最大存活时间
+ * @property {number} [maxTargets] - 最大命中目标数；按距离升序截断
+ * @property {string} targetType - 本次投掷物命中的目标类型，使用 `ThrowTarget` 中的值
+ * @property {import("cs_script/point_script").Entity | null} [source] - 伤害来源实体或施法实体
+ * @property {Record<string, any>} [meta] - 业务自定义扩展字段，原样透传到命中事件
+ * @property {number} result - 管理器返回的投掷物 id，失败返回 -1
+ */
+
+/**
+ * 投掷物停止请求。
+ * @typedef {object} ThrowStopRequest
+ * @property {number} projectileId - 需要停止的投掷物 id
+ * @property {boolean} [removeEntity] - 是否同时移除实体；默认 true
+ * @property {boolean} result - 停止是否成功
+ */
+
+/**
+ * 投掷物每帧检测上下文。
+ * @typedef {object} ProjectileTickContext
+ * @property {import("../player/player/player").Player[]} players - 当帧可命中的玩家列表
+ * @property {import("../monster/monster/monster").Monster[]} monsters - 当帧可命中的怪物列表
+ */
+
+/**
+ * 单个玩家命中条目。
+ *
+ * 约定：
+ * - `targetType` 固定为 `ThrowTarget.Player`。
+ * - `hit` 字段与 AreaEffect 保持一致，玩家使用 `slot`。
+ *
+ * @typedef {object} ProjectileHitPlayerEntry
+ * @property {string} targetType - 命中的目标类型，固定为 player
+ * @property {number} hit - 玩家 slot
+ * @property {number} distance - 目标距落点的距离
+ * @property {import("../player/player/player").Player} player - 命中的玩家实例
+ */
+
+/**
+ * 单个怪物命中条目。
+ *
+ * 约定：
+ * - `targetType` 固定为 `ThrowTarget.Monster`。
+ * - `hit` 字段与 AreaEffect 保持一致，怪物使用 `monsterId`。
+ *
+ * @typedef {object} ProjectileHitMonsterEntry
+ * @property {string} targetType - 命中的目标类型，固定为 monster
+ * @property {number} hit - 怪物 monsterId
+ * @property {number} distance - 目标距落点的距离
+ * @property {import("../monster/monster/monster").Monster} monster - 命中的怪物实例
+ */
+
+/**
+ * 单个命中目标条目。
+ *
+ * 约定：
+ * - 命中列表已按距离升序排序，并已按 `maxTargets` 截断。
+ * - 每条结果只会携带 `player` 或 `monster` 中的一种，不会混成联合 owner 字段。
+ *
+ * @typedef {ProjectileHitPlayerEntry | ProjectileHitMonsterEntry} ProjectileHitEntry
+ */
+
+/**
+ * 投掷物创建后事件。
+ * @typedef {object} OnProjectileCreated
+ * @property {number} projectileId - 投掷物 id
+ * @property {import("cs_script/point_script").Entity} entity - 投掷物实体
+ * @property {string} targetType - 本次投掷物命中的目标类型
+ * @property {import("cs_script/point_script").Entity | null} [source] - 伤害来源实体或施法实体
+ * @property {Record<string, any>} [meta] - 业务扩展数据
+ */
+
+/**
+ * 投掷物命中事件。
+ *
+ * 约定：
+ * - Throw 模块只负责飞行和命中结果采样，不直接结算伤害。
+ * - 订阅方应使用 `hitResults` 中的宿主对象自行完成伤害、Buff 或其他业务处理。
+ * - `meta` 会原样透传调用方自定义上下文，例如 damage、reason 或技能类型。
+ *
+ * @typedef {object} OnProjectileHit
+ * @property {number} projectileId - 投掷物 id
+ * @property {import("cs_script/point_script").Entity} entity - 投掷物实体
+ * @property {import("cs_script/point_script").Vector} impactPos - 落点位置
+ * @property {number} radius - 命中半径
+ * @property {string} targetType - 本次投掷物命中的目标类型
+ * @property {import("cs_script/point_script").Entity | null} [source] - 伤害来源实体或施法实体
+ * @property {ProjectileHitEntry[]} hitResults - 已排序并截断后的命中列表
+ * @property {number} hitCount - 命中数量
+ * @property {Record<string, any>} [meta] - 业务扩展数据
+ */
+
+/**
+ * 投掷物停止事件。
+ * @typedef {object} OnProjectileStopped
+ * @property {number} projectileId - 投掷物 id
+ * @property {import("cs_script/point_script").Entity} entity - 投掷物实体
+ * @property {import("cs_script/point_script").Vector | null} impactPos - 落点；若提前清理则可能为空
+ * @property {boolean} removedEntity - 是否已移除实体
+ * @property {string} targetType - 本次投掷物命中的目标类型
+ * @property {import("cs_script/point_script").Entity | null} [source] - 伤害来源实体或施法实体
+ * @property {Record<string, any>} [meta] - 业务扩展数据
+ */
 
 /**
  * @module 怪物系统/怪物技能/投掷石头
@@ -6444,6 +6966,7 @@ class ThrowStoneSkill extends SkillTemplate {
      *   gravityScale?: number;
      *   radius?: number;
      *   maxTargets?: number;
+    *   templateName?: string;
      * }} [params]
      */
     constructor(player, monster, id, params = {}) {
@@ -6457,6 +6980,9 @@ class ThrowStoneSkill extends SkillTemplate {
         this.gravityScale = params.gravityScale ?? 1;
         this.radius = params.radius ?? 32;
         this.maxTargets = params.maxTargets ?? 1;
+        this.templateName = typeof params.templateName === "string"
+            ? params.templateName.trim()
+            : "throwstone_projectile_template";
     }
 
     canTrigger(/** @type {any} */ event) {
@@ -6494,135 +7020,94 @@ class ThrowStoneSkill extends SkillTemplate {
         }
         const monster = this.monster;
         const target = monster?.target;
-        if (!monster || !target) return;
+        const model = monster?.model;
+        if (!monster || !target || !model?.IsValid?.()) return;
 
         const distsq = monster.distanceTosq(target);
         const minDistSq = this.distanceMin * this.distanceMin;
         const maxDistSq = this.distanceMax * this.distanceMax;
         if (distsq < minDistSq || distsq > maxDistSq) return;
 
-        this.running = true;
-        this._markTriggered();
-        monster.emitAttackEvent(this.damage, target);
-        this.running = false;
-    }
-}
+        const startPos = model.GetEyePosition?.() ?? model.GetAbsOrigin?.();
+        const endPos = target.GetAbsOrigin?.();
+        if (!startPos || !endPos) return;
 
-/**
- * @module 怪物系统/怪物技能/激光
- */
+        const projectileEntity = this._spawnProjectileEntity(startPos);
+        if (!projectileEntity) return;
 
-class LaserBeamSkill extends SkillTemplate {
-    /**
-    * @param {import("../../player/player/player.js").Player|null} player
-    * @param {import("../../monster/monster/monster.js").Monster|null} monster
-     * @param {number} id
-     * @param {{
-     *   cooldown?: number;
-     *   events?: string[];
-     *   animation?: string | null;
-     *   distance?: number;
-     *   duration?: number;
-     *   damagePerSecond?: number;
-     *   tickInterval?: number;
-     *   width?: number;
-     *   pierce?: boolean;
-     *   maxTargets?: number;
-     *   startDelay?: number;
-     * }} [params]
-     */
-    constructor(player, monster, id, params = {}) {
-        super(player, monster, "laserbeam", id, params);
-        this.animation = params.animation ?? null;
-        this.events = params.events ?? [MonsterRuntimeEvents.Tick];
-        this.distance = params.distance ?? 500;
-        this.duration = params.duration ?? 0;
-        this.damagePerSecond = params.damagePerSecond ?? 20;
-        this.tickInterval = params.tickInterval ?? 0.25;
-        this.width = params.width ?? 8;
-        this.pierce = params.pierce ?? false;
-        this.maxTargets = params.maxTargets ?? 1;
-        this.startDelay = params.startDelay ?? 0;
-        this._beamStartedAt = 0;
-        this._nextDamageAt = 0;
-    }
-    /**
-        * @param {import("../../util/runtime_events.js").RuntimeEvent} event
-     */
-    canTrigger(event) {
-        if (!this.events.includes(event.type)) return false;
-        if (!this._cooldownReady()) return false;
-        if (!this.monster)return false;
-
-        if (!this.monster.target) return false;
-        if (this.running) return false;
-        if (this.monster.isOccupied()) return false;
-
-        const distsq = this.monster.distanceTosq(this.monster.target);
-        if (distsq > this.distance * this.distance) return false;
-
-        if (this.animation === null) {
-            this.trigger();
-            return false;
-        }
-        return true;
-    }
-
-    tick() {
-        if (this.player) return;
-        if (!this.running || !this.monster) return;
-
-        const now = Instance.GetGameTime();
-        if (this.duration > 0 && this._beamStartedAt + this.duration <= now) {
-            this._stopBeam();
-            return;
-        }
-
-        const target = this.monster.target;
-        if (!target || this.monster.distanceTosq(target) > this.distance * this.distance) {
-            this._stopBeam();
-            return;
-        }
-
-        const interval = this.tickInterval > 0 ? this.tickInterval : 0.25;
-        while (now >= this._nextDamageAt) {
-            this.monster.emitAttackEvent(Math.max(1, Math.round(this.damagePerSecond * interval)), target);
-            this._nextDamageAt += interval;
-        }
-    }
-
-    trigger() {
-        if (this.player) {
-            this._markTriggered();
-            return;
-        }
-        const monster = this.monster;
-        const target = monster?.target;
-        if (!monster || !target) return;
-        if (monster.distanceTosq(target) > this.distance * this.distance) return;
-
-        this._markTriggered();
-        this._beamStartedAt = Instance.GetGameTime();
-        const interval = this.tickInterval > 0 ? this.tickInterval : 0.25;
-        this._nextDamageAt = this._beamStartedAt + this.startDelay;
-
-        if (this.duration <= 0) {
-            monster.emitAttackEvent(Math.max(1, Math.round(this.damagePerSecond * interval)), target);
-            this._stopBeam();
+        /** @type {import("../../throw/throw_const").ThrowCreateRequest} */
+        const payload = {
+            startPos,
+            endPos,
+            entity: projectileEntity,
+            speed: this.projectileSpeed,
+            gravityScale: this.gravityScale,
+            radius: this.radius,
+            maxTargets: this.maxTargets,
+            targetType: ThrowTarget.Player,
+            source: model,
+            meta: {
+                damage: this.damage,
+                reason: "throwstone",
+                skillId: this.id,
+                skillTypeId: this.typeId,
+            },
+            result: -1,
+        };
+        eventBus.emit(event.Throw.In.CreateRequest, payload);
+        if (payload.result <= 0) {
+            if (projectileEntity.IsValid()) {
+                projectileEntity.Remove();
+            }
             return;
         }
 
         this.running = true;
+        this._markTriggered();
     }
 
-    onSkillDelete() {
-        this._stopBeam();
+    /**
+     * @param {import("cs_script/point_script").Vector} origin
+     * @returns {import("cs_script/point_script").Entity | null}
+     */
+    _spawnProjectileEntity(origin) {
+        if (!this.templateName) {
+            Instance.Msg("ThrowStone: 未配置 templateName\n");
+            return null;
+        }
+
+        const template = Instance.FindEntityByName(this.templateName);
+        if (!template || !(template instanceof PointTemplate)) {
+            Instance.Msg(`ThrowStone: 找不到 PointTemplate \"${this.templateName}\"\n`);
+            return null;
+        }
+
+        const spawned = template.ForceSpawn(origin);
+        if (!spawned || spawned.length !== 1) {
+            Instance.Msg(`ThrowStone: PointTemplate \"${this.templateName}\" 必须且只能生成 1 个实体\n`);
+            this._cleanupSpawnedEntities(spawned ?? []);
+            return null;
+        }
+
+        const projectileEntity = spawned[0];
+        if (!projectileEntity?.IsValid?.()) {
+            Instance.Msg(`ThrowStone: PointTemplate \"${this.templateName}\" 生成的实体无效\n`);
+            this._cleanupSpawnedEntities(spawned);
+            return null;
+        }
+
+        return projectileEntity;
     }
 
-    _stopBeam() {
-        this.running = false;
-        this._beamStartedAt = 0;
-        this._nextDamageAt = 0;
+    /**
+     * @param {import("cs_script/point_script").Entity[]} entities
+     */
+    _cleanupSpawnedEntities(entities) {
+        for (const entity of entities) {
+            if (entity?.IsValid?.()) {
+                entity.Remove();
+            }
+        }
     }
 }
 
@@ -6934,8 +7419,1126 @@ class PlayerHealingFieldSkill extends SkillTemplate {
 }
 
 /**
+ * @module 工具/激光端点工具
+ */
+
+/** 激光端点 PointTemplate 默认实体名。 */
+const LASER_ENDPOINT_TEMPLATE_NAME = "laser_template";
+
+/**
+ * 激光端点创建参数。
+ *
+ * 说明：
+ * - 该工具不管理实体生命周期，只负责创建并返回两个端点实体。
+ * - 模板必须且只能生成两个独立实体，通常建议使用两个 info_target。
+ * - 两个端点本身是对称锚点，`start` / `end` 只是返回时的可读命名；调用方可以自由交换两者的位置或用途。
+ *
+ * @typedef {object} LaserEndpointCreateOptions
+ * @property {import("cs_script/point_script").Vector} startPosition - 创建后覆盖第一个端点的位置
+ * @property {import("cs_script/point_script").Vector} endPosition - 创建后覆盖第二个端点的位置
+ */
+
+/**
+ * 激光端点创建结果。
+ * @typedef {object} LaserEndpointPair
+ * @property {import("cs_script/point_script").Entity} start - 第一个端点实体
+ * @property {import("cs_script/point_script").Entity} end - 第二个端点实体
+ */
+
+/**
+ * 创建一对激光端点实体。
+ *
+ * 该函数只负责：
+ * - 查找 PointTemplate
+ * - 生成两端点实体
+ * - 按需覆盖起点/终点位置与角度
+ * - 返回创建结果
+ *
+ * 它不会：
+ * - 持有实体引用
+ * - 在后续 tick 中维护实体
+ * - 在外部不再需要时自动删除实体
+ *
+ * @param {LaserEndpointCreateOptions} options
+ * @returns {LaserEndpointPair | null}
+ */
+function createLaserEndpoints(options) {
+    const template = Instance.FindEntityByName(LASER_ENDPOINT_TEMPLATE_NAME);
+    if (!template || !(template instanceof PointTemplate)) {
+        return null;
+    }
+    const spawned = template.ForceSpawn(options.startPosition);
+    if (!spawned || spawned.length !== 2) {
+        cleanupSpawnedEntities(spawned ?? []);
+        return null;
+    }
+
+    const [start, end] = spawned;
+    if (!start?.IsValid?.() || !end?.IsValid?.()) {
+        cleanupSpawnedEntities(spawned);
+        return null;
+    }
+    start.Teleport({position: options.startPosition});
+    end.Teleport({position: options.endPosition});
+
+    return {
+        start,
+        end
+    };
+}
+
+/**
+ * 失败时清理由模板生成出的实体，避免遗留无主实体。
+ * @param {import("cs_script/point_script").Entity[]} entities
+ */
+function cleanupSpawnedEntities(entities) {
+    for (const entity of entities) {
+        if (entity?.IsValid?.()) {
+            entity.Remove();
+        }
+    }
+}
+
+/**
+ * @module 技能系统/哨戒炮台/常量配置
+ */
+
+/**
+ * 哨戒炮台静态配置。
+ *
+ * 每个字段均可在 `player_turret` 技能的 params 中覆盖。
+ *
+ * @typedef {Object} SentryConfig
+ * @property {number} searchRadius     - 搜敌半径（游戏单位）
+ * @property {number} targetLostRange  - 目标超出此距离后丢失（游戏单位）
+ * @property {number} damage           - 每次 tick 造成的伤害
+ * @property {number} lifetime         - 炮台存活秒数，到期自动销毁
+ * @property {number} attackInterval   - 炮台直接伤害判定间隔（秒）
+ * @property {number} turnSpeed        - 炮台每秒最大水平转向角速度（度）
+ */
+
+/** @type {SentryConfig} */
+const SENTRY_DEFAULTS = {
+    searchRadius:    640,
+    targetLostRange: 768,
+    damage:          200,
+    lifetime:        120,
+    attackInterval:  1,
+    turnSpeed:       360,
+};
+
+/** 哨戒炮台 PointTemplate 默认实体名。 */
+const SENTRY_DEFAULT_TEMPLATE_NAME = "sentry_template";
+
+/** 激光发射点围绕底座中心的水平半径。 */
+const SENTRY_LASER_ORBIT_RADIUS = 25;
+
+/** 激光发射点高于底座中心的高度。 */
+const SENTRY_LASER_ORBIT_HEIGHT = 43.5;
+
+/** 玩家触发技能时默认放置在当前位置。 */
+const SENTRY_DEFAULT_PLACEMENT_DISTANCE = 0;
+
+/** 放置检测用的近似占位包围盒。 */
+const SENTRY_PLACEMENT_BOUNDS = {
+    mins: { x: -24, y: -24, z: 0 },
+    maxs: { x: 24, y: 24, z: 72 },
+};
+
+/**
+ * 炮台内部状态枚举。
+ * @enum {string}
+ */
+const SentryState = {
+    /** 空闲：无目标，正在扫描 */
+    IDLE:     "idle",
+    /** 战斗：已锁定目标并开火 */
+    COMBAT:   "combat",
+    /** 已销毁 */
+    DESTROYED: "destroyed",
+};
+
+/**
+ * @typedef {Object} SentryTurretOptions
+ * @property {import("cs_script/point_script").Entity}  turretBase        - 底座实体（EntityGroup[0]）
+ * @property {import("cs_script/point_script").Entity}  turretYaw         - 偏航旋转体（EntityGroup[1]）
+ * @property {number} ownerKey                                              - 部署炮台的玩家槽位
+ * @property {number} [turnSpeed]                                            - 炮台每秒最大水平转向角速度（度）
+ * @property {import("cs_script/point_script").Entity[]} [spawnedEntities] - 本次模板生成出的全部实体
+ */
+
+/**
+ * @module 技能系统/哨戒炮台/炮台实例
+ *
+ * 封装单个哨戒炮台实例的完整生命周期。
+ * 炮台自身只负责索敌、旋转与直接伤害判定，
+ * 不再依赖部署点或资源收益逻辑。
+ */
+
+class SentryTurret {
+    /**
+     * @param {import("./sentry_const").SentryTurretOptions} options
+     */
+    constructor(options) {
+        const cfg = SENTRY_DEFAULTS;
+
+        this.base = options.turretBase;
+        this.yaw = options.turretYaw;
+        this.spawnedEntities = Array.isArray(options.spawnedEntities) && options.spawnedEntities.length > 0
+            ? options.spawnedEntities
+            : [options.turretBase, options.turretYaw];
+        this.ownerKey = options.ownerKey;
+        this.laserStart = null;
+        this.laserEnd = null;
+        /** @type {((turret: SentryTurret) => void) | null} */
+        this.onDestroyed = null;
+
+        /** @type {import("../../../monster/monster/monster").Monster|null} */
+        this.target = null;
+        /** @type {SentryState} */
+        this.state = SentryState.IDLE;
+
+        this.searchRadius = cfg.searchRadius;
+        this.targetLostRange = cfg.targetLostRange;
+        this.damage = cfg.damage;
+        this.lifetime = cfg.lifetime;
+        this.attackInterval = cfg.attackInterval;
+        this.turnSpeed = typeof options.turnSpeed === "number" && Number.isFinite(options.turnSpeed)
+            ? Math.max(0, options.turnSpeed)
+            : cfg.turnSpeed;
+        this._basePosition = this._cloneVector(this.base?.GetAbsOrigin?.());
+        this._baseAngles = this._cloneAngles(this.base?.GetAbsAngles?.());
+        this._yawPosition = this._cloneVector(this.yaw?.GetAbsOrigin?.());
+        this._currentYaw = this._normalizeYaw(this.yaw?.GetAbsAngles?.()?.yaw ?? this._baseAngles?.yaw ?? 0);
+
+        /** @type {() => import("../../../monster/monster/monster").Monster[]} */
+        this.getActiveMonsters = () => [];
+
+        this._nextAttackTime = 0;
+        this._destroyTime = Instance.GetGameTime() + this.lifetime;
+        this._lastTickTime = Instance.GetGameTime();
+
+        this._init();
+    }
+
+    _init() {
+        this._syncAnchors();
+        const laserStartPos = this._getLaserStartPosition();
+        if (!laserStartPos || !this._createLaserEndpoints(laserStartPos)) {
+            Instance.Msg(`Sentry: 创建激光端点失败\n`);
+            this.destroy();
+            return;
+        }
+        this._syncLaserEndpoints(laserStartPos, laserStartPos);
+        this._ceaseFire();
+    }
+
+    tick() {
+        if (this.state === SentryState.DESTROYED) return;
+        if (!this._hasRequiredEntities()) {
+            this.destroy();
+            return;
+        }
+
+        const now = Instance.GetGameTime();
+        const dt = Math.max(0, now - this._lastTickTime);
+        this._lastTickTime = now;
+        if (now >= this._destroyTime) {
+            this.destroy();
+            return;
+        }
+
+        this._syncAnchors();
+        const turretPos = this._getTurretBasePosition();
+        const restingLaserStartPos = this._getLaserStartPosition();
+        if (!turretPos || !restingLaserStartPos) {
+            this.destroy();
+            return;
+        }
+
+        let targetPos = null;
+        let aimSolution = null;
+
+        if (this._isTargetValid() && this._isTargetInRange(turretPos)) {
+            targetPos = this._getTargetAimPosition(this.target);
+            aimSolution = targetPos ? this._createAimSolution(turretPos, targetPos) : null;
+            if (!aimSolution || !this._hasLineOfSight(aimSolution.laserStartPos, this.target, targetPos)) {
+                targetPos = null;
+                aimSolution = null;
+            }
+        }
+
+        if (!aimSolution) {
+            this.target = this._findTarget(turretPos);
+            this._nextAttackTime = now;
+            targetPos = this._getTargetAimPosition(this.target);
+            aimSolution = targetPos ? this._createAimSolution(turretPos, targetPos) : null;
+        }
+
+        if (!this.target || !targetPos || !aimSolution) {
+            this.target = null;
+            this._syncLaserEndpoints(restingLaserStartPos, restingLaserStartPos);
+            if (this.state === SentryState.COMBAT) {
+                this._ceaseFire();
+            }
+            return;
+        }
+
+        const activeYaw = this._rotateToward(aimSolution.yaw, dt);
+        const activeLaserStartPos = this._getLaserStartPosition(activeYaw, turretPos);
+        if (!activeLaserStartPos) {
+            this.destroy();
+            return;
+        }
+
+        this._syncLaserEndpoints(activeLaserStartPos, targetPos);
+        if (this.state !== SentryState.COMBAT) {
+            this._openFire();
+        }
+
+        if (now >= this._nextAttackTime) {
+            this.target.takeDamage(this.damage, null);
+            this._nextAttackTime = now + this.attackInterval;
+        }
+    }
+
+    _openFire() {
+        this.state = SentryState.COMBAT;
+    }
+
+    _ceaseFire() {
+        this.state = SentryState.IDLE;
+    }
+
+    destroy() {
+        if (this.state === SentryState.DESTROYED) return;
+        this._ceaseFire();
+        this.state = SentryState.DESTROYED;
+        this.target = null;
+
+        const entities = this.spawnedEntities.length > 0
+            ? [...this.spawnedEntities]
+            : [this.base, this.yaw];
+        if (this.laserStart) {
+            entities.push(this.laserStart);
+        }
+        if (this.laserEnd) {
+            entities.push(this.laserEnd);
+        }
+        const uniqueEntities = new Set(entities.filter((entity) => entity?.IsValid?.()));
+        for (const entity of uniqueEntities) {
+            entity.Remove();
+        }
+
+        this.laserStart = null;
+        this.laserEnd = null;
+
+        if (typeof this.onDestroyed === "function") {
+            this.onDestroyed(this);
+        }
+    }
+
+    _isTargetValid() {
+        return this._isMonsterValid(this.target);
+    }
+
+    _hasRequiredEntities() {
+        return this.base?.IsValid?.()
+            && this.yaw?.IsValid?.()
+            && this.laserStart?.IsValid?.()
+            && this.laserEnd?.IsValid?.();
+    }
+
+    _getTurretBasePosition() {
+        return this._cloneVector(this._basePosition ?? this.base.GetAbsOrigin());
+    }
+
+    _getLaserStartPosition(yaw = this._currentYaw, turretPos = null) {
+        const basePosition = this._cloneVector(turretPos ?? this._basePosition ?? this.base.GetAbsOrigin());
+        if (!basePosition || !Number.isFinite(yaw)) return null;
+
+        const yawRad = yaw * (Math.PI / 180);
+        return {
+            x: basePosition.x + Math.cos(yawRad) * SENTRY_LASER_ORBIT_RADIUS,
+            y: basePosition.y + Math.sin(yawRad) * SENTRY_LASER_ORBIT_RADIUS,
+            z: basePosition.z + SENTRY_LASER_ORBIT_HEIGHT,
+        };
+    }
+
+    _syncAnchors() {
+        if (this._basePosition || this._baseAngles) {
+            this.base.Teleport({
+                position: this._basePosition ?? undefined,
+                angles: this._baseAngles ?? undefined,
+            });
+        }
+
+        if (this._yawPosition) {
+            this.yaw.Teleport({
+                position: this._yawPosition,
+            });
+        }
+    }
+
+    /**
+     * @param {{x:number,y:number,z:number}} laserStartPos
+     * @returns {boolean}
+     */
+    _createLaserEndpoints(laserStartPos) {
+        const endpoints = createLaserEndpoints({
+            startPosition: laserStartPos,
+            endPosition: laserStartPos,
+        });
+        if (!endpoints?.start?.IsValid?.() || !endpoints?.end?.IsValid?.()) {
+            return false;
+        }
+
+        this.laserStart = endpoints.start;
+        this.laserEnd = endpoints.end;
+        return true;
+    }
+
+    /**
+     * @param {{x:number,y:number,z:number}} laserStartPos
+     * @param {{x:number,y:number,z:number}} laserEndPos
+     */
+    _syncLaserEndpoints(laserStartPos, laserEndPos) {
+        if (!this.laserStart?.IsValid?.() || !this.laserEnd?.IsValid?.()) {
+            return;
+        }
+        this.laserStart.Teleport({ position: laserStartPos });
+        this.laserEnd.Teleport({ position: laserEndPos });
+    }
+
+    /**
+     * @returns {import("cs_script/point_script").Entity[]}
+     */
+    _getIgnoredTraceEntities() {
+        const entities = this.spawnedEntities.filter((entity) => entity?.IsValid?.());
+        if (this.laserStart?.IsValid?.()) {
+            entities.push(this.laserStart);
+        }
+        if (this.laserEnd?.IsValid?.()) {
+            entities.push(this.laserEnd);
+        }
+        return entities;
+    }
+
+    /**
+     * @param {import("../../../monster/monster/monster").Monster | null} monster
+     * @returns {boolean}
+     */
+    _isMonsterValid(monster) {
+        if (!monster) return false;
+        if (monster.state === MonsterState.DEAD) return false;
+        return this._getTargetEntity(monster) != null;
+    }
+
+    /**
+     * @param {{x:number,y:number,z:number}} turretPos
+     * @returns {import("../../../monster/monster/monster").Monster | null}
+     */
+    _findTarget(turretPos) {
+        let selectedTarget = null;
+        let selectedDistancesq = Number.POSITIVE_INFINITY;
+        for (const monster of this.getActiveMonsters()) {
+            if (!this._isMonsterValid(monster)) continue;
+            const targetPos = this._getTargetAimPosition(monster);
+            if (!targetPos) continue;
+            const aimSolution = this._createAimSolution(turretPos, targetPos);
+            if (!aimSolution) continue;
+
+            const distancesq = this._distsq(turretPos, targetPos);
+            if (distancesq > this.searchRadius*this.searchRadius || distancesq >= selectedDistancesq) continue;
+            if (!this._hasLineOfSight(aimSolution.laserStartPos, monster, targetPos)) continue;
+
+            selectedTarget = monster;
+            selectedDistancesq = distancesq;
+        }
+        return selectedTarget;
+    }
+
+    /**
+     * @param {{x:number,y:number,z:number}} turretPos
+     * @returns {boolean}
+     */
+    _isTargetInRange(turretPos) {
+        const targetPos = this._getTargetAimPosition(this.target);
+        if (!targetPos) return false;
+        return this._distsq(turretPos, targetPos) <= this.targetLostRange*this.targetLostRange;
+    }
+
+    /**
+     * @param {{x:number,y:number,z:number} | null | undefined} laserStartPos
+     * @param {import("../../../monster/monster/monster").Monster | null} monster
+     * @param {{x:number,y:number,z:number} | null} [targetPos]
+     * @returns {boolean}
+     */
+    _hasLineOfSight(laserStartPos, monster, targetPos = null) {
+        const targetEntity = this._getTargetEntity(monster);
+        const resolvedTargetPos = targetPos ?? this._getTargetAimPosition(monster);
+        if (!targetEntity || !resolvedTargetPos || !laserStartPos) return false;
+
+        const trace = Instance.TraceLine({
+            start: laserStartPos,
+            end: resolvedTargetPos,
+            ignoreEntity: this._getIgnoredTraceEntities(),
+            ignorePlayers: true,
+        });
+        return !trace.didHit || trace.hitEntity === targetEntity;
+    }
+
+    /**
+     * @param {import("../../../monster/monster/monster").Monster | null} monster
+     * @returns {import("cs_script/point_script").Entity | null}
+     */
+    _getTargetEntity(monster) {
+        if (!monster) return null;
+        if (monster.model?.IsValid?.()) return monster.model;
+        if (monster.breakable?.IsValid?.()) return monster.breakable;
+        return null;
+    }
+
+    /**
+     * @param {import("../../../monster/monster/monster").Monster | null} monster
+     * @returns {{x:number,y:number,z:number} | null}
+     */
+    _getTargetAimPosition(monster) {
+        const targetEntity = this._getTargetEntity(monster);
+        if (!targetEntity) return null;
+
+        const origin = targetEntity.GetAbsOrigin?.();
+        if (!origin) return null;
+        const zOffset = monster?.model?.IsValid?.() ? 48 : 24;
+        return {
+            x: origin.x,
+            y: origin.y,
+            z: origin.z + zOffset,
+        };
+    }
+
+    /**
+     * @param {{x:number,y:number,z:number}} turretPos
+     * @param {{x:number,y:number,z:number}} targetPos
+     */
+    _createAimSolution(turretPos, targetPos) {
+        if (!turretPos || !targetPos) return null;
+
+        const yaw = Math.atan2(targetPos.y - turretPos.y, targetPos.x - turretPos.x) * (180 / Math.PI);
+        const laserStartPos = this._getLaserStartPosition(yaw, turretPos);
+        if (!laserStartPos) return null;
+
+        return {
+            yaw,
+            laserStartPos,
+        };
+    }
+
+    /**
+     * @param {number} yaw
+     * @param {number} dt
+     */
+    _rotateToward(yaw, dt = 0) {
+        const targetYaw = this._normalizeYaw(yaw);
+        if (!Number.isFinite(targetYaw)) {
+            return this._currentYaw;
+        }
+
+        let nextYaw = Number.isFinite(this._currentYaw)
+            ? this._normalizeYaw(this._currentYaw)
+            : targetYaw;
+        if (this.turnSpeed > 0 && Number.isFinite(dt) && dt > 0) {
+            const maxStep = this.turnSpeed * dt;
+            const delta = this._getShortestYawDelta(nextYaw, targetYaw);
+            if (Math.abs(delta) > maxStep) {
+                nextYaw = this._normalizeYaw(nextYaw + Math.sign(delta) * maxStep);
+            } else {
+                nextYaw = targetYaw;
+            }
+        } else {
+            nextYaw = targetYaw;
+        }
+
+        this._currentYaw = nextYaw;
+        this.yaw.Teleport({
+            position: this._yawPosition ?? this._getTurretBasePosition() ?? undefined,
+            angles: {
+                pitch: 0,
+                yaw: nextYaw,
+                roll: 0,
+            },
+        });
+        return nextYaw;
+    }
+
+    /**
+     * @param {number} currentYaw
+     * @param {number} targetYaw
+     */
+    _getShortestYawDelta(currentYaw, targetYaw) {
+        return this._normalizeYaw(targetYaw - currentYaw);
+    }
+
+    /**
+     * @param {number} yaw
+     */
+    _normalizeYaw(yaw) {
+        if (!Number.isFinite(yaw)) return yaw;
+
+        let normalized = yaw % 360;
+        if (normalized <= -180) {
+            normalized += 360;
+        }
+        if (normalized > 180) {
+            normalized -= 360;
+        }
+        return normalized;
+    }
+
+    /**
+     * @param {{x:number,y:number,z:number} | undefined | null} vector
+     */
+    _cloneVector(vector) {
+        if (!vector) return null;
+        return {
+            x: vector.x,
+            y: vector.y,
+            z: vector.z,
+        };
+    }
+
+    /**
+     * @param {{pitch:number,yaw:number,roll:number} | undefined | null} angles
+     */
+    _cloneAngles(angles) {
+        if (!angles) return null;
+        return {
+            pitch: angles.pitch,
+            yaw: angles.yaw,
+            roll: angles.roll,
+        };
+    }
+
+    /**
+     * @param {{x:number,y:number,z:number}} a
+     * @param {{x:number,y:number,z:number}} b
+     */
+    _distsq(a, b) {
+        const dx = a.x - b.x;
+        const dy = a.y - b.y;
+        const dz = a.z - b.z;
+        return dx * dx + dy * dy + dz * dz;
+    }
+}
+
+/**
+ * @module 技能系统/哨戒炮台/炮台管理器
+ *
+ * 管理当前场景内所有存活的 SentryTurret 实例。
+ * 由 SentrySkill 在部署炮台时创建实例并注册进来，内部自动驱动每个炮台的 tick。
+ *
+ * 使用方式：
+ * ```js
+ * // 在主遊戏循环里调用
+ * sentryManager.tick();
+ *
+ * // 添加一台炮台
+ * sentryManager.register(sentryTurretInstance);
+ *
+ * // 手动销毁所有炮台（例如波次结束时）
+ * sentryManager.destroyAll();
+ * ```
+ */
+
+class SentryManager {
+    constructor() {
+        /** @type {Set<SentryTurret>} */
+        this._turrets = new Set();
+        /** @type {() => import("../../../monster/monster/monster").Monster[]} */
+        this._monsterProvider = () => [];
+    }
+
+    /**
+     * @param {() => import("../../../monster/monster/monster").Monster[]} provider
+     */
+    setMonsterProvider(provider) {
+        this._monsterProvider = typeof provider === "function" ? provider : () => [];
+    }
+
+    /**
+     * @returns {import("../../../monster/monster/monster").Monster[]}
+     */
+    getActiveMonsters() {
+        return this._monsterProvider();
+    }
+
+    /**
+     * 注册一台炮台实例。
+     * 炮台销毁时会通过 onDestroyed 回调自动从集合移除。
+     * @param {SentryTurret} turret
+     */
+    register(turret) {
+        turret.onDestroyed = (/** @type {SentryTurret} */ t) => this._turrets.delete(t);
+        turret.getActiveMonsters = () => this.getActiveMonsters();
+        this._turrets.add(turret);
+    }
+
+    /**
+     * 每帧调用一次，驱动所有活跃炮台的 tick。
+     * 已销毁的炮台会被惰性清除。
+     */
+    tick() {
+        for (const turret of this._turrets) {
+            if (turret.state === SentryState.DESTROYED) {
+                this._turrets.delete(turret);
+                continue;
+            }
+            turret.tick();
+        }
+    }
+
+    /**
+     * 立即销毁所有炮台（波次结束等场景使用）。
+     */
+    destroyAll() {
+        for (const turret of this._turrets) {
+            turret.destroy();
+        }
+        this._turrets.clear();
+    }
+
+    /**
+     * 销毁指定玩家拥有的所有炮台。
+     * @param {number} ownerKey
+     */
+    destroyByOwner(ownerKey) {
+        for (const turret of this._turrets) {
+            if (turret.ownerKey === ownerKey) {
+                turret.destroy();
+            }
+        }
+    }
+
+    /**
+     * 返回指定玩家当前拥有的活跃炮台数量。
+     * @param {number} ownerKey
+     * @returns {number}
+     */
+    countByOwner(ownerKey) {
+        let count = 0;
+        for (const turret of this._turrets) {
+            if (turret.ownerKey === ownerKey && turret.state !== SentryState.DESTROYED) count++;
+        }
+        return count;
+    }
+
+    destroy() {
+        this.destroyAll();
+    }
+}
+
+/** 全局单例（与其他 manager 一致） */
+const sentryManager = new SentryManager();
+
+/**
+ * @module 工具/向量工具
+ */
+/**
+ * 向量工具类，提供 2D/3D 向量的静态运算方法（加减、点积、叉积、归一化、插值等）。
+ * @navigationTitle 向量工具
+ */
+let vec$1 = class vec{
+    /**
+     * 返回向量vec1+vec2
+     * @param {import("cs_script/point_script").Vector} a
+     * @param {import("cs_script/point_script").Vector} b
+     * @returns {import("cs_script/point_script").Vector}
+     */
+    static add(a, b) {
+        return { x: a.x + b.x, y: a.y + b.y, z: a.z + b.z };
+    }
+    /**
+     * 添加 2D 分量
+     * @param {import("cs_script/point_script").Vector} a
+     * @param {import("cs_script/point_script").Vector} b
+     * @returns {import("cs_script/point_script").Vector}
+     */
+    static add2D(a, b) {
+        return { x: a.x + b.x, y: a.y + b.y, z: a.z};
+    }
+    /**
+     * 返回向量vec1-vec2
+     * @param {import("cs_script/point_script").Vector} a
+     * @param {import("cs_script/point_script").Vector} b
+     * @returns {import("cs_script/point_script").Vector}
+     */
+    static sub(a, b) {
+        return { x: a.x - b.x, y: a.y - b.y, z: a.z - b.z };
+    }
+    /**
+     * 返回向量vec1*s
+     * @param {import("cs_script/point_script").Vector} a
+     * @param {number} s
+     * @returns {import("cs_script/point_script").Vector}
+     */
+    static scale(a,s)
+    {
+        return {x:a.x*s,y:a.y*s,z:a.z*s}
+    }
+    /**
+     * 返回向量vec1*s
+     * @param {import("cs_script/point_script").Vector} a
+     * @param {number} s
+     * @returns {import("cs_script/point_script").Vector}
+     */
+    static scale2D(a,s) {
+        return {
+            x:a.x * s,
+            y:a.y * s,
+            z:a.z
+        };
+    }
+    /**
+     * 得到vector
+     * @param {number} [x]
+     * @param {number} [y]
+     * @param {number} [z]
+     * @returns {import("cs_script/point_script").Vector}
+     */
+    static get(x=0,y=0,z=0)
+    {
+        return {x,y,z};
+    }
+    /**
+     * 深复制
+     * @param {import("cs_script/point_script").Vector} a
+     * @returns {import("cs_script/point_script").Vector}
+     */
+    static clone(a)
+    {
+        return {x:a.x,y:a.y,z:a.z};
+    }
+    /**
+     * 计算空间两点之间的距离
+     * @param {import("cs_script/point_script").Vector} a
+     * @param {import("cs_script/point_script").Vector} [b]
+     * @returns {number}
+     */
+    static length(a, b={x:0,y:0,z:0}) {
+        const dx = a.x - b.x; const dy = a.y - b.y; const dz = a.z - b.z;
+        return Math.sqrt(dx * dx + dy * dy + dz * dz);
+    }
+    /**
+     * 计算xy平面两点之间的距离
+     * @param {import("cs_script/point_script").Vector} a
+     * @param {import("cs_script/point_script").Vector} [b]
+     * @returns {number}
+     */
+    static length2D(a, b={x:0,y:0,z:0}) {
+        const dx = a.x - b.x; const dy = a.y - b.y;
+        return Math.sqrt(dx * dx + dy * dy);
+    }
+    /**
+     * 计算空间两点之间的距离平方（无平方根，更快）
+     * @param {import("cs_script/point_script").Vector} a
+     * @param {import("cs_script/point_script").Vector} [b]
+     * @returns {number}
+     */
+    static lengthsq(a, b={x:0,y:0,z:0}) {
+        const dx = a.x - b.x; const dy = a.y - b.y; const dz = a.z - b.z;
+        return dx * dx + dy * dy + dz * dz;
+    }
+    /**
+     * 计算xy平面两点之间的距离平方（无平方根，更快）
+     * @param {import("cs_script/point_script").Vector} a
+     * @param {import("cs_script/point_script").Vector} [b]
+     * @returns {number}
+     */
+    static length2Dsq(a, b={x:0,y:0,z:0}) {
+        const dx = a.x - b.x; const dy = a.y - b.y;
+        return dx * dx + dy * dy;
+    }
+    /**
+     * 返回pos上方height高度的点
+     * @param {import("cs_script/point_script").Vector} pos
+     * @param {number} height
+     * @returns {import("cs_script/point_script").Vector}
+     */
+    static Zfly(pos, height) {
+        return { x: pos.x, y: pos.y, z: pos.z + height };
+    }
+    /**
+     * 输出点pos的坐标
+     * @param {import("cs_script/point_script").Vector} pos
+     */
+    static msg(pos) {
+        Instance.Msg(`{${pos.x} ${pos.y} ${pos.z}}`);
+    }
+    /**
+     * 计算两个三维向量的点积。
+     * @param {import("cs_script/point_script").Vector} a
+     * @param {import("cs_script/point_script").Vector} b
+     */
+    static dot(a,b) {
+        return a.x * b.x + a.y * b.y + a.z * b.z;
+    }
+
+    /**
+     * 计算两个向量在 XY 平面上的点积。
+     * @param {import("cs_script/point_script").Vector} a
+     * @param {import("cs_script/point_script").Vector} b
+     */
+    static dot2D(a,b) {
+        return a.x * b.x + a.y * b.y;
+    }
+
+    /**
+     * 计算两个三维向量的叉积。
+     * @param {import("cs_script/point_script").Vector} a
+     * @param {import("cs_script/point_script").Vector} b
+     */
+    static cross(a,b) {
+        return {
+            x:a.y * b.z - a.z * b.y,
+            y:a.z * b.x - a.x * b.z,
+            z:a.x * b.y - a.y * b.x
+        };
+    }
+    /**
+     * 返回三维向量的单位向量，零向量时返回原点。
+     * @param {import("cs_script/point_script").Vector} a
+     */
+    static normalize(a) {
+        const len = this.length(a);
+        if (len < 1e-6) {
+            return {x:0,y:0,z:0};
+        }
+        return this.scale(a,1 / len);
+    }
+    /**
+     * 返回向量在 XY 平面上的单位向量（z 置零），零向量时返回原点。
+     * @param {import("cs_script/point_script").Vector} a
+     */
+    static normalize2D(a) {
+        const len = this.length2D(a);
+        if (len < 1e-6) {
+            return {x:0,y:0,z:0};
+        }
+        return {
+            x:a.x / len,
+            y:a.y / len,
+            z:0
+        };
+    }
+    /**
+     * 判断向量是否为零向量（各分量绝对值小于 1e-6）。
+     * @param {import("cs_script/point_script").Vector} a
+     */
+    static isZero(a) {
+        return (
+            Math.abs(a.x) < 1e-6 &&
+            Math.abs(a.y) < 1e-6 &&
+            Math.abs(a.z) < 1e-6
+        );
+    }
+};
+
+/**
+ * @module 技能系统/哨戒炮台/玩家技能
+ *
+ * 玩家技能：`player_turret`。
+ * 玩家使用技能触发时，在当前位置生成一台哨戒炮台实例并注册到全局 sentryManager。
+ *
+ * typeId: "player_turret"
+ */
+
+class SentrySkill extends SkillTemplate {
+    /**
+    * @param {import("../../../player/player/player").Player | null} player
+    * @param {import("../../../monster/monster/monster").Monster | null} monster
+     * @param {number} id
+     * @param {{
+     *   cooldown?:         number;
+     *   searchRadius?:     number;
+     *   targetLostRange?:  number;
+     *   damage?:           number;
+     *   lifetime?:         number;
+    *   attackInterval?:   number;
+    *   turnSpeed?:        number;
+    *   templateName?:     string;
+    *   placementDistance?:number;
+     *   maxPerPlayer?:     number;
+     * }} params
+     */
+    constructor(player, monster, id, params = {}) {
+        super(player, monster, "player_turret", id, {
+            cooldown: params.cooldown ?? 0,
+            ...params,
+        });
+        this.animation  = null;
+        this.events     = [PlayerRuntimeEvents.Input];
+        this.inputKey   = "InspectWeapon";
+
+        const rawPlacementDistance = params.placementDistance;
+        const rawMaxPerPlayer = params.maxPerPlayer;
+        const rawTurnSpeed = params.turnSpeed;
+        this._templateName = typeof params.templateName === "string" && params.templateName.trim()
+            ? params.templateName.trim()
+            : SENTRY_DEFAULT_TEMPLATE_NAME;
+        this._placementDistance = typeof rawPlacementDistance === "number" && Number.isFinite(rawPlacementDistance)
+            ? Math.max(0, rawPlacementDistance)
+            : SENTRY_DEFAULT_PLACEMENT_DISTANCE;
+        this._maxPerPlayer = typeof rawMaxPerPlayer === "number" && Number.isFinite(rawMaxPerPlayer)
+            ? Math.max(1, Math.floor(rawMaxPerPlayer))
+            : 1;
+        this._turnSpeed = typeof rawTurnSpeed === "number" && Number.isFinite(rawTurnSpeed)
+            ? Math.max(0, rawTurnSpeed)
+            : SENTRY_DEFAULTS.turnSpeed;
+    }
+
+    /**
+     * @param {import("../../../util/runtime_events.js").RuntimeEvent} event
+     */
+    canTrigger(event) {
+        if (!this.player || this.monster) return false;
+        if (!this.events.includes(event.type)) return false;
+        const key = "key" in event ? event.key : undefined;
+        if (event.type === PlayerRuntimeEvents.Input && key !== this.inputKey) return false;
+        if (!this._cooldownReady()) return false;
+
+        this.trigger();
+        return false;
+    }
+
+    trigger() {
+        const player = this.player;
+        if (!player || this.monster) return false;
+
+        const pawn = player.entityBridge?.pawn;
+        if (!pawn?.IsValid?.()) return false;
+
+        const ownerKey = player.slot;
+        if (sentryManager.countByOwner(ownerKey) >= this._maxPerPlayer) return false;
+
+        const placement = pawn.GetAbsOrigin?.();
+        if (!placement) return false;
+        if (!this._canPlaceAt(placement)) return false;
+
+        const ok = this._spawnTurret(vec$1.Zfly(placement,15), ownerKey);
+        if (ok) {
+            this._markTriggered();
+            return true;
+        }
+        return false;
+    }
+
+    /**
+     * 技能移除时同步销毁该玩家的现存炮台。
+     */
+    onSkillDelete() {
+        super.onSkillDelete();
+        const ownerKey = this.player?.slot;
+        if (typeof ownerKey === "number") {
+            sentryManager.destroyByOwner(ownerKey);
+        }
+    }
+
+    /**
+     * @param {import("cs_script/point_script").CSPlayerPawn} pawn
+     * @returns {{ position: import("cs_script/point_script").Vector, angles: import("cs_script/point_script").QAngle } | null}
+     */
+    _getPlacement(pawn) {
+        const origin = pawn.GetAbsOrigin?.();
+        const angles = pawn.GetAbsAngles?.();
+        if (!origin || !angles) return null;
+
+        const yawRad = (angles.yaw ?? 0) * (Math.PI / 180);
+        return {
+            position: {
+                x: origin.x + Math.cos(yawRad) * this._placementDistance,
+                y: origin.y + Math.sin(yawRad) * this._placementDistance,
+                z: origin.z,
+            },
+            angles,
+        };
+    }
+
+    /**
+     * @param {import("cs_script/point_script").Vector} position
+     * @returns {boolean}
+     */
+    _canPlaceAt(position) {
+        const trace = Instance.TraceBox({
+            mins: SENTRY_PLACEMENT_BOUNDS.mins,
+            maxs: SENTRY_PLACEMENT_BOUNDS.maxs,
+            start: {
+                x: position.x,
+                y: position.y,
+                z: position.z + 4,
+            },
+            end: {
+                x: position.x,
+                y: position.y,
+                z: position.z + 4,
+            },
+            ignorePlayers: true,
+        });
+        return !trace.didHit;
+    }
+
+    /**
+     * @param {import("cs_script/point_script").Vector} position
+      * @param {number} ownerKey
+     * @returns {boolean}
+     */
+    _spawnTurret(position, ownerKey) {
+        const template = Instance.FindEntityByName(this._templateName);
+        if (!template || !(template instanceof PointTemplate)) {
+            Instance.Msg(`Sentry: 找不到 PointTemplate "${this._templateName}"\n`);
+            return false;
+        }
+
+        const spawned = template.ForceSpawn(position);
+        if (!spawned || spawned.length < 2) {
+            Instance.Msg(`Sentry: PointTemplate "${this._templateName}" 至少需要生成 2 个实体\n`);
+            this._cleanupSpawnedEntities(spawned ?? []);
+            return false;
+        }
+
+        const [turretBase, turretYaw] = spawned;
+        if (!turretBase?.IsValid?.() || !turretYaw?.IsValid?.()) {
+            Instance.Msg(`Sentry: PointTemplate "${this._templateName}" 缺少底座或旋转实体\n`);
+            this._cleanupSpawnedEntities(spawned);
+            return false;
+        }
+
+        const turret = new SentryTurret({
+            turretBase,
+            turretYaw,
+            ownerKey,
+            turnSpeed: this._turnSpeed,
+            spawnedEntities: spawned,
+        });
+        sentryManager.register(turret);
+        return true;
+    }
+
+    /**
+     * @param {import("cs_script/point_script").Entity[]} entities
+     */
+    _cleanupSpawnedEntities(entities) {
+        for (const entity of entities) {
+            if (entity?.IsValid?.()) {
+                entity.Remove();
+            }
+        }
+    }
+}
+
+/**
  * @module 怪物系统/技能工厂
  */
+
 /*
 技能分类规则（唯一权威）：
   有 animation 参数（非 null）= 有动作：canTrigger 返回 true 后 request 占用当前待执行槽，
@@ -6953,6 +8556,7 @@ class PlayerHealingFieldSkill extends SkillTemplate {
 所有技能均支持 params.events（string[]）配置多个触发事件，未提供则使用各技能自身默认。
 每个技能均支持可选 animation 参数，不传则默认 null（无动作）。
 每个技能均支持可选 cooldown 参数，不传则默认 -1（一次性）。
+任何需要显式添加 Buff 的技能，统一只接收 `buffConfigId`；Buff 数值与持续时间由 src/buff/buff_const.js 负责。
 
 技能列表（typeId 均为小写无前缀）：
 
@@ -6970,8 +8574,8 @@ initanim    初始动画（默认 OnSpawn 一次性）
 doubleattack  双倍攻击（默认 AttackTrue 触发）
   { cooldown?, events?, animation? }
 
-powerattack   重击（默认 AttackTrue 触发，可击飞玩家）
-  { cooldown?, events?, animation? }
+powerattack   重击（默认 AttackTrue 触发，可选给目标追加预配置 Buff）
+  { cooldown?, events?, animation?, buffConfigId? }
 
 fire          燃烧区域（怪物默认 Die 触发；玩家默认 InspectWeapon 触发）
   { cooldown?, events?, animation?, inputKey?, zoneDuration?, zoneRadius?, triggerDistance?/distance?, targetTypes? }
@@ -6979,37 +8583,33 @@ fire          燃烧区域（怪物默认 Die 触发；玩家默认 InspectWeapo
 shield      能量护盾（默认 [OnSpawn, OnTick]，Spawn 始终保留以初始化修饰器）
   { runtime: number, value: number, cooldown?, events?, animation? }
 
-speedboost  急速（默认 OnTick，临时提升移动速度，超时后恢复）
-  { runtime: number, speed_mult?, speed_value?, cooldown?, events?, animation?,
-    glow?: {r,g,b} }
+speedboost  急速（默认 OnTick，施加预配置加速 Buff，超时后恢复）
+  { buffConfigId?, cooldown?, events?, animation?, glow?: {r,g,b} }
 
-throwstone  投掷石头（默认 OnTick，距离判定后投掷，trigger 待实现）
+throwstone  投掷石头（默认 OnTick，距离判定后请求投掷物管理器创建投掷物）
   { distanceMin?, distanceMax?, damage?, projectileSpeed?, gravityScale?,
-    radius?, maxTargets?, cooldown?, events?, animation? }
-
-laserbeam   发射激光（默认 OnTick，distance 内判定，trigger 待实现）
-  { distance?, duration?, damagePerSecond?, tickInterval?, width?,
-    pierce?, maxTargets?, startDelay?, cooldown?, events?, animation? }
+    radius?, maxTargets?, templateName?, cooldown?, events?, animation? }
 
 sound       怪物声音实体（创建时生成跟随怪物模型的实体，命中事件时设置声音事件并播放）
   { templateName: string, eventSoundMap?: Record<string, string>, cooldown?, events?, animation? }
 
 spawn       事件触发产卵（默认 OnDie）
-  { events?, event?(旧单值兄容), count?, typeName?, cooldown?,
+  { events?, event?(旧单值兼容), count?, typeName?, cooldown?,
     maxSummons?, radiusMin?, radiusMax?, tries?, animation? }
 
-player_guard    玩家守护脉冲（InspectWeapon 触发，加护甲）
-player_mend     玩家治疗脉冲（InspectWeapon 触发，回血）
+player_guard      玩家守护脉冲（InspectWeapon 触发，加护甲）
+player_mend       玩家治疗脉冲（InspectWeapon 触发，回血）
 player_mend_field 玩家治疗领域（InspectWeapon 触发，创建跟随玩家的持续回血区域）
-player_vanguard 玩家先锋脉冲（InspectWeapon 触发，回血+护甲）
+player_vanguard   玩家先锋脉冲（InspectWeapon 触发，回血+护甲）
+player_turret     玩家哨戒炮台（InspectWeapon 触发，在当前位置部署炮台）
  */
 /**
  * 技能工厂。根据 typeId 创建对应的技能实例。
  *
  * 当前支持的 typeId：
  * corestats、pounce、initanim、doubleattack、powerattack、
- * fire、spawn、shield、speedboost、throwstone、laserbeam、sound、
- * player_guard、player_mend、player_mend_field、player_vanguard。
+ * fire、spawn、shield、speedboost、throwstone、sound、
+ * player_guard、player_mend、player_mend_field、player_vanguard、player_turret。
  *
  * 所有技能均支持 `params.events`、`params.animation`、`params.cooldown`。
  * 详细参数见各技能类的 JSDoc。
@@ -7017,50 +8617,50 @@ player_vanguard 玩家先锋脉冲（InspectWeapon 触发，回血+护甲）
 const SkillFactory = {
     /**
      * 根据 typeId 创建对应的技能实例。未识别的 id 返回 null。
-      * @param {import("../player/player/player.js").Player|null} player 施法玩家
-      * @param {import("../monster/monster/monster.js").Monster|null} monster 施法怪物
+     * @param {import("../player/player/player.js").Player|null} player 施法玩家
+     * @param {import("../monster/monster/monster.js").Monster|null} monster 施法怪物
      * @param {string} typeid 技能类型标识（如 "corestats"、"pounce"）
      * @param {number} id 技能实例 id
      * @param {any} params 技能配置参数
-      * @returns {import("./skill_template.js").SkillTemplate|null}
+     * @returns {import("./skill_template.js").SkillTemplate|null}
      */
-  create(player, monster, typeid, id, params = {}) {
+    create(player, monster, typeid, id, params = {}) {
         switch (typeid) {
             case "corestats":
-        return new CoreStats(player, monster,id, params);
+                return new CoreStats(player, monster, id, params);
             case "pounce":
-        return new PounceSkill(player, monster,id, params);
+                return new PounceSkill(player, monster, id, params);
             case "initanim":
-        return new InitAnimSkill(player, monster,id, params);
+                return new InitAnimSkill(player, monster, id, params);
             case "doubleattack":
-        return new DoubleAttackSkill(player, monster,id, params);
+                return new DoubleAttackSkill(player, monster, id, params);
             case "powerattack":
-        return new PowerAttackSkill(player, monster,id, params);
+                return new PowerAttackSkill(player, monster, id, params);
             case "fire":
-          return new FireSkill(player, monster,id, params);
+                return new FireSkill(player, monster, id, params);
             case "spawn":
-        return new SpawnSkill(player, monster,id, params);
+                return new SpawnSkill(player, monster, id, params);
             case "shield":
-        return new ShieldSkill(player, monster,id, params);
+                return new ShieldSkill(player, monster, id, params);
             case "speedboost":
-        return new SpeedBoostSkill(player, monster,id, params);
+                return new SpeedBoostSkill(player, monster, id, params);
             case "throwstone":
-        return new ThrowStoneSkill(player, monster,id, params);
-            case "laserbeam":
-        return new LaserBeamSkill(player, monster,id, params);
+                return new ThrowStoneSkill(player, monster, id, params);
             case "sound":
-          return new SoundSkill(player, monster,id, params);
+                return new SoundSkill(player, monster, id, params);
             case "player_guard":
-          return new PlayerPulseSkill(player, monster, "player_guard", id, { inputKey: "InspectWeapon", cooldown: 8, armor: 25, ...params });
+                return new PlayerPulseSkill(player, monster, "player_guard", id, { inputKey: "InspectWeapon", cooldown: 8, armor: 25, ...params });
             case "player_mend":
-          return new PlayerPulseSkill(player, monster, "player_mend", id, { inputKey: "InspectWeapon", cooldown: 8, heal: 35, ...params });
+                return new PlayerPulseSkill(player, monster, "player_mend", id, { inputKey: "InspectWeapon", cooldown: 8, heal: 35, ...params });
             case "player_mend_field":
-          return new PlayerHealingFieldSkill(player, monster, id, { inputKey: "InspectWeapon", cooldown: 10, zoneDuration: 5, zoneRadius: 150, ...params });
+                return new PlayerHealingFieldSkill(player, monster, id, { inputKey: "InspectWeapon", cooldown: 10, zoneDuration: 5, zoneRadius: 150, ...params });
             case "player_vanguard":
-          return new PlayerPulseSkill(player, monster, "player_vanguard", id, { inputKey: "InspectWeapon", cooldown: 10, heal: 20, armor: 15, ...params });
+                return new PlayerPulseSkill(player, monster, "player_vanguard", id, { inputKey: "InspectWeapon", cooldown: 10, heal: 20, armor: 15, ...params });
+            case "player_turret":
+                return new SentrySkill(player, monster, id, params);
             default:
                 return null;
-        } 
+        }
     }
 };
 
@@ -7485,209 +9085,6 @@ class MonsterAnimator {
 }
 
 /**
- * @module 工具/向量工具
- */
-/**
- * 向量工具类，提供 2D/3D 向量的静态运算方法（加减、点积、叉积、归一化、插值等）。
- * @navigationTitle 向量工具
- */
-let vec$1 = class vec{
-    /**
-     * 返回向量vec1+vec2
-     * @param {import("cs_script/point_script").Vector} a
-     * @param {import("cs_script/point_script").Vector} b
-     * @returns {import("cs_script/point_script").Vector}
-     */
-    static add(a, b) {
-        return { x: a.x + b.x, y: a.y + b.y, z: a.z + b.z };
-    }
-    /**
-     * 添加 2D 分量
-     * @param {import("cs_script/point_script").Vector} a
-     * @param {import("cs_script/point_script").Vector} b
-     * @returns {import("cs_script/point_script").Vector}
-     */
-    static add2D(a, b) {
-        return { x: a.x + b.x, y: a.y + b.y, z: a.z};
-    }
-    /**
-     * 返回向量vec1-vec2
-     * @param {import("cs_script/point_script").Vector} a
-     * @param {import("cs_script/point_script").Vector} b
-     * @returns {import("cs_script/point_script").Vector}
-     */
-    static sub(a, b) {
-        return { x: a.x - b.x, y: a.y - b.y, z: a.z - b.z };
-    }
-    /**
-     * 返回向量vec1*s
-     * @param {import("cs_script/point_script").Vector} a
-     * @param {number} s
-     * @returns {import("cs_script/point_script").Vector}
-     */
-    static scale(a,s)
-    {
-        return {x:a.x*s,y:a.y*s,z:a.z*s}
-    }
-    /**
-     * 返回向量vec1*s
-     * @param {import("cs_script/point_script").Vector} a
-     * @param {number} s
-     * @returns {import("cs_script/point_script").Vector}
-     */
-    static scale2D(a,s) {
-        return {
-            x:a.x * s,
-            y:a.y * s,
-            z:a.z
-        };
-    }
-    /**
-     * 得到vector
-     * @param {number} [x]
-     * @param {number} [y]
-     * @param {number} [z]
-     * @returns {import("cs_script/point_script").Vector}
-     */
-    static get(x=0,y=0,z=0)
-    {
-        return {x,y,z};
-    }
-    /**
-     * 深复制
-     * @param {import("cs_script/point_script").Vector} a
-     * @returns {import("cs_script/point_script").Vector}
-     */
-    static clone(a)
-    {
-        return {x:a.x,y:a.y,z:a.z};
-    }
-    /**
-     * 计算空间两点之间的距离
-     * @param {import("cs_script/point_script").Vector} a
-     * @param {import("cs_script/point_script").Vector} [b]
-     * @returns {number}
-     */
-    static length(a, b={x:0,y:0,z:0}) {
-        const dx = a.x - b.x; const dy = a.y - b.y; const dz = a.z - b.z;
-        return Math.sqrt(dx * dx + dy * dy + dz * dz);
-    }
-    /**
-     * 计算xy平面两点之间的距离
-     * @param {import("cs_script/point_script").Vector} a
-     * @param {import("cs_script/point_script").Vector} [b]
-     * @returns {number}
-     */
-    static length2D(a, b={x:0,y:0,z:0}) {
-        const dx = a.x - b.x; const dy = a.y - b.y;
-        return Math.sqrt(dx * dx + dy * dy);
-    }
-    /**
-     * 计算空间两点之间的距离平方（无平方根，更快）
-     * @param {import("cs_script/point_script").Vector} a
-     * @param {import("cs_script/point_script").Vector} [b]
-     * @returns {number}
-     */
-    static lengthsq(a, b={x:0,y:0,z:0}) {
-        const dx = a.x - b.x; const dy = a.y - b.y; const dz = a.z - b.z;
-        return dx * dx + dy * dy + dz * dz;
-    }
-    /**
-     * 计算xy平面两点之间的距离平方（无平方根，更快）
-     * @param {import("cs_script/point_script").Vector} a
-     * @param {import("cs_script/point_script").Vector} [b]
-     * @returns {number}
-     */
-    static length2Dsq(a, b={x:0,y:0,z:0}) {
-        const dx = a.x - b.x; const dy = a.y - b.y;
-        return dx * dx + dy * dy;
-    }
-    /**
-     * 返回pos上方height高度的点
-     * @param {import("cs_script/point_script").Vector} pos
-     * @param {number} height
-     * @returns {import("cs_script/point_script").Vector}
-     */
-    static Zfly(pos, height) {
-        return { x: pos.x, y: pos.y, z: pos.z + height };
-    }
-    /**
-     * 输出点pos的坐标
-     * @param {import("cs_script/point_script").Vector} pos
-     */
-    static msg(pos) {
-        Instance.Msg(`{${pos.x} ${pos.y} ${pos.z}}`);
-    }
-    /**
-     * 计算两个三维向量的点积。
-     * @param {import("cs_script/point_script").Vector} a
-     * @param {import("cs_script/point_script").Vector} b
-     */
-    static dot(a,b) {
-        return a.x * b.x + a.y * b.y + a.z * b.z;
-    }
-
-    /**
-     * 计算两个向量在 XY 平面上的点积。
-     * @param {import("cs_script/point_script").Vector} a
-     * @param {import("cs_script/point_script").Vector} b
-     */
-    static dot2D(a,b) {
-        return a.x * b.x + a.y * b.y;
-    }
-
-    /**
-     * 计算两个三维向量的叉积。
-     * @param {import("cs_script/point_script").Vector} a
-     * @param {import("cs_script/point_script").Vector} b
-     */
-    static cross(a,b) {
-        return {
-            x:a.y * b.z - a.z * b.y,
-            y:a.z * b.x - a.x * b.z,
-            z:a.x * b.y - a.y * b.x
-        };
-    }
-    /**
-     * 返回三维向量的单位向量，零向量时返回原点。
-     * @param {import("cs_script/point_script").Vector} a
-     */
-    static normalize(a) {
-        const len = this.length(a);
-        if (len < 1e-6) {
-            return {x:0,y:0,z:0};
-        }
-        return this.scale(a,1 / len);
-    }
-    /**
-     * 返回向量在 XY 平面上的单位向量（z 置零），零向量时返回原点。
-     * @param {import("cs_script/point_script").Vector} a
-     */
-    static normalize2D(a) {
-        const len = this.length2D(a);
-        if (len < 1e-6) {
-            return {x:0,y:0,z:0};
-        }
-        return {
-            x:a.x / len,
-            y:a.y / len,
-            z:0
-        };
-    }
-    /**
-     * 判断向量是否为零向量（各分量绝对值小于 1e-6）。
-     * @param {import("cs_script/point_script").Vector} a
-     */
-    static isZero(a) {
-        return (
-            Math.abs(a.x) < 1e-6 &&
-            Math.abs(a.y) < 1e-6 &&
-            Math.abs(a.z) < 1e-6
-        );
-    }
-};
-
-/**
  * @module 怪物系统/怪物实体
  */
 
@@ -7697,10 +9094,6 @@ let vec$1 = class vec{
  * @typedef {{
  *   buffId: number;
  *   typeId: string;
- *   params: Record<string, any>;
- *   groupKey: string | null;
- *   source: Record<string, any> | null;
- *   context: Record<string, any> | null;
  * }} MonsterBuffRuntime
  */
 /** @typedef {import("../../util/runtime_events.js").RuntimeEvent} MonsterRuntimeEvent */
@@ -7820,14 +9213,10 @@ class Monster {
 
     /**
      * @param {string} typeId
-     * @param {Record<string, any>} [params]
-     * @param {Record<string, any> | null} [source]
-     * @param {Record<string, any> | null} [context]
      * @returns {boolean}
      */
-    addBuff(typeId, params = {}, source = null, context = null) {
+    addBuff(typeId) {
         if (this.buffMap.has(typeId)) return false;
-        const normalizedParams = { ...(params ?? {}) };
         /** @type {import("../../buff/buff_const").BuffAddRequest} */
         const addRequest = {
             configid: typeId,
@@ -7842,10 +9231,6 @@ class Monster {
         this.buffStateMap.set(typeId, {
             buffId: addRequest.result,
             typeId,
-            params: normalizedParams,
-            groupKey: typeof normalizedParams.groupKey === "string" ? normalizedParams.groupKey : null,
-            source,
-            context,
         });
         this.recomputeDerivedStats();
         return true;
@@ -7853,12 +9238,11 @@ class Monster {
 
     /**
      * @param {string} typeId
-     * @param {Record<string, any>} [params]
      * @returns {boolean}
      */
-    refreshBuff(typeId, params = {}) {
+    refreshBuff(typeId) {
         const id = this.buffMap.get(typeId);
-        if (id == null) return this.addBuff(typeId, params);
+        if (id == null) return this.addBuff(typeId);
 
         /** @type {import("../../buff/buff_const").BuffRefreshRequest} */
         const refreshRequest = {
@@ -7867,12 +9251,6 @@ class Monster {
         };
         eventBus.emit(event.Buff.In.BuffRefreshRequest, refreshRequest);
         if (!refreshRequest.result) return false;
-
-        const runtime = this.buffStateMap.get(typeId);
-        if (runtime) {
-            runtime.params = { ...(params ?? runtime.params) };
-            runtime.groupKey = typeof runtime.params.groupKey === "string" ? runtime.params.groupKey : null;
-        }
         this.recomputeDerivedStats();
         return true;
     }
@@ -8529,9 +9907,8 @@ class MonsterManager {
     /**
      * @param {number} monsterId
      * @param {string} typeId
-     * @param {Record<string, any>} params
      */
-    applyBuff(monsterId,typeId, params) {
+    applyBuff(monsterId,typeId) {
         if (!typeId) return null;
         const monster = this.monsters.get(monsterId);
         if (!monster) return null;
@@ -8650,8 +10027,8 @@ class MonsterManager {
             }
             const spawnPoint = nearbySpawnPoints[Math.floor(Math.random() * nearbySpawnPoints.length)];
             const pos = spawnPoint.GetAbsOrigin();
-            const start = { x: pos.x, y: pos.y, z: pos.z + 50 };
-            const end = { x: pos.x, y: pos.y, z: pos.z + 50 };
+            const start = { x: pos.x, y: pos.y, z: pos.z };
+            const end = { x: pos.x, y: pos.y, z: pos.z };
             if (Instance.TraceSphere({ radius:30, start, end, ignorePlayers: true }).hitEntity) {
                 Instance.Msg("错误: 生成点有遮挡");
                 return null;
@@ -9619,18 +10996,18 @@ const PathState$1 = {
     PORTAL: 4
 };
 //==============================世界相关设置=====================================
-/** NavMesh 世界原点坐标（体素空间的 (0,0,0) 对应的世界坐标）。 */
-const origin = { x: -1400, y: -4510, z: 220 };
+/** NavMesh 世界左下角原点坐标（体素空间的 (0,0,0) 对应的世界坐标）。 */
+const origin = { x: -2500, y: -820, z: 1080 };
 /** 体素水平方向尺寸（单位）。越小精度越高，构建越慢。 */
-const MESH_CELL_SIZE_XY = 8;
+const MESH_CELL_SIZE_XY = 6;
 /** 体素垂直方向尺寸（单位）。 */
 const MESH_CELL_SIZE_Z = 1;
 /** 体素化射线方块高度（单位）。设置过高会忽略竖直方向的空隙。 */
 const MESH_TRACE_SIZE_Z = 32;
 /** NavMesh 世界水平范围大小（单位）。 */
-const MESH_WORLD_SIZE_XY = 3200;
+const MESH_WORLD_SIZE_XY = 4000;
 /** NavMesh 世界垂直范围大小（单位）。 */
-const MESH_WORLD_SIZE_Z = 1100;
+const MESH_WORLD_SIZE_Z = 512;
 //==============================数据结构设置=====================================
 /** 多边形最大数量，受 16 位索引限制（不超过 65535）。 */
 const MAX_POLYS = 65535;
@@ -11695,117 +13072,149 @@ class StaticData
 {
     constructor()
     {
-        this.Data = ``+`{"tiles":[["0_0",{"tileId":"0_0","tx":0,"ty":0,"mesh":{"verts":[-1392,-4494,406,-888,-4494,404,-888,-3998,288,-1392,-3998,406],"vertslength":4,"polys":[0,3],"polyslength":1,"regions":[1],"neighbors":[[[0],[0],[0],[0]]]},"detail":{"verts":[-1392,-4494,403,-888,-4494,402,-888,-3998,288,-1025.45458984375,-3998,290,-1392,-3998,403],"vertslength":5,"tris":[1,2,3,3,4,0,0,1,3],"trislength":3,"triTopoly":[0,0,0],"baseVert":[0],"vertsCount":[5],"baseTri":[0],"triCount":[3]},"links":{"poly":[],"cost":[],"`
-+`type":[],"pos":[],"length":0}}],["1_0",{"tileId":"1_0","tx":1,"ty":0,"mesh":{"verts":[-888,-3998,288,-888,-4494,404,-376,-4494,404,-376,-3998,288],"vertslength":4,"polys":[0,3],"polyslength":1,"regions":[1],"neighbors":[[[0],[0],[0],[0]]]},"detail":{"verts":[-888,-3998,288,-888,-4494,402,-376,-4494,402,-376,-3998,288],"vertslength":4,"tris":[3,0,1,1,2,3],"trislength":2,"triTopoly":[0,0],"baseVert":[0],"vertsCount":[4],"baseTri":[0],"triCount":[2]},"links":{"poly":[],"cost":[],"type":[],"pos":[],`
-+`"length":0}}],["2_0",{"tileId":"2_0","tx":2,"ty":0,"mesh":{"verts":[-376,-3998,288,-376,-4494,404,136,-4494,404,136,-3998,288],"vertslength":4,"polys":[0,3],"polyslength":1,"regions":[1],"neighbors":[[[0],[0],[0],[0]]]},"detail":{"verts":[-376,-3998,288,-376,-4494,402,136,-4494,402,136,-3998,288],"vertslength":4,"tris":[3,0,1,1,2,3],"trislength":2,"triTopoly":[0,0],"baseVert":[0],"vertsCount":[4],"baseTri":[0],"triCount":[2]},"links":{"poly":[],"cost":[],"type":[],"pos":[],"length":0}}],["3_0",{`
-+`"tileId":"3_0","tx":3,"ty":0,"mesh":{"verts":[136,-3998,288,136,-4494,404,648,-4494,404,648,-3998,288],"vertslength":4,"polys":[0,3],"polyslength":1,"regions":[1],"neighbors":[[[0],[0],[0],[0]]]},"detail":{"verts":[136,-3998,288,136,-4494,402,648,-4494,402,648,-3998,288],"vertslength":4,"tris":[3,0,1,1,2,3],"trislength":2,"triTopoly":[0,0],"baseVert":[0],"vertsCount":[4],"baseTri":[0],"triCount":[2]},"links":{"poly":[],"cost":[],"type":[],"pos":[],"length":0}}],["4_0",{"tileId":"4_0","tx":4,"ty"`
-+`:0,"mesh":{"verts":[824,-4014,292,816,-3998,288,648,-3998,288,648,-4494,404,1160,-3998,354,968,-3998,296,960,-4014,294,1160,-4494,404,960,-4014,294,824,-4014,292,648,-4494,404,1160,-4494,404],"vertslength":12,"polys":[0,3,4,7,8,11],"polyslength":3,"regions":[1,1,1],"neighbors":[[[0],[0],[0],[1,2]],[[0],[0],[1,2],[0]],[[0],[1,0],[0],[1,1]]]},"detail":{"verts":[824,-4014,292,816,-3998,288,648,-3998,288,648,-4494,402,1160,-3998,354,968,-3998,299,960,-4014,296,996.3636474609375,-4101.27294921875,309`
-+`,1160,-4494,402,1160,-4281.4287109375,354,960,-4014,296,824,-4014,292,648,-4494,402,1160,-4494,402,996.3636474609375,-4101.27294921875,309,948,-4026,292],"vertslength":16,"tris":[0,1,2,0,2,3,5,6,7,4,5,7,9,4,7,7,8,9,13,14,11,11,12,13,14,10,15,10,11,15,11,14,15],"trislength":11,"triTopoly":[0,0,1,1,1,1,2,2,2,2,2],"baseVert":[0,4,10],"vertsCount":[4,6,6],"baseTri":[0,2,6],"triCount":[2,4,5]},"links":{"poly":[],"cost":[],"type":[],"pos":[],"length":0}}],["5_0",{"tileId":"5_0","tx":5,"ty":0,"mesh":{"`
-+`verts":[1160,-3998,357,1160,-4494,404,1320,-4494,404,1320,-3998,404],"vertslength":4,"polys":[0,3],"polyslength":1,"regions":[1],"neighbors":[[[0],[0],[0],[0]]]},"detail":{"verts":[1160,-3998,359,1160,-4305.0478515625,359,1160,-4494,402,1320,-4494,404,1320,-3998,404],"vertslength":5,"tris":[1,2,3,4,0,1,1,3,4],"trislength":3,"triTopoly":[0,0,0],"baseVert":[0],"vertsCount":[5],"baseTri":[0],"triCount":[3]},"links":{"poly":[],"cost":[],"type":[],"pos":[],"length":0}}],["6_0",{"tileId":"6_0","tx":6,`
-+`"ty":0,"mesh":{"verts":[],"vertslength":0,"polys":[],"polyslength":0,"regions":[],"neighbors":[]},"detail":{"verts":[],"vertslength":0,"tris":[],"trislength":0,"triTopoly":[],"baseVert":[],"vertsCount":[],"baseTri":[],"triCount":[]},"links":{"poly":[],"cost":[],"type":[],"pos":[],"length":0}}],["0_1",{"tileId":"0_1","tx":0,"ty":1,"mesh":{"verts":[-1392,-3486,406,-1392,-3998,406,-888,-3998,286,-888,-3486,250,-1048,-3486,897,-1048,-3998,897,-888,-3998,897,-888,-3486,897],"vertslength":8,"polys":[0`
-+`,3,4,7],"polyslength":2,"regions":[1,2],"neighbors":[[[0],[0],[0],[0]],[[0],[0],[0],[0]]]},"detail":{"verts":[-1392,-3486,403,-1392,-3998,403,-1002.5454711914062,-3998,284,-888,-3998,284,-888,-3835.0908203125,250,-888,-3486,250,-1048,-3486,897,-1048,-3998,897,-888,-3998,897,-888,-3486,897],"vertslength":10,"tris":[2,3,4,2,4,5,0,1,2,0,2,5,9,6,7,7,8,9],"trislength":6,"triTopoly":[0,0,0,0,1,1],"baseVert":[0,6],"vertsCount":[6,4],"baseTri":[0,4],"triCount":[4,2]},"links":{"poly":[],"cost":[],"type":`
-+`[],"pos":[],"length":0}}],["1_1",{"tileId":"1_1","tx":1,"ty":1,"mesh":{"verts":[-744,-3590,236,-752,-3486,236,-888,-3486,247,-888,-3998,286,-376,-3998,286,-376,-3590,236,-744,-3590,236,-888,-3998,286,-888,-3486,897,-888,-3998,897,-376,-3998,897,-376,-3486,897,-736,-3574,606,-376,-3574,606,-376,-3486,606,-736,-3486,606,-728,-3566,250,-376,-3566,251,-376,-3486,313,-728,-3486,250,-376,-3494,236,-376,-3486,236,-656,-3486,236],"vertslength":23,"polys":[0,3,4,7,8,11,12,15,16,19,20,22],"polyslength":6,`
-+`"regions":[2,2,1,3,4,5],"neighbors":[[[0],[0],[0],[1,1]],[[0],[0],[1,0],[0]],[[0],[0],[0],[0]],[[0],[0],[0],[0]],[[0],[0],[0],[0]],[[0],[0],[0]]]},"detail":{"verts":[-744,-3590,236,-752,-3486,236,-842.6666870117188,-3486,236,-888,-3486,245,-888,-3835.0908203125,246,-888,-3998,284,-819.7894897460938,-3804.73681640625,238,-852,-3770,236,-852,-3530,236,-376,-3998,284,-376,-3794,236,-376,-3590,236,-744,-3590,236,-819.7894897460938,-3804.73681640625,238,-888,-3998,284,-888,-3486,897,-888,-3998,897,-3`
-+`76,-3998,897,-376,-3486,897,-736,-3574,606,-376,-3574,606,-376,-3486,606,-736,-3486,606,-728,-3566,257,-376,-3566,258,-376,-3506,306,-376,-3486,313,-634.1333618164062,-3486,313,-657.5999755859375,-3486,307,-728,-3486,257,-644,-3506,306,-548,-3506,306,-376,-3494,236,-376,-3486,236,-656,-3486,236],"vertslength":35,"tris":[4,5,6,3,4,7,4,6,7,0,6,7,3,7,8,7,0,8,3,2,8,0,1,8,2,1,8,10,11,12,10,12,13,9,10,13,9,13,14,18,15,16,16,17,18,22,19,20,20,21,22,27,28,30,23,29,30,28,29,30,24,25,31,25,26,31,27,26,31,`
-+`27,30,31,24,23,31,30,23,31,32,33,34],"trislength":27,"triTopoly":[0,0,0,0,0,0,0,0,0,1,1,1,1,2,2,3,3,4,4,4,4,4,4,4,4,4,5],"baseVert":[0,9,15,19,23,32],"vertsCount":[9,6,4,4,9,3],"baseTri":[0,9,13,15,17,26],"triCount":[9,4,2,2,9,1]},"links":{"poly":[4,5],"cost":[1084.3148193359375],"type":[2],"pos":[-656,-3486,262.8863525390625,-656,-3486,236],"length":1}}],["2_1",{"tileId":"2_1","tx":2,"ty":1,"mesh":{"verts":[64,-3582,237,64,-3486,313,-160,-3486,313,-168,-3590,236,136,-3590,236,64,-3582,237,-168,`
-+`-3590,236,-168,-3590,236,-376,-3590,236,-376,-3998,286,136,-3998,286,136,-3590,236,-376,-3486,897,-376,-3998,897,136,-3998,897,136,-3486,897,-376,-3486,606,-376,-3574,606,136,-3574,606,136,-3486,606,-376,-3486,313,-376,-3566,251,-184,-3566,251,-184,-3486,313,-376,-3494,236,-184,-3486,236,-376,-3486,236,88,-3566,251,136,-3566,251,136,-3486,313,88,-3486,313,136,-3494,236,136,-3486,236,88,-3486,236],"vertslength":34,"polys":[0,3,4,6,7,11,12,15,16,19,20,23,24,26,27,30,31,33],"polyslength":9,"regions`
-+`":[2,2,2,1,3,4,6,5,8],"neighbors":[[[0],[0],[0],[1,1]],[[0],[1,0],[1,2]],[[0],[0],[0],[0],[1,1]],[[0],[0],[0],[0]],[[0],[0],[0],[0]],[[0],[0],[0],[0]],[[0],[0],[0]],[[0],[0],[0],[0]],[[0],[0],[0]]]},"detail":{"verts":[64,-3582,244,64,-3505.199951171875,306,64,-3486,313,-160,-3486,313,-161.60000610351562,-3506.800048828125,306,-168,-3590,237,40.79999923706055,-3582.800048828125,237,36,-3506,306,136,-3590,236,82,-3584,236,64,-3582,244,40.79999923706055,-3582.800048828125,237,-168,-3590,237,-168,-3`
-+`590,237,-376,-3590,236,-376,-3794,236,-376,-3998,284,136,-3998,284,136,-3794,236,136,-3590,236,-268,-3794,236,-376,-3486,897,-376,-3998,897,136,-3998,897,136,-3486,897,-376,-3486,606,-376,-3574,606,136,-3574,606,136,-3486,606,-376,-3486,313,-376,-3506,306,-376,-3566,258,-184,-3566,258,-184,-3506,306,-184,-3486,313,-376,-3494,236,-184,-3486,236,-376,-3486,236,88,-3566,258,136,-3566,258,136,-3506,306,136,-3486,313,88,-3486,313,88,-3506,306,136,-3494,236,136,-3486,236,88,-3486,236],"vertslength":47`
-+`,"tris":[4,5,6,4,6,7,2,3,7,4,3,7,2,1,7,6,0,7,1,0,7,9,10,11,8,9,11,8,11,12,18,19,13,16,17,20,16,15,20,13,14,20,15,14,20,17,18,20,13,18,20,24,21,22,22,23,24,28,25,26,26,27,28,34,29,30,33,34,30,33,30,31,31,32,33,35,36,37,40,41,42,40,42,43,43,38,39,39,40,43,44,45,46],"trislength":31,"triTopoly":[0,0,0,0,0,0,0,1,1,1,2,2,2,2,2,2,2,3,3,4,4,5,5,5,5,6,7,7,7,7,8],"baseVert":[0,8,13,21,25,29,35,38,44],"vertsCount":[8,5,8,4,4,6,3,6,3],"baseTri":[0,7,10,17,19,21,25,26,30],"triCount":[7,3,7,2,2,4,1,4,1]},"lin`
-+`ks":{"poly":[],"cost":[],"type":[],"pos":[],"length":0}}],["3_1",{"tileId":"3_1","tx":3,"ty":1,"mesh":{"verts":[136,-3590,236,136,-3998,286,648,-3998,286,648,-3590,236,136,-3486,897,136,-3998,897,648,-3998,897,648,-3486,897,136,-3486,606,136,-3574,606,640,-3574,606,640,-3486,606,136,-3486,313,136,-3566,251,632,-3566,251,632,-3486,253,136,-3494,236,560,-3486,236,136,-3486,236],"vertslength":19,"polys":[0,3,4,7,8,11,12,15,16,18],"polyslength":5,"regions":[2,1,3,4,5],"neighbors":[[[0],[0],[0],[0]],`
-+`[[0],[0],[0],[0]],[[0],[0],[0],[0]],[[0],[0],[0],[0]],[[0],[0],[0]]]},"detail":{"verts":[136,-3590,236,136,-3794,236,136,-3998,284,648,-3998,284,648,-3794,236,648,-3590,236,136,-3486,897,136,-3998,897,648,-3998,897,648,-3486,897,136,-3486,606,136,-3574,606,640,-3574,606,640,-3486,606,136,-3486,313,136,-3506,306,136,-3566,258,632,-3566,253,632,-3486,253,608.3809814453125,-3486,260,537.5238037109375,-3486,313,532,-3506,306,556,-3506,304,136,-3494,236,560,-3486,236,136,-3486,236],"vertslength":26,"`
-+`tris":[5,0,1,1,2,3,1,3,4,1,4,5,9,6,7,7,8,9,13,10,11,11,12,13,17,18,19,16,17,21,16,15,21,20,14,21,15,14,21,17,19,22,21,17,22,19,20,22,21,20,22,23,24,25],"trislength":18,"triTopoly":[0,0,0,0,1,1,2,2,3,3,3,3,3,3,3,3,3,4],"baseVert":[0,6,10,14,23],"vertsCount":[6,4,4,9,3],"baseTri":[0,4,6,8,17],"triCount":[4,2,2,9,1]},"links":{"poly":[3,4],"cost":[991.4812622070312],"type":[2],"pos":[560,-3486,261.7096862792969,560,-3486,236],"length":1}}],["4_1",{"tileId":"4_1","tx":4,"ty":1,"mesh":{"verts":[648,-3`
-+`998,286,816,-3998,286,824,-3854,253,648,-3582,236,960,-3854,294,968,-3998,296,1160,-3998,354,1160,-3486,354,656,-3486,236,648,-3582,236,824,-3854,253,960,-3854,294,1160,-3486,354,648,-3486,897,648,-3998,897,952,-3998,897,952,-3486,897,840,-3886,265,840,-3982,282,944,-3982,286,944,-3886,286],"vertslength":21,"polys":[0,3,4,7,8,12,13,16,17,20],"polyslength":5,"regions":[1,1,1,2,3],"neighbors":[[[0],[0],[1,2],[0]],[[0],[0],[0],[1,2]],[[0],[1,0],[0],[1,1],[0]],[[0],[0],[0],[0]],[[0],[0],[0],[0]]]},"`
-+`detail":{"verts":[648,-3998,284,816,-3998,284,822.8571166992188,-3874.571533203125,252,824,-3854,253,773.7142944335938,-3776.28564453125,236,648,-3582,236,648,-3790,236,960,-3854,296,968,-3998,299,1160,-3998,354,1160,-3486,354,656,-3486,236,648,-3582,236,773.7142944335938,-3776.28564453125,236,824,-3854,253,960,-3854,296,1160,-3486,354,770.5454711914062,-3486,236,648,-3486,897,648,-3998,897,952,-3998,897,952,-3486,897,840,-3886,265,840,-3982,280,944,-3982,286,944,-3886,286,876,-3922,268],"vertsl`
-+`ength":27,"tris":[2,3,4,1,2,4,4,5,6,4,6,0,0,1,4,7,8,9,7,9,10,17,11,12,13,14,15,17,12,13,17,13,15,15,16,17,21,18,19,19,20,21,25,22,26,22,23,26,23,24,26,25,24,26],"trislength":18,"triTopoly":[0,0,0,0,0,1,1,2,2,2,2,2,3,3,4,4,4,4],"baseVert":[0,7,11,18,22],"vertsCount":[7,4,7,4,5],"baseTri":[0,5,7,12,14],"triCount":[5,2,5,2,4]},"links":{"poly":[],"cost":[],"type":[],"pos":[],"length":0}}],["5_1",{"tileId":"5_1","tx":5,"ty":1,"mesh":{"verts":[1160,-3486,357,1160,-3998,357,1320,-3998,404,1320,-3486,40`
-+`4],"vertslength":4,"polys":[0,3],"polyslength":1,"regions":[1],"neighbors":[[[0],[0],[0],[0]]]},"detail":{"verts":[1160,-3486,359,1160,-3998,359,1320,-3998,404,1320,-3486,404],"vertslength":4,"tris":[3,0,1,1,2,3],"trislength":2,"triTopoly":[0,0],"baseVert":[0],"vertsCount":[4],"baseTri":[0],"triCount":[2]},"links":{"poly":[],"cost":[],"type":[],"pos":[],"length":0}}],["6_1",{"tileId":"6_1","tx":6,"ty":1,"mesh":{"verts":[],"vertslength":0,"polys":[],"polyslength":0,"regions":[],"neighbors":[]},"d`
-+`etail":{"verts":[],"vertslength":0,"tris":[],"trislength":0,"triTopoly":[],"baseVert":[],"vertsCount":[],"baseTri":[],"triCount":[]},"links":{"poly":[],"cost":[],"type":[],"pos":[],"length":0}}],["0_2",{"tileId":"0_2","tx":0,"ty":2,"mesh":{"verts":[-1392,-2974,406,-1392,-3486,406,-888,-3486,250,-888,-2974,250,-1048,-2974,897,-1048,-3486,897,-888,-3486,897,-888,-2974,897],"vertslength":8,"polys":[0,3,4,7],"polyslength":2,"regions":[1,2],"neighbors":[[[0],[0],[0],[0]],[[0],[0],[0],[0]]]},"detail":`
-+`{"verts":[-1392,-2974,403,-1392,-3486,403,-888,-3486,250,-888,-2974,250,-1048,-2974,897,-1048,-3486,897,-888,-3486,897,-888,-2974,897],"vertslength":8,"tris":[3,0,1,1,2,3,7,4,5,5,6,7],"trislength":4,"triTopoly":[0,0,1,1],"baseVert":[0,4],"vertsCount":[4,4],"baseTri":[0,2],"triCount":[2,2]},"links":{"poly":[],"cost":[],"type":[],"pos":[],"length":0}}],["1_2",{"tileId":"1_2","tx":1,"ty":2,"mesh":{"verts":[-752,-3046,236,-376,-3038,523,-376,-2974,523,-888,-2974,247,-888,-3486,247,-752,-3486,236,-75`
-+`2,-3046,236,-888,-2974,247,-888,-2974,897,-888,-3486,897,-376,-3486,897,-376,-2974,897,-632,-3054,606,-640,-2974,606,-736,-2974,606,-736,-3486,606,-376,-3486,606,-376,-3054,606,-632,-3054,606,-736,-3486,606,-728,-3062,250,-728,-3486,250,-376,-3486,320,-376,-3062,523,-656,-3062,236,-656,-3486,236,-376,-3486,236,-376,-3062,236,-656,-3038,236,-376,-3038,236,-376,-2974,236,-656,-2974,236],"vertslength":32,"polys":[0,3,4,7,8,11,12,15,16,19,20,23,24,27,28,31],"polyslength":8,"regions":[5,5,1,2,2,3,4,6`
-+`],"neighbors":[[[0],[0],[0],[1,1]],[[0],[0],[1,0],[0]],[[0],[0],[0],[0]],[[0],[0],[0],[1,4]],[[0],[0],[1,3],[0]],[[0],[0],[0],[0]],[[0],[0],[0],[0]],[[0],[0],[0],[0]]]},"detail":{"verts":[-752,-3046,238,-728.5,-3045.5,250,-399.5,-3038.5,517,-376,-3038,523,-376,-2974,523,-399.2727355957031,-2974,517,-748.3636474609375,-2974,238,-841.4545288085938,-2974,236,-888,-2974,245,-849.1428833007812,-2994.571533203125,236,-756,-3010,236,-888,-3486,245,-842.6666870117188,-3486,236,-752,-3486,236,-752,-3046,`
-+`238,-849.1428833007812,-2994.571533203125,236,-888,-2974,245,-852,-3234,236,-888,-2974,897,-888,-3486,897,-376,-3486,897,-376,-2974,897,-632,-3054,606,-640,-2974,606,-736,-2974,606,-736,-3486,606,-376,-3486,606,-376,-3054,606,-632,-3054,606,-736,-3486,606,-728,-3062,257,-728,-3486,257,-704.5333251953125,-3486,269,-634.1333618164062,-3486,326,-376,-3486,327,-376,-3462.4443359375,341,-376,-3250.4443359375,523,-376,-3062,523,-399.4666748046875,-3062,517,-704.5333251953125,-3062,269,-476,-3330,453,-`
-+`452,-3330,459,-656,-3062,236,-656,-3486,236,-376,-3486,236,-376,-3062,236,-656,-3038,236,-376,-3038,236,-376,-2974,236,-656,-2974,236],"vertslength":50,"tris":[7,8,9,3,4,5,2,3,5,1,2,5,1,5,6,1,6,10,6,7,10,9,7,10,9,0,10,1,0,10,16,11,17,11,12,17,14,13,17,12,13,17,14,15,17,16,15,17,21,18,19,19,20,21,22,23,24,22,24,25,26,27,28,26,28,29,36,37,38,33,34,35,39,30,31,38,39,40,38,36,40,39,31,40,31,32,40,35,33,40,32,33,40,35,36,41,36,40,41,40,35,41,45,42,43,43,44,45,49,46,47,47,48,49],"trislength":38,"triTo`
-+`poly":[0,0,0,0,0,0,0,0,0,0,1,1,1,1,1,1,2,2,3,3,4,4,5,5,5,5,5,5,5,5,5,5,5,5,6,6,7,7],"baseVert":[0,11,18,22,26,30,42,46],"vertsCount":[11,7,4,4,4,12,4,4],"baseTri":[0,10,16,18,20,22,34,36],"triCount":[10,6,2,2,2,12,2,2]},"links":{"poly":[5,6],"cost":[1202.879150390625],"type":[2],"pos":[-656,-3486,264.31817626953125,-656,-3486,236],"length":1}}],["2_2",{"tileId":"2_2","tx":2,"ty":2,"mesh":{"verts":[-376,-3062,236,-376,-3486,236,-184,-3486,236,-184,-3062,236,-328,-3206,561,-336,-3062,555,-376,-306`
-+`2,529,-376,-3486,320,-184,-3486,320,-184,-3206,556,-328,-3206,561,-376,-3486,320,-168,-3166,606,-168,-3158,606,-304,-3054,606,-376,-3054,606,-376,-3486,606,-176,-3470,606,88,-3486,606,80,-3470,606,-176,-3470,606,-376,-3486,606,-376,-2974,897,-376,-3486,897,136,-3486,897,136,-2974,897,64,-3046,236,136,-3038,236,136,-2974,236,-376,-2974,236,-376,-3038,236,-160,-3046,236,64,-3046,236,-160,-3046,236,-160,-3486,236,64,-3486,236,-376,-2974,529,-376,-3038,529,-296,-3038,593,-160,-2974,607,-296,-3038,59`
-+`3,-304,-3054,606,-168,-3158,606,-160,-2974,607,80,-3470,606,88,-3486,606,136,-3486,606,136,-2974,607,80,-3166,606,-160,-2974,607,-168,-3158,606,-168,-3166,606,64,-3166,598,80,-3166,606,136,-2974,607,-160,-3486,320,64,-3486,320,64,-3166,598,-168,-3166,606,88,-3062,236,88,-3486,236,136,-3486,236,136,-3062,236,88,-3206,556,88,-3486,320,136,-3486,320,136,-3206,556],"vertslength":67,"polys":[0,3,4,7,8,11,12,17,18,21,22,25,26,31,32,35,36,39,40,43,44,48,49,54,55,58,59,62,63,66],"polyslength":15,"region`
-+`s":[6,7,7,4,4,1,3,3,5,5,2,2,2,8,9],"neighbors":[[[0],[0],[0],[0]],[[0],[0],[0],[1,2]],[[0],[0],[1,1],[0]],[[1,11],[1,9],[0],[0],[1,4],[0]],[[1,10],[0],[1,3],[0]],[[0],[0],[0],[0]],[[0],[0],[0],[0],[0],[1,7]],[[1,6],[0],[0],[0]],[[0],[0],[1,9],[0]],[[0],[1,3],[1,11],[1,8]],[[1,4],[0],[0],[1,11],[0]],[[1,9],[1,3],[1,12],[0],[1,10],[0]],[[0],[0],[1,11],[0]],[[0],[0],[0],[0]],[[0],[0],[0],[0]]]},"detail":{"verts":[-376,-3062,236,-376,-3486,236,-184,-3486,236,-184,-3062,236,-328,-3206,556,-336,-3062,`
-+`555,-376,-3062,536,-376,-3226.888916015625,536,-376,-3250.4443359375,528,-376,-3462.4443359375,341,-376,-3486,327,-372,-3462.666748046875,341,-332,-3229.333251953125,549,-340,-3210,561,-184,-3486,327,-184,-3462.666748046875,341,-184,-3229.333251953125,549,-184,-3206,556,-328,-3206,556,-332,-3229.333251953125,549,-372,-3462.666748046875,341,-376,-3486,327,-168,-3166,606,-168,-3158,606,-304,-3054,606,-376,-3054,606,-376,-3486,606,-176,-3470,606,88,-3486,606,80,-3470,606,-176,-3470,606,-376,-3486,6`
-+`06,-376,-2974,897,-376,-3486,897,136,-3486,897,136,-2974,897,64,-3046,236,136,-3038,236,136,-2974,236,-376,-2974,236,-376,-3038,236,-160,-3046,236,64,-3046,236,-160,-3046,236,-160,-3486,236,64,-3486,236,-376,-2974,536,-376,-3038,536,-296,-3038,599,-276.5714416503906,-3028.857177734375,607,-160,-2974,607,-268,-2974,607,-311.20001220703125,-2974,586,-296,-3038,599,-304,-3054,593,-287,-3067,606,-168,-3158,607,-160,-2974,607,-276.5714416503906,-3028.857177734375,607,80,-3470,606,88,-3486,606,136,-34`
-+`86,606,136,-2974,607,80,-3166,606,-160,-2974,607,-168,-3158,607,-168,-3166,604,64,-3166,606,80,-3166,606,136,-2974,607,-160,-3486,327,41.599998474121094,-3486,327,64,-3486,606,64,-3166,606,-168,-3166,604,-160.57142639160156,-3463.142822265625,341,60,-3474,334,88,-3062,236,88,-3486,236,136,-3486,236,136,-3062,236,88,-3206,556,88,-3229.333251953125,549,88,-3462.666748046875,341,88,-3486,327,136,-3486,327,136,-3462.666748046875,341,136,-3229.333251953125,549,136,-3206,556],"vertslength":89,"tris":[`
-+`3,0,1,1,2,3,9,10,11,12,7,8,8,9,11,8,11,12,7,12,13,12,4,13,5,4,13,5,6,13,7,6,13,16,17,18,16,18,19,20,21,14,20,14,15,15,16,19,15,19,20,22,23,24,22,24,25,26,27,22,22,25,26,28,29,30,28,30,31,35,32,33,33,34,35,36,37,38,39,40,41,41,36,38,38,39,41,45,42,43,43,44,45,47,48,49,52,46,47,52,47,49,51,52,49,49,50,51,53,54,55,58,53,55,57,58,55,55,56,57,59,60,61,63,59,61,61,62,63,64,65,66,67,68,69,64,66,67,64,67,69,75,70,71,73,74,75,72,73,76,73,75,76,75,71,76,72,71,76,80,77,78,78,79,80,88,81,82,83,84,85,83,85,8`
-+`6,87,88,82,87,82,83,83,86,87],"trislength":61,"triTopoly":[0,0,1,1,1,1,1,1,1,1,1,2,2,2,2,2,2,3,3,3,3,4,4,5,5,6,6,6,6,7,7,8,8,8,8,8,9,9,9,9,10,10,10,11,11,11,11,12,12,12,12,12,12,13,13,14,14,14,14,14,14],"baseVert":[0,4,14,22,28,32,36,42,46,53,59,64,70,77,81],"vertsCount":[4,10,8,6,4,4,6,4,7,6,5,6,7,4,8],"baseTri":[0,2,11,17,21,23,25,29,31,36,40,43,47,53,55],"triCount":[2,9,6,4,2,2,4,2,5,4,3,4,6,2,6]},"links":{"poly":[],"cost":[],"type":[],"pos":[],"length":0}}],["3_2",{"tileId":"3_2","tx":3,"ty"`
-+`:2,"mesh":{"verts":[136,-3062,236,136,-3486,236,560,-3486,236,560,-3062,236,240,-3198,563,136,-3206,556,136,-3486,320,632,-3062,253,240,-3062,558,240,-3198,563,240,-3198,563,136,-3486,320,632,-3486,253,632,-3062,253,640,-2974,606,552,-2974,606,544,-3054,606,640,-3486,606,200,-3046,606,136,-3038,607,136,-3486,606,544,-3054,606,200,-3046,606,136,-3486,606,640,-3486,606,136,-2974,897,136,-3486,897,648,-3486,897,648,-2974,897,136,-2974,236,136,-3038,236,560,-3038,236,560,-2974,236,136,-2974,607,136,`
-+`-3038,607,200,-3046,606,648,-3038,241,648,-2974,241],"vertslength":38,"polys":[0,3,4,6,7,9,10,13,14,17,18,20,21,24,25,28,29,32,33,37],"polyslength":10,"regions":[3,4,4,4,2,2,2,1,6,5],"neighbors":[[[0],[0],[0],[0]],[[0],[0],[1,3]],[[0],[0],[1,3]],[[1,1],[0],[0],[1,2]],[[0],[0],[1,6],[0]],[[1,9],[0],[1,6]],[[0],[1,5],[0],[1,4]],[[0],[0],[0],[0]],[[0],[0],[0],[0]],[[0],[1,5],[0],[0],[0]]]},"detail":{"verts":[136,-3062,236,136,-3486,236,560,-3486,236,560,-3062,236,240,-3198,552,219.1999969482422,-31`
-+`99.60009765625,558,136,-3206,556,136,-3229.333251953125,549,136,-3462.666748046875,341,136,-3486,327,176,-3375.230712890625,417,200,-3308.769287109375,480,208,-3286.615478515625,493,232,-3220.15380859375,556,220,-3210,563,632,-3062,253,608.941162109375,-3062,260,447.5294189453125,-3062,393,240,-3062,552,240,-3198,552,610.2222290039062,-3069.5556640625,260,240,-3198,552,232,-3220.15380859375,556,208,-3286.615478515625,493,200,-3308.769287109375,480,176,-3375.230712890625,417,136,-3486,327,513.904`
-+`78515625,-3486,327,537.5238037109375,-3486,317,608.3809814453125,-3486,260,632,-3486,253,632,-3062,253,610.2222290039062,-3069.5556640625,260,604,-3090,266,484,-3450,355,640,-2974,606,552,-2974,606,544,-3054,606,640,-3486,606,200,-3046,606,136,-3038,607,136,-3486,606,544,-3054,606,200,-3046,606,136,-3486,606,640,-3486,606,136,-2974,897,136,-3486,897,648,-3486,897,648,-2974,897,136,-2974,236,136,-3038,236,560,-3038,236,560,-2974,236,136,-2974,607,136,-3038,607,178.6666717529297,-3043.333251953125`
-+`,602,200,-3046,583,223.57894897460938,-3045.578857421875,571,624.4210815429688,-3038.421142578125,247,648,-3038,241,648,-2974,241,624.727294921875,-2974,247,182.5454559326172,-2974,602,172,-3034,607],"vertslength":65,"tris":[3,0,1,1,2,3,10,11,12,8,9,10,10,12,7,7,8,10,12,13,14,13,4,14,5,4,14,12,7,14,5,6,14,7,6,14,20,15,16,20,16,17,17,18,19,17,19,20,31,30,33,29,30,33,31,32,33,32,21,33,22,23,34,28,27,34,23,24,34,27,26,34,24,25,34,26,25,34,28,29,34,33,29,34,22,21,34,33,21,34,35,36,37,35,37,38,39,40,`
-+`41,42,43,44,42,44,45,49,46,47,47,48,49,53,50,51,51,52,53,60,61,62,59,60,62,58,59,62,58,62,63,58,63,64,63,54,64,55,54,64,55,56,64,58,57,64,56,57,64],"trislength":49,"triTopoly":[0,0,1,1,1,1,1,1,1,1,1,1,2,2,2,2,3,3,3,3,3,3,3,3,3,3,3,3,3,3,4,4,5,6,6,7,7,8,8,9,9,9,9,9,9,9,9,9,9],"baseVert":[0,4,15,21,35,39,42,46,50,54],"vertsCount":[4,11,6,14,4,3,4,4,4,11],"baseTri":[0,2,12,16,30,32,33,35,37,39],"triCount":[2,10,4,14,2,1,2,2,2,10]},"links":{"poly":[0,3],"cost":[1071.403076171875],"type":[2],"pos":[5`
-+`60,-3486,236,560,-3486,262.7257995605469],"length":1}}],["4_2",{"tileId":"4_2","tx":4,"ty":2,"mesh":{"verts":[648,-2974,897,648,-3486,897,952,-3486,897,952,-2974,897,648,-2974,236,648,-3046,236,656,-3486,236,1160,-3486,354,1160,-2974,354],"vertslength":9,"polys":[0,3,4,8],"polyslength":2,"regions":[2,1],"neighbors":[[[0],[0],[0],[0]],[[0],[0],[0],[0],[0]]]},"detail":{"verts":[648,-2974,897,648,-3486,897,952,-3486,897,952,-2974,897,648,-2974,236,648,-3046,236,656,-3486,236,770.5454711914062,-3486`
-+`,236,1160,-3486,354,1160,-2974,354,1136.727294921875,-2974,352,787.6363525390625,-2974,241,780,-3138,238],"vertslength":13,"tris":[3,0,1,1,2,3,11,4,5,8,9,12,8,7,12,5,6,12,7,6,12,9,10,12,5,11,12,10,11,12],"trislength":10,"triTopoly":[0,0,1,1,1,1,1,1,1,1],"baseVert":[0,4],"vertsCount":[4,9],"baseTri":[0,2],"triCount":[2,8]},"links":{"poly":[],"cost":[],"type":[],"pos":[],"length":0}}],["5_2",{"tileId":"5_2","tx":5,"ty":2,"mesh":{"verts":[1160,-2974,357,1160,-3486,357,1320,-3486,404,1320,-2974,404]`
-+`,"vertslength":4,"polys":[0,3],"polyslength":1,"regions":[1],"neighbors":[[[0],[0],[0],[0]]]},"detail":{"verts":[1160,-2974,359,1160,-3486,359,1320,-3486,404,1320,-2974,404],"vertslength":4,"tris":[3,0,1,1,2,3],"trislength":2,"triTopoly":[0,0],"baseVert":[0],"vertsCount":[4],"baseTri":[0],"triCount":[2]},"links":{"poly":[],"cost":[],"type":[],"pos":[],"length":0}}],["6_2",{"tileId":"6_2","tx":6,"ty":2,"mesh":{"verts":[],"vertslength":0,"polys":[],"polyslength":0,"regions":[],"neighbors":[]},"det`
-+`ail":{"verts":[],"vertslength":0,"tris":[],"trislength":0,"triTopoly":[],"baseVert":[],"vertsCount":[],"baseTri":[],"triCount":[]},"links":{"poly":[],"cost":[],"type":[],"pos":[],"length":0}}],["0_3",{"tileId":"0_3","tx":0,"ty":3,"mesh":{"verts":[-1392,-2462,406,-1392,-2974,406,-888,-2974,250,-888,-2462,250,-1048,-2462,897,-1048,-2974,897,-888,-2974,897,-888,-2462,897],"vertslength":8,"polys":[0,3,4,7],"polyslength":2,"regions":[1,2],"neighbors":[[[0],[0],[0],[0]],[[0],[0],[0],[0]]]},"detail":{"`
-+`verts":[-1392,-2462,403,-1392,-2974,403,-888,-2974,250,-888,-2462,250,-1048,-2462,897,-1048,-2974,897,-888,-2974,897,-888,-2462,897],"vertslength":8,"tris":[3,0,1,1,2,3,7,4,5,5,6,7],"trislength":4,"triTopoly":[0,0,1,1],"baseVert":[0,4],"vertsCount":[4,4],"baseTri":[0,2],"triCount":[2,2]},"links":{"poly":[],"cost":[],"type":[],"pos":[],"length":0}}],["1_3",{"tileId":"1_3","tx":1,"ty":3,"mesh":{"verts":[-744,-2830,238,-752,-2462,236,-888,-2462,247,-888,-2974,247,-376,-2974,523,-376,-2830,523,-744,`
-+`-2830,238,-888,-2974,247,-888,-2462,897,-888,-2974,897,-376,-2974,897,-376,-2462,897,-736,-2974,606,-640,-2974,606,-632,-2814,606,-736,-2462,606,-632,-2814,606,-376,-2814,606,-376,-2462,606,-736,-2462,606,-728,-2806,250,-376,-2806,523,-376,-2462,391,-728,-2462,250,-656,-2830,236,-656,-2974,236,-376,-2974,236,-376,-2830,236,-656,-2806,236,-376,-2806,236,-376,-2462,236,-656,-2462,236],"vertslength":32,"polys":[0,3,4,7,8,11,12,15,16,19,20,23,24,27,28,31],"polyslength":8,"regions":[5,5,1,2,2,3,6,4],`
-+`"neighbors":[[[0],[0],[0],[1,1]],[[0],[0],[1,0],[0]],[[0],[0],[0],[0]],[[0],[0],[1,4],[0]],[[0],[0],[0],[1,3]],[[0],[0],[0],[0]],[[0],[0],[0],[0]],[[0],[0],[0],[0]]]},"detail":{"verts":[-744,-2830,244,-744.5,-2807,236,-752,-2462,236,-842.6666870117188,-2462,236,-888,-2462,245,-888,-2974,245,-856,-2942,236,-760,-2846,236,-852,-2914,236,-852,-2554,236,-376,-2974,523,-376,-2830,523,-399,-2830,517,-721,-2830,257,-744,-2830,244,-760,-2846,236,-856,-2942,236,-888,-2974,245,-841.4545288085938,-2974,236`
-+`,-748.3636474609375,-2974,238,-399.2727355957031,-2974,517,-756,-2866,236,-888,-2462,897,-888,-2974,897,-376,-2974,897,-376,-2462,897,-736,-2974,606,-640,-2974,606,-632,-2814,606,-736,-2462,606,-632,-2814,606,-376,-2814,606,-376,-2462,606,-736,-2462,606,-728,-2806,257,-704.5333251953125,-2806,269,-399.4666748046875,-2806,517,-376,-2806,523,-376,-2622.533447265625,523,-376,-2484.933349609375,398,-376,-2462,391,-540.2666625976562,-2462,391,-563.7333374023438,-2462,383,-704.5333251953125,-2462,269,`
-+`-728,-2462,257,-404,-2626,510,-656,-2830,236,-656,-2974,236,-376,-2974,236,-376,-2830,236,-656,-2806,236,-376,-2806,236,-376,-2462,236,-656,-2462,236],"vertslength":54,"tris":[7,0,1,5,6,8,1,7,8,6,7,8,8,1,9,4,3,9,1,2,9,3,2,9,4,5,9,8,5,9,16,17,18,16,18,19,10,11,12,20,10,12,20,12,13,13,19,20,16,19,21,19,13,21,16,15,21,13,14,21,15,14,21,25,22,23,23,24,25,26,27,28,26,28,29,30,31,32,30,32,33,39,40,41,44,34,35,43,44,35,43,35,45,35,36,45,38,37,45,36,37,45,43,42,45,38,39,45,42,41,45,39,41,45,49,46,47,47,`
-+`48,49,53,50,51,51,52,53],"trislength":42,"triTopoly":[0,0,0,0,0,0,0,0,0,0,1,1,1,1,1,1,1,1,1,1,1,2,2,3,3,4,4,5,5,5,5,5,5,5,5,5,5,5,6,6,7,7],"baseVert":[0,10,22,26,30,34,46,50],"vertsCount":[10,12,4,4,4,12,4,4],"baseTri":[0,10,21,23,25,27,38,40],"triCount":[10,11,2,2,2,11,2,2]},"links":{"poly":[5,7],"cost":[2753.01513671875],"type":[2],"pos":[-656,-2462,278.8409118652344,-656,-2462,236],"length":1}}],["2_3",{"tileId":"2_3","tx":2,"ty":3,"mesh":{"verts":[136,-2974,236,136,-2830,236,64,-2822,236,-16`
-+`0,-2822,236,-376,-2830,236,-376,-2974,236,64,-2822,236,64,-2462,236,-160,-2462,236,-160,-2822,236,-296,-2822,606,-376,-2830,529,-376,-2974,529,-144,-2974,607,-144,-2822,607,16,-2806,897,16,-2974,897,136,-2974,897,136,-2462,897,-376,-2974,897,-144,-2974,897,-136,-2798,897,-376,-2462,897,-136,-2798,897,16,-2806,897,136,-2462,897,-376,-2462,897,-144,-2822,607,-128,-2798,607,-168,-2702,606,-296,-2822,606,-376,-2814,606,-296,-2822,606,-168,-2702,606,-176,-2462,606,-376,-2462,606,-376,-2462,236,-376,-`
-+`2806,236,-184,-2806,236,-184,-2462,236,-376,-2806,529,-336,-2806,555,-328,-2662,561,-376,-2462,391,-328,-2662,561,-184,-2662,558,-184,-2462,391,-376,-2462,391,8,-2798,607,16,-2814,607,72,-2702,606,-168,-2702,606,-128,-2798,607,8,-2798,607,72,-2702,606,64,-2462,391,-160,-2462,391,-128,-2814,671,-128,-2966,671,0,-2966,671,0,-2814,671,-128,-2814,962,-128,-2966,962,0,-2966,962,0,-2814,962,-120,-2822,607,-120,-2958,607,-8,-2958,607,-8,-2822,607,16,-2814,607,16,-2974,607,136,-2974,607,72,-2702,606,136`
-+`,-2462,606,80,-2462,606,72,-2702,606,136,-2974,607,88,-2806,236,136,-2806,236,136,-2462,236,88,-2462,236,88,-2662,558,136,-2662,558,136,-2462,391,88,-2462,391],"vertslength":85,"polys":[0,5,6,9,10,14,15,18,19,22,23,26,27,30,31,35,36,39,40,43,44,47,48,50,51,56,57,60,61,64,65,68,69,72,73,76,77,80,81,84],"polyslength":20,"regions":[2,2,7,1,1,1,4,4,5,6,6,3,3,9,10,11,8,8,12,13],"neighbors":[[[0],[0],[1,1],[0],[0],[0]],[[0],[0],[0],[1,0]],[[0],[0],[0],[0],[1,6]],[[0],[0],[0],[1,5]],[[0],[0],[1,5],[0]]`
-+`,[[0],[1,3],[0],[1,4]],[[0],[1,12],[1,7],[1,2]],[[0],[1,6],[0],[0],[0]],[[0],[0],[0],[0]],[[0],[0],[1,10],[0]],[[0],[0],[0],[1,9]],[[0],[1,16],[1,12]],[[1,6],[0],[1,11],[0],[0],[0]],[[0],[0],[0],[0]],[[0],[0],[0],[0]],[[0],[0],[0],[0]],[[0],[0],[1,17],[1,11]],[[0],[0],[1,16],[0]],[[0],[0],[0],[0]],[[0],[0],[0],[0]]]},"detail":{"verts":[136,-2974,236,136,-2830,236,64,-2822,236,-160,-2822,236,-376,-2830,236,-376,-2974,236,64,-2822,236,64,-2462,236,-160,-2462,236,-160,-2822,236,-296,-2822,606,-316,`
-+`-2824,580,-376,-2830,536,-376,-2974,536,-352.79998779296875,-2974,548,-283.20001220703125,-2974,605,-144,-2974,607,-144,-2822,607,-268,-2842,607,-292,-2866,599,16,-2806,897,16,-2974,897,136,-2974,897,136,-2462,897,-376,-2974,897,-144,-2974,897,-136,-2798,897,-376,-2462,897,-136,-2798,897,16,-2806,897,136,-2462,897,-376,-2462,897,-144,-2822,607,-128,-2798,607,-168,-2702,606,-296,-2822,606,-376,-2814,606,-296,-2822,606,-168,-2702,606,-176,-2462,606,-376,-2462,606,-376,-2462,236,-376,-2806,236,-184`
-+`,-2806,236,-184,-2462,236,-376,-2806,536,-336,-2806,555,-329.1428527832031,-2682.571533203125,558,-328,-2662,551,-354.6666564941406,-2550.888916015625,461,-370.6666564941406,-2484.22216796875,398,-376,-2462,391,-376,-2484.933349609375,398,-376,-2622.533447265625,523,-376,-2645.466552734375,536,-340,-2650,544,-328,-2662,551,-184,-2662,551,-184,-2550.888916015625,461,-184,-2484.22216796875,398,-184,-2462,391,-376,-2462,391,-370.6666564941406,-2484.22216796875,398,-354.6666564941406,-2550.888916015`
-+`625,461,-364,-2482,398,8,-2798,607,16,-2814,607,53.33333206176758,-2739.333251953125,607,72,-2702,599,-168,-2702,585,-160,-2721.199951171875,606,-128,-2798,607,8,-2798,607,72,-2702,599,69.81818389892578,-2636.54541015625,530,66.90908813476562,-2549.272705078125,454,64.7272720336914,-2483.818115234375,398,64,-2462,391,-160,-2462,391,-160.72727966308594,-2483.818115234375,398,-165.09091186523438,-2614.727294921875,516,-132,-2714,599,60,-2474,391,60,-2690,578,-108,-2738,607,-128,-2814,671,-128,-296`
-+`6,671,0,-2966,671,0,-2814,671,-128,-2814,962,-128,-2966,962,0,-2966,962,0,-2814,962,-120,-2822,607,-120,-2958,607,-8,-2958,607,-8,-2822,607,16,-2814,607,16,-2974,607,136,-2974,607,72,-2702,606,136,-2462,606,80,-2462,606,72,-2702,606,136,-2974,607,88,-2806,236,136,-2806,236,136,-2462,236,88,-2462,236,88,-2662,551,136,-2662,551,136,-2550.888916015625,461,136,-2484.22216796875,398,136,-2462,391,88,-2462,391,88,-2484.22216796875,398,88,-2550.888916015625,461],"vertslength":117,"tris":[0,1,2,3,4,5,0,`
-+`2,3,0,3,5,9,6,7,7,8,9,12,13,14,15,16,18,17,16,18,17,10,18,11,12,19,14,12,19,14,15,19,18,15,19,18,10,19,11,10,19,20,21,22,20,22,23,24,25,26,24,26,27,28,29,30,28,30,31,32,33,34,32,34,35,36,37,38,38,39,40,36,38,40,44,41,42,42,43,44,50,51,52,49,50,52,49,52,53,45,46,47,45,47,54,54,47,55,47,48,55,49,48,55,49,53,55,54,53,55,56,57,58,63,56,58,63,58,59,63,59,64,59,60,64,61,60,64,61,62,64,63,62,64,65,66,67,65,67,68,75,79,80,80,75,81,75,74,81,80,69,81,70,69,81,79,75,82,75,76,82,77,76,82,77,78,82,79,78,82,7`
-+`3,74,83,74,81,83,73,72,83,71,72,84,72,83,84,81,83,84,81,70,84,71,70,84,88,85,86,86,87,88,92,89,90,90,91,92,96,93,94,94,95,96,97,98,99,97,99,100,101,102,103,101,103,104,108,105,106,106,107,108,112,113,114,112,114,115,111,112,115,111,115,116,116,109,110,110,111,116],"trislength":85,"triTopoly":[0,0,0,0,1,1,2,2,2,2,2,2,2,2,2,2,3,3,4,4,5,5,6,6,7,7,7,8,8,9,9,9,9,9,9,9,9,9,9,10,10,10,10,10,10,10,10,11,11,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12,12,13,13,14,14,15,15,16,16,17,17,18,18,19,19,19`
-+`,19,19,19],"baseVert":[0,6,10,20,24,28,32,36,41,45,56,65,69,85,89,93,97,101,105,109],"vertsCount":[6,4,10,4,4,4,4,5,4,11,9,4,16,4,4,4,4,4,4,8],"baseTri":[0,4,6,16,18,20,22,24,27,29,39,47,49,67,69,71,73,75,77,79],"triCount":[4,2,10,2,2,2,2,3,2,10,8,2,18,2,2,2,2,2,2,6]},"links":{"poly":[2,13,3,14],"cost":[6528,6721.5],"type":[2,2],"pos":[-144,-2966,607,-128,-2966,671,16,-2966,897,0,-2966,962],"length":2}}],["3_3",{"tileId":"3_3","tx":3,"ty":3,"mesh":{"verts":[136,-2830,236,136,-2974,236,560,-2974,`
-+`236,560,-2830,236,200,-2822,606,136,-2814,607,136,-2974,607,648,-2974,241,648,-2830,241,200,-2822,606,136,-2974,607,136,-2462,897,136,-2974,897,648,-2974,897,648,-2462,897,544,-2814,606,552,-2974,606,640,-2974,606,640,-2462,606,136,-2462,606,136,-2814,607,200,-2822,606,544,-2814,606,640,-2462,606,136,-2462,236,136,-2806,236,560,-2806,236,560,-2462,236,136,-2462,391,136,-2662,558,240,-2670,564,240,-2670,564,240,-2806,558,632,-2806,253,632,-2462,253,136,-2462,391,240,-2670,564,632,-2806,253],"vert`
-+`slength":38,"polys":[0,3,4,6,7,10,11,14,15,18,19,23,24,27,28,30,31,33,34,37],"polyslength":10,"regions":[5,6,6,1,2,2,3,4,4,4],"neighbors":[[[0],[0],[0],[0]],[[1,5],[0],[1,2]],[[0],[0],[1,1],[0]],[[0],[0],[0],[0]],[[0],[0],[0],[1,5]],[[0],[1,1],[0],[1,4],[0]],[[0],[0],[0],[0]],[[0],[0],[1,9]],[[0],[0],[1,9]],[[0],[1,7],[1,8],[0]]]},"detail":{"verts":[136,-2830,236,136,-2974,236,560,-2974,236,560,-2830,236,200,-2822,596,136,-2814,607,136,-2974,607,172.57142639160156,-2887.142822265625,607,648,-297`
-+`4,241,648,-2830,241,624.4210815429688,-2829.578857421875,247,223.57894897460938,-2822.421142578125,571,200,-2822,596,172.57142639160156,-2887.142822265625,607,136,-2974,607,182.5454559326172,-2974,602,624.727294921875,-2974,247,136,-2462,897,136,-2974,897,648,-2974,897,648,-2462,897,544,-2814,606,552,-2974,606,640,-2974,606,640,-2462,606,136,-2462,606,136,-2814,607,200,-2822,606,544,-2814,606,640,-2462,606,136,-2462,236,136,-2806,236,560,-2806,236,560,-2462,236,136,-2462,391,136,-2484.2221679687`
-+`5,398,136,-2550.888916015625,461,136,-2662,551,156.8000030517578,-2663.60009765625,558,240,-2670,552,229.60000610351562,-2649.199951171875,544,146.39999389648438,-2482.800048828125,398,240,-2670,552,240,-2806,552,263.058837890625,-2806,539,608.941162109375,-2806,260,632,-2806,253,610.2222290039062,-2798.4443359375,260,632,-2462,253,608.3809814453125,-2462,260,443.047607421875,-2462,391,136,-2462,391,146.39999389648438,-2482.800048828125,398,229.60000610351562,-2649.199951171875,544,240,-2670,552`
-+`,610.2222290039062,-2798.4443359375,260,632,-2806,253,268,-2482,398],"vertslength":58,"tris":[3,0,1,1,2,3,7,4,5,5,6,7,11,12,13,13,14,15,16,8,9,16,9,10,11,13,15,16,10,11,11,15,16,20,17,18,18,19,20,21,22,23,21,23,24,25,26,27,25,27,28,25,28,29,33,30,31,31,32,33,41,34,35,41,35,36,38,39,40,37,38,40,36,37,40,36,40,41,45,46,47,42,43,44,44,45,47,42,44,47,55,56,48,55,48,49,55,49,50,50,54,55,50,51,57,51,52,57,53,52,57,53,54,57,50,54,57],"trislength":39,"triTopoly":[0,0,1,1,2,2,2,2,2,2,2,3,3,4,4,5,5,5,6,6,`
-+`7,7,7,7,7,7,8,8,8,8,9,9,9,9,9,9,9,9,9],"baseVert":[0,4,8,17,21,25,30,34,42,48],"vertsCount":[4,4,9,4,4,5,4,8,6,10],"baseTri":[0,2,4,11,13,15,18,20,26,30],"triCount":[2,2,7,2,2,3,2,6,4,9]},"links":{"poly":[6,9],"cost":[2057.082275390625],"type":[2],"pos":[560,-2462,236,560,-2462,273.0322570800781],"length":1}}],["4_3",{"tileId":"4_3","tx":4,"ty":3,"mesh":{"verts":[656,-2462,236,648,-2822,236,648,-2974,236,1160,-2974,354,1160,-2462,354,648,-2462,897,648,-2974,897,952,-2974,897,952,-2462,897],"vert`
-+`slength":9,"polys":[0,4,5,8],"polyslength":2,"regions":[1,2],"neighbors":[[[0],[0],[0],[0],[0]],[[0],[0],[0],[0]]]},"detail":{"verts":[656,-2462,236,648,-2822,236,648,-2974,236,787.6363525390625,-2974,241,1136.727294921875,-2974,352,1160,-2974,354,1160,-2462,354,770.5454711914062,-2462,236,780,-2842,238,648,-2462,897,648,-2974,897,952,-2974,897,952,-2462,897],"vertslength":13,"tris":[7,0,1,4,5,6,4,6,8,4,3,8,1,2,8,3,2,8,6,7,8,1,7,8,12,9,10,10,11,12],"trislength":10,"triTopoly":[0,0,0,0,0,0,0,0,1,`
-+`1],"baseVert":[0,9],"vertsCount":[9,4],"baseTri":[0,8],"triCount":[8,2]},"links":{"poly":[],"cost":[],"type":[],"pos":[],"length":0}}],["5_3",{"tileId":"5_3","tx":5,"ty":3,"mesh":{"verts":[1160,-2462,357,1160,-2974,357,1320,-2974,404,1320,-2462,404],"vertslength":4,"polys":[0,3],"polyslength":1,"regions":[1],"neighbors":[[[0],[0],[0],[0]]]},"detail":{"verts":[1160,-2462,359,1160,-2974,359,1320,-2974,404,1320,-2462,404],"vertslength":4,"tris":[3,0,1,1,2,3],"trislength":2,"triTopoly":[0,0],"baseVe`
-+`rt":[0],"vertsCount":[4],"baseTri":[0],"triCount":[2]},"links":{"poly":[],"cost":[],"type":[],"pos":[],"length":0}}],["6_3",{"tileId":"6_3","tx":6,"ty":3,"mesh":{"verts":[],"vertslength":0,"polys":[],"polyslength":0,"regions":[],"neighbors":[]},"detail":{"verts":[],"vertslength":0,"tris":[],"trislength":0,"triTopoly":[],"baseVert":[],"vertsCount":[],"baseTri":[],"triCount":[]},"links":{"poly":[],"cost":[],"type":[],"pos":[],"length":0}}],["0_4",{"tileId":"0_4","tx":0,"ty":4,"mesh":{"verts":[-888`
-+`,-1950,269,-912,-1950,269,-920,-1990,262,-888,-2462,250,-1056,-1990,302,-1064,-1950,305,-1392,-1950,406,-888,-2462,250,-920,-1990,262,-1056,-1990,302,-1056,-1990,302,-1392,-1950,406,-1392,-2462,406,-888,-2462,250,-1048,-1950,897,-1048,-2462,897,-888,-2462,897,-888,-1950,897,-936,-1966,267,-936,-1950,269,-1040,-1950,295,-1040,-1966,295],"vertslength":22,"polys":[0,3,4,6,7,9,10,13,14,17,18,21],"polyslength":6,"regions":[1,1,1,1,2,3],"neighbors":[[[0],[0],[1,2],[0]],[[0],[0],[1,3]],[[1,0],[0],[1,3]`
-+`],[[1,1],[0],[0],[1,2]],[[0],[0],[0],[0]],[[0],[0],[0],[0]]]},"detail":{"verts":[-888,-1950,269,-912,-1950,269,-920,-1990,263,-912,-2108,252,-888,-2462,250,-888,-2043.0909423828125,250,-1056,-1990,297,-1064,-1950,305,-1392,-1950,403,-888,-2462,250,-912,-2108,252,-920,-1990,263,-942.6666870117188,-1990,262,-1056,-1990,297,-1056,-1990,297,-1392,-1950,403,-1392,-2462,403,-888,-2462,250,-1048,-1950,897,-1048,-2462,897,-888,-2462,897,-888,-1950,897,-936,-1966,269,-936,-1950,269,-1040,-1950,292,-1040,`
-+`-1966,292],"vertslength":26,"tris":[0,1,2,5,0,2,5,2,3,3,4,5,6,7,8,10,11,12,10,12,13,9,10,13,14,15,16,14,16,17,21,18,19,19,20,21,25,22,23,23,24,25],"trislength":14,"triTopoly":[0,0,0,0,1,2,2,2,3,3,4,4,5,5],"baseVert":[0,6,9,14,18,22],"vertsCount":[6,3,5,4,4,4],"baseTri":[0,4,5,8,10,12],"triCount":[4,1,3,2,2,2]},"links":{"poly":[],"cost":[],"type":[],"pos":[],"length":0}}],["1_4",{"tileId":"1_4","tx":1,"ty":4,"mesh":{"verts":[-888,-2462,247,-752,-2462,236,-744,-2278,236,-888,-1950,269,-744,-2278,2`
-+`36,-376,-2278,236,-376,-1950,269,-888,-1950,269,-888,-1950,897,-888,-2462,897,-376,-2462,897,-376,-1950,897,-736,-2294,606,-736,-2462,606,-376,-2462,606,-376,-2294,606,-728,-2302,250,-728,-2462,250,-376,-2462,384,-376,-2302,253,-656,-2366,236,-656,-2462,236,-376,-2462,236,-376,-2366,236],"vertslength":24,"polys":[0,3,4,7,8,11,12,15,16,19,20,23],"polyslength":6,"regions":[2,2,1,3,4,5],"neighbors":[[[0],[0],[1,1],[0]],[[0],[0],[0],[1,0]],[[0],[0],[0],[0]],[[0],[0],[0],[0]],[[0],[0],[0],[0]],[[0],[`
-+`0],[0],[0]]]},"detail":{"verts":[-888,-2462,245,-842.6666870117188,-2462,236,-752,-2462,236,-744,-2278,236,-820.7999877929688,-2103.066650390625,236,-888,-1950,269,-888,-2066.363525390625,245,-852,-2402,236,-744,-2278,236,-376,-2278,236,-376,-2114,236,-376,-1950,269,-888,-1950,269,-820.7999877929688,-2103.066650390625,236,-888,-1950,897,-888,-2462,897,-376,-2462,897,-376,-1950,897,-736,-2294,606,-736,-2462,606,-376,-2462,606,-376,-2294,606,-728,-2302,253,-728,-2462,257,-704.5333251953125,-2462,2`
-+`69,-563.7333374023438,-2462,377,-376,-2462,377,-376,-2439.142822265625,363,-376,-2324.857177734375,259,-376,-2302,253,-572,-2330,266,-668,-2354,287,-692,-2330,266,-656,-2366,236,-656,-2462,236,-376,-2462,236,-376,-2366,236],"vertslength":37,"tris":[4,5,6,6,0,7,0,1,7,3,2,7,1,2,7,3,4,7,6,4,7,8,9,10,13,8,10,13,10,11,11,12,13,17,14,15,15,16,17,21,18,19,19,20,21,25,26,27,29,22,30,29,28,30,25,27,30,28,27,30,24,23,31,24,25,31,30,25,31,30,22,32,31,30,32,22,23,32,31,23,32,36,33,34,34,35,36],"trislength":`
-+`29,"triTopoly":[0,0,0,0,0,0,0,1,1,1,1,2,2,3,3,4,4,4,4,4,4,4,4,4,4,4,4,5,5],"baseVert":[0,8,14,18,22,33],"vertsCount":[8,6,4,4,11,4],"baseTri":[0,7,11,13,15,27],"triCount":[7,4,2,2,12,2]},"links":{"poly":[4,5],"cost":[2572.0693359375],"type":[2],"pos":[-656,-2462,277.4090881347656,-656,-2462,236],"length":1}}],["2_4",{"tileId":"2_4","tx":2,"ty":4,"mesh":{"verts":[-376,-2366,236,-376,-2462,236,-184,-2462,236,-184,-2366,236,-376,-2302,253,-376,-2462,384,-184,-2462,384,-184,-2302,253,-376,-2462,606,`
-+`-176,-2462,606,-168,-2390,606,-376,-2294,606,-168,-2390,606,64,-2390,606,72,-2294,606,-376,-2294,606,-376,-1950,897,-376,-2462,897,136,-2462,897,136,-1950,897,-160,-2462,384,64,-2462,384,64,-2286,239,-168,-2278,236,-168,-2278,236,64,-2286,239,136,-2278,236,-376,-1950,269,-376,-2278,236,-168,-2278,236,136,-2278,236,136,-1950,269,-160,-2366,236,-160,-2462,236,64,-2462,236,64,-2366,236,80,-2398,606,80,-2462,606,136,-2462,606,72,-2294,606,64,-2390,606,80,-2398,606,136,-2294,606,72,-2294,606,80,-2398`
-+`,606,136,-2462,606,88,-2366,236,88,-2462,236,136,-2462,236,136,-2366,236,88,-2302,253,88,-2462,384,136,-2462,384,136,-2302,253],"vertslength":54,"polys":[0,3,4,7,8,11,12,15,16,19,20,23,24,26,27,31,32,35,36,38,39,41,42,45,46,49,50,53],"polyslength":14,"regions":[6,4,3,3,1,2,2,2,7,5,5,5,8,9],"neighbors":[[[0],[0],[0],[0]],[[0],[0],[0],[0]],[[0],[0],[1,3],[0]],[[0],[1,10],[0],[1,2]],[[0],[0],[0],[0]],[[0],[0],[1,6],[0]],[[1,5],[0],[1,7]],[[0],[0],[1,6],[0],[0]],[[0],[0],[0],[0]],[[0],[0],[1,11]],[[`
-+`1,3],[0],[1,11]],[[0],[1,10],[1,9],[0]],[[0],[0],[0],[0]],[[0],[0],[0],[0]]]},"detail":{"verts":[-376,-2366,236,-376,-2462,236,-184,-2462,236,-184,-2366,236,-376,-2302,253,-376,-2324.857177734375,259,-376,-2439.142822265625,363,-376,-2462,377,-184,-2462,377,-184,-2439.142822265625,363,-184,-2324.857177734375,259,-184,-2302,253,-376,-2462,606,-176,-2462,606,-168,-2390,606,-376,-2294,606,-168,-2390,606,64,-2390,606,72,-2294,606,-376,-2294,606,-376,-1950,897,-376,-2462,897,136,-2462,897,136,-1950,8`
-+`97,-160,-2462,377,64,-2462,377,64,-2308,246,64,-2286,236,-168,-2278,236,-167,-2301,239,-161,-2439,363,-168,-2278,236,64,-2286,236,136,-2278,236,-376,-1950,269,-376,-2114,236,-376,-2278,236,-168,-2278,236,136,-2278,236,136,-2114,236,136,-1950,269,-124,-2098,237,-160,-2366,236,-160,-2462,236,64,-2462,236,64,-2366,236,80,-2398,606,80,-2462,606,136,-2462,606,72,-2294,606,64,-2390,606,80,-2398,606,136,-2294,606,72,-2294,606,80,-2398,606,136,-2462,606,88,-2366,236,88,-2462,236,136,-2462,236,136,-2366,`
-+`236,88,-2302,253,88,-2324.857177734375,259,88,-2439.142822265625,363,88,-2462,377,136,-2462,377,136,-2439.142822265625,363,136,-2324.857177734375,259,136,-2302,253],"vertslength":68,"tris":[3,0,1,1,2,3,11,4,5,6,7,8,6,8,9,10,11,5,10,5,6,6,9,10,12,13,14,12,14,15,16,17,18,16,18,19,23,20,21,21,22,23,30,24,25,27,28,29,26,27,29,26,29,30,25,26,30,31,32,33,35,36,37,40,34,41,34,35,41,37,35,41,40,39,41,37,38,41,39,38,41,45,42,43,43,44,45,46,47,48,49,50,51,52,53,54,52,54,55,59,56,57,57,58,59,67,60,61,62,63`
-+`,64,62,64,65,66,67,61,66,61,62,62,65,66],"trislength":41,"triTopoly":[0,0,1,1,1,1,1,1,2,2,3,3,4,4,5,5,5,5,5,6,7,7,7,7,7,7,7,8,8,9,10,11,11,12,12,13,13,13,13,13,13],"baseVert":[0,4,12,16,20,24,31,34,42,46,49,52,56,60],"vertsCount":[4,8,4,4,4,7,3,8,4,3,3,4,4,8],"baseTri":[0,2,8,10,12,14,19,20,27,29,30,31,33,35],"triCount":[2,6,2,2,2,5,1,7,2,1,1,2,2,6]},"links":{"poly":[],"cost":[],"type":[],"pos":[],"length":0}}],["3_4",{"tileId":"3_4","tx":3,"ty":4,"mesh":{"verts":[136,-2366,236,136,-2462,236,560`
-+`,-2462,236,560,-2366,236,136,-2302,253,136,-2462,384,632,-2462,253,632,-2302,253,136,-2294,606,136,-2462,606,640,-2462,606,640,-2294,606,136,-1950,897,136,-2462,897,648,-2462,897,648,-1950,897,136,-1950,269,136,-2278,236,648,-2278,236,648,-1950,269],"vertslength":20,"polys":[0,3,4,7,8,11,12,15,16,19],"polyslength":5,"regions":[5,4,3,1,2],"neighbors":[[[0],[0],[0],[0]],[[0],[0],[0],[0]],[[0],[0],[0],[0]],[[0],[0],[0],[0]],[[0],[0],[0],[0]]]},"detail":{"verts":[136,-2366,236,136,-2462,236,560,-246`
-+`2,236,560,-2366,236,136,-2302,253,136,-2324.857177734375,259,136,-2439.142822265625,363,136,-2462,377,466.6666564941406,-2462,374,608.3809814453125,-2462,260,632,-2462,253,632,-2302,253,220,-2330,266,580,-2330,266,460,-2450,370,136,-2294,606,136,-2462,606,640,-2462,606,640,-2294,606,136,-1950,897,136,-2462,897,648,-2462,897,648,-1950,897,136,-1950,269,136,-2114,236,136,-2278,236,648,-2278,236,648,-2114,236,648,-1950,269],"vertslength":29,"tris":[3,0,1,1,2,3,11,4,12,4,5,12,5,6,12,6,7,12,11,12,13,`
-+`11,10,13,9,10,13,13,12,14,12,7,14,8,7,14,8,9,14,13,9,14,18,15,16,16,17,18,22,19,20,20,21,22,28,23,24,24,25,26,24,26,27,24,27,28],"trislength":22,"triTopoly":[0,0,1,1,1,1,1,1,1,1,1,1,1,1,2,2,3,3,4,4,4,4],"baseVert":[0,4,15,19,23],"vertsCount":[4,11,4,4,6],"baseTri":[0,2,14,16,18],"triCount":[2,12,2,2,4]},"links":{"poly":[0,1],"cost":[1945.7423095703125],"type":[2],"pos":[560,-2462,236,560,-2462,272.0161437988281],"length":1}}],["4_4",{"tileId":"4_4","tx":4,"ty":4,"mesh":{"verts":[648,-1950,897,64`
-+`8,-2462,897,952,-2462,897,952,-1950,897,648,-1950,269,648,-2286,236,656,-2462,236,1160,-2462,354,1160,-1950,354],"vertslength":9,"polys":[0,3,4,8],"polyslength":2,"regions":[2,1],"neighbors":[[[0],[0],[0],[0]],[[0],[0],[0],[0],[0]]]},"detail":{"verts":[648,-1950,897,648,-2462,897,952,-2462,897,952,-1950,897,648,-1950,269,648,-2106.800048828125,236,648,-2286,236,656,-2462,236,770.5454711914062,-2462,236,1160,-2462,354,1160,-1950,354,880.727294921875,-1950,271,780,-2186,238],"vertslength":13,"tris`
-+`":[3,0,1,1,2,3,6,7,8,11,4,5,9,10,12,9,8,12,5,6,12,8,6,12,10,11,12,5,11,12],"trislength":10,"triTopoly":[0,0,1,1,1,1,1,1,1,1],"baseVert":[0,4],"vertsCount":[4,9],"baseTri":[0,2],"triCount":[2,8]},"links":{"poly":[],"cost":[],"type":[],"pos":[],"length":0}}],["5_4",{"tileId":"5_4","tx":5,"ty":4,"mesh":{"verts":[1160,-1950,357,1160,-2462,357,1320,-2462,404,1320,-1950,404],"vertslength":4,"polys":[0,3],"polyslength":1,"regions":[1],"neighbors":[[[0],[0],[0],[0]]]},"detail":{"verts":[1160,-1950,359,1`
-+`160,-2462,359,1320,-2462,404,1320,-1950,404],"vertslength":4,"tris":[3,0,1,1,2,3],"trislength":2,"triTopoly":[0,0],"baseVert":[0],"vertsCount":[4],"baseTri":[0],"triCount":[2]},"links":{"poly":[],"cost":[],"type":[],"pos":[],"length":0}}],["6_4",{"tileId":"6_4","tx":6,"ty":4,"mesh":{"verts":[],"vertslength":0,"polys":[],"polyslength":0,"regions":[],"neighbors":[]},"detail":{"verts":[],"vertslength":0,"tris":[],"trislength":0,"triTopoly":[],"baseVert":[],"vertsCount":[],"baseTri":[],"triCount":[]`
-+`},"links":{"poly":[],"cost":[],"type":[],"pos":[],"length":0}}],["0_5",{"tileId":"0_5","tx":0,"ty":5,"mesh":{"verts":[-920,-1838,298,-912,-1950,271,-888,-1950,271,-888,-1438,391,-1392,-1950,406,-1064,-1950,305,-1056,-1838,302,-1056,-1838,302,-920,-1838,298,-888,-1438,391,-1392,-1438,406,-1392,-1950,406,-1056,-1838,302,-888,-1438,391,-1048,-1854,897,-1048,-1950,897,-888,-1950,897,-888,-1854,897,-1040,-1862,295,-1040,-1950,295,-936,-1950,271,-936,-1862,290],"vertslength":22,"polys":[0,3,4,6,7,9,10`
-+`,13,14,17,18,21],"polyslength":6,"regions":[1,1,1,1,2,3],"neighbors":[[[0],[0],[0],[1,2]],[[0],[0],[1,3]],[[0],[1,0],[1,3]],[[0],[1,1],[1,2],[0]],[[0],[0],[0],[0]],[[0],[0],[0],[0]]]},"detail":{"verts":[-920,-1838,300,-912,-1950,273,-888,-1950,273,-888,-1438,391,-1392,-1950,403,-1064,-1950,305,-1056,-1838,300,-1056,-1838,300,-920,-1838,300,-888,-1438,391,-1392,-1438,403,-1392,-1950,403,-1056,-1838,300,-888,-1438,391,-1346.1817626953125,-1438,391,-1048,-1854,897,-1048,-1950,897,-888,-1950,897,-88`
-+`8,-1854,897,-1040,-1862,292,-1040,-1950,292,-977.5999755859375,-1950,275,-936,-1950,273,-936,-1862,290],"vertslength":24,"tris":[0,1,2,0,2,3,4,5,6,7,8,9,14,10,11,14,11,12,12,13,14,18,15,16,16,17,18,21,22,23,19,20,21,19,21,23],"trislength":12,"triTopoly":[0,0,1,2,3,3,3,4,4,5,5,5],"baseVert":[0,4,7,10,15,19],"vertsCount":[4,3,3,5,4,5],"baseTri":[0,2,3,4,7,9],"triCount":[2,1,1,3,2,3]},"links":{"poly":[],"cost":[],"type":[],"pos":[],"length":0}}],["1_5",{"tileId":"1_5","tx":1,"ty":5,"mesh":{"verts":`
-+`[-888,-1438,391,-888,-1950,271,-376,-1950,271,-376,-1438,391,-888,-1854,897,-888,-1950,897,-376,-1950,897,-376,-1854,897],"vertslength":8,"polys":[0,3,4,7],"polyslength":2,"regions":[1,2],"neighbors":[[[0],[0],[0],[0]],[[0],[0],[0],[0]]]},"detail":{"verts":[-888,-1438,391,-888,-1950,273,-376,-1950,273,-376,-1438,391,-888,-1854,897,-888,-1950,897,-376,-1950,897,-376,-1854,897],"vertslength":8,"tris":[3,0,1,1,2,3,7,4,5,5,6,7],"trislength":4,"triTopoly":[0,0,1,1],"baseVert":[0,4],"vertsCount":[4,4]`
-+`,"baseTri":[0,2],"triCount":[2,2]},"links":{"poly":[],"cost":[],"type":[],"pos":[],"length":0}}],["2_5",{"tileId":"2_5","tx":2,"ty":5,"mesh":{"verts":[-376,-1438,391,-376,-1950,271,136,-1950,271,136,-1438,391,-376,-1854,897,-376,-1950,897,136,-1950,897,136,-1854,897],"vertslength":8,"polys":[0,3,4,7],"polyslength":2,"regions":[1,2],"neighbors":[[[0],[0],[0],[0]],[[0],[0],[0],[0]]]},"detail":{"verts":[-376,-1438,391,-376,-1950,273,136,-1950,273,136,-1438,391,-376,-1854,897,-376,-1950,897,136,-195`
-+`0,897,136,-1854,897],"vertslength":8,"tris":[3,0,1,1,2,3,7,4,5,5,6,7],"trislength":4,"triTopoly":[0,0,1,1],"baseVert":[0,4],"vertsCount":[4,4],"baseTri":[0,2],"triCount":[2,2]},"links":{"poly":[],"cost":[],"type":[],"pos":[],"length":0}}],["3_5",{"tileId":"3_5","tx":3,"ty":5,"mesh":{"verts":[136,-1438,391,136,-1950,271,648,-1950,271,648,-1438,391,136,-1854,897,136,-1950,897,648,-1950,897,648,-1854,897],"vertslength":8,"polys":[0,3,4,7],"polyslength":2,"regions":[1,2],"neighbors":[[[0],[0],[0],[0`
-+`]],[[0],[0],[0],[0]]]},"detail":{"verts":[136,-1438,391,136,-1950,273,648,-1950,273,648,-1438,391,136,-1854,897,136,-1950,897,648,-1950,897,648,-1854,897],"vertslength":8,"tris":[3,0,1,1,2,3,7,4,5,5,6,7],"trislength":4,"triTopoly":[0,0,1,1],"baseVert":[0,4],"vertsCount":[4,4],"baseTri":[0,2],"triCount":[2,2]},"links":{"poly":[],"cost":[],"type":[],"pos":[],"length":0}}],["4_5",{"tileId":"4_5","tx":4,"ty":5,"mesh":{"verts":[648,-1438,391,648,-1950,271,1160,-1950,354,1160,-1438,391,648,-1854,897,6`
-+`48,-1950,897,952,-1950,897,952,-1854,897],"vertslength":8,"polys":[0,3,4,7],"polyslength":2,"regions":[1,2],"neighbors":[[[0],[0],[0],[0]],[[0],[0],[0],[0]]]},"detail":{"verts":[648,-1438,391,648,-1950,273,880.727294921875,-1950,273,1160,-1950,354,1160,-1600.9090576171875,355,1160,-1438,391,648,-1854,897,648,-1950,897,952,-1950,897,952,-1854,897],"vertslength":10,"tris":[2,3,4,2,4,5,0,1,2,0,2,5,9,6,7,7,8,9],"trislength":6,"triTopoly":[0,0,0,0,1,1],"baseVert":[0,6],"vertsCount":[6,4],"baseTri":[0`
-+`,4],"triCount":[4,2]},"links":{"poly":[],"cost":[],"type":[],"pos":[],"length":0}}],["5_5",{"tileId":"5_5","tx":5,"ty":5,"mesh":{"verts":[1160,-1438,391,1160,-1950,357,1320,-1950,404,1320,-1438,404],"vertslength":4,"polys":[0,3],"polyslength":1,"regions":[1],"neighbors":[[[0],[0],[0],[0]]]},"detail":{"verts":[1160,-1438,391,1160,-1600.9090576171875,359,1160,-1950,359,1320,-1950,404,1320,-1438,404,1251.4285888671875,-1438,391],"vertslength":6,"tris":[5,0,1,4,5,1,1,2,3,1,3,4],"trislength":4,"triTo`
-+`poly":[0,0,0,0],"baseVert":[0],"vertsCount":[6],"baseTri":[0],"triCount":[4]},"links":{"poly":[],"cost":[],"type":[],"pos":[],"length":0}}],["6_5",{"tileId":"6_5","tx":6,"ty":5,"mesh":{"verts":[],"vertslength":0,"polys":[],"polyslength":0,"regions":[],"neighbors":[]},"detail":{"verts":[],"vertslength":0,"tris":[],"trislength":0,"triTopoly":[],"baseVert":[],"vertsCount":[],"baseTri":[],"triCount":[]},"links":{"poly":[],"cost":[],"type":[],"pos":[],"length":0}}],["0_6",{"tileId":"0_6","tx":0,"ty":`
-+`6,"mesh":{"verts":[-1392,-1382,406,-1392,-1438,406,-888,-1438,393,-888,-1382,405],"vertslength":4,"polys":[0,3],"polyslength":1,"regions":[1],"neighbors":[[[0],[0],[0],[0]]]},"detail":{"verts":[-1392,-1382,405,-1392,-1438,403,-1346.1817626953125,-1438,395,-888,-1438,395,-888,-1382,405],"vertslength":5,"tris":[0,1,2,2,3,4,0,2,4],"trislength":3,"triTopoly":[0,0,0],"baseVert":[0],"vertsCount":[5],"baseTri":[0],"triCount":[3]},"links":{"poly":[],"cost":[],"type":[],"pos":[],"length":0}}],["1_6",{"ti`
-+`leId":"1_6","tx":1,"ty":6,"mesh":{"verts":[-888,-1382,405,-888,-1438,393,-376,-1438,393,-376,-1382,405],"vertslength":4,"polys":[0,3],"polyslength":1,"regions":[1],"neighbors":[[[0],[0],[0],[0]]]},"detail":{"verts":[-888,-1382,405,-888,-1438,395,-376,-1438,395,-376,-1382,405],"vertslength":4,"tris":[3,0,1,1,2,3],"trislength":2,"triTopoly":[0,0],"baseVert":[0],"vertsCount":[4],"baseTri":[0],"triCount":[2]},"links":{"poly":[],"cost":[],"type":[],"pos":[],"length":0}}],["2_6",{"tileId":"2_6","tx":2`
-+`,"ty":6,"mesh":{"verts":[-376,-1382,405,-376,-1438,393,136,-1438,393,136,-1382,405],"vertslength":4,"polys":[0,3],"polyslength":1,"regions":[1],"neighbors":[[[0],[0],[0],[0]]]},"detail":{"verts":[-376,-1382,405,-376,-1438,395,136,-1438,395,136,-1382,405],"vertslength":4,"tris":[3,0,1,1,2,3],"trislength":2,"triTopoly":[0,0],"baseVert":[0],"vertsCount":[4],"baseTri":[0],"triCount":[2]},"links":{"poly":[],"cost":[],"type":[],"pos":[],"length":0}}],["3_6",{"tileId":"3_6","tx":3,"ty":6,"mesh":{"verts`
-+`":[136,-1382,405,136,-1438,393,648,-1438,393,648,-1382,405],"vertslength":4,"polys":[0,3],"polyslength":1,"regions":[1],"neighbors":[[[0],[0],[0],[0]]]},"detail":{"verts":[136,-1382,405,136,-1438,395,648,-1438,395,648,-1382,405],"vertslength":4,"tris":[3,0,1,1,2,3],"trislength":2,"triTopoly":[0,0],"baseVert":[0],"vertsCount":[4],"baseTri":[0],"triCount":[2]},"links":{"poly":[],"cost":[],"type":[],"pos":[],"length":0}}],["4_6",{"tileId":"4_6","tx":4,"ty":6,"mesh":{"verts":[648,-1382,405,648,-1438`
-+`,393,1160,-1438,393,1160,-1382,405],"vertslength":4,"polys":[0,3],"polyslength":1,"regions":[1],"neighbors":[[[0],[0],[0],[0]]]},"detail":{"verts":[648,-1382,405,648,-1438,395,1160,-1438,395,1160,-1382,405],"vertslength":4,"tris":[3,0,1,1,2,3],"trislength":2,"triTopoly":[0,0],"baseVert":[0],"vertsCount":[4],"baseTri":[0],"triCount":[2]},"links":{"poly":[],"cost":[],"type":[],"pos":[],"length":0}}],["5_6",{"tileId":"5_6","tx":5,"ty":6,"mesh":{"verts":[1160,-1382,405,1160,-1438,393,1320,-1438,404,`
-+`1320,-1382,405],"vertslength":4,"polys":[0,3],"polyslength":1,"regions":[1],"neighbors":[[[0],[0],[0],[0]]]},"detail":{"verts":[1160,-1382,405,1160,-1438,395,1274.2857666015625,-1438,395,1320,-1438,404,1320,-1382,405],"vertslength":5,"tris":[2,3,4,0,1,2,0,2,4],"trislength":3,"triTopoly":[0,0,0],"baseVert":[0],"vertsCount":[5],"baseTri":[0],"triCount":[3]},"links":{"poly":[],"cost":[],"type":[],"pos":[],"length":0}}],["6_6",{"tileId":"6_6","tx":6,"ty":6,"mesh":{"verts":[],"vertslength":0,"polys":`
-+`[],"polyslength":0,"regions":[],"neighbors":[]},"detail":{"verts":[],"vertslength":0,"tris":[],"trislength":0,"triTopoly":[],"baseVert":[],"vertsCount":[],"baseTri":[],"triCount":[]},"links":{"poly":[],"cost":[],"type":[],"pos":[],"length":0}}]]}`;
+        this.Data = ``+`{"tiles":[["0_0",{"tileId":"0_0","tx":0,"ty":0,"mesh":{"verts":[-2332,-310,1480,-2470,-310,1480,-2470,-748,1480,-2122,-400,1105,-2122,-310,1105,-2458,-310,1105,-2110,-412,1105,-2122,-400,1105,-2458,-310,1105,-2428,-724,1105,-2404,-736,1105,-1990,-790,1105,-1990,-790,1105,-2404,-736,1105,-2416,-754,1105,-1990,-790,1105,-1990,-412,1105,-2110,-412,1105,-2458,-790,1105,-1990,-790,1105,-2416,-754,1105,-2458,-790,1105,-2416,-754,1105,-2440,-742,1105,-2458,-310,1105,-2458,-790,1105,-2440,-742,1105,-245`
++`8,-310,1105,-2440,-742,1105,-2428,-724,1105,-1990,-694,1480,-1990,-484,1480,-2422,-778,1480,-1990,-796,1480,-1990,-760,1480,-2188,-760,1480,-2338,-790,1480,-2098,-388,1284,-1990,-388,1284,-1990,-310,1284,-2098,-310,1284,-2092,-382,1105,-1990,-382,1105,-1990,-310,1105,-2092,-310,1105,-1990,-730,1480,-1990,-724,1480,-2002,-724,1480],"vertslength":48,"polys":[0,2,3,5,6,11,12,14,15,17,18,20,21,23,24,26,27,29,30,32,33,36,37,40,41,44,45,47],"polyslength":14,"regions":[3,1,1,1,1,1,1,1,1,2,7,4,5,8],"nei`
++`ghbors":[[[0],[0],[0]],[[0],[0],[1,2]],[[0],[1,1],[1,8],[0],[1,3],[1,4]],[[1,2],[0],[1,5]],[[0],[0],[1,2]],[[0],[1,3],[1,6]],[[1,5],[0],[1,7]],[[0],[1,6],[1,8]],[[1,7],[0],[1,2]],[[0],[0],[0]],[[0],[0],[0],[0]],[[0],[0],[0],[0]],[[0],[0],[0],[0]],[[0],[0],[0]]]},"detail":{"verts":[-2332,-310,1480,-2470,-310,1480,-2470,-748,1480,-2122,-400,1105,-2122,-310,1105,-2458,-310,1105,-2110,-412,1105,-2122,-400,1105,-2458,-310,1105,-2428,-724,1105,-2404,-736,1105,-1990,-790,1105,-1990,-790,1105,-2404,-736`
++`,1105,-2416,-754,1105,-1990,-790,1105,-1990,-412,1105,-2110,-412,1105,-2458,-790,1105,-1990,-790,1105,-2416,-754,1105,-2458,-790,1105,-2416,-754,1105,-2440,-742,1105,-2458,-310,1105,-2458,-790,1105,-2440,-742,1105,-2458,-310,1105,-2440,-742,1105,-2428,-724,1105,-1990,-694,1480,-1990,-484,1480,-2422,-778,1480,-1990,-796,1480,-1990,-760,1480,-2188,-760,1480,-2338,-790,1480,-2098,-388,1284,-1990,-388,1284,-1990,-310,1284,-2098,-310,1284,-2092,-382,1105,-1990,-382,1105,-1990,-310,1105,-2092,-310,110`
++`5,-1990,-730,1480,-1990,-724,1480,-2002,-724,1480],"vertslength":48,"tris":[0,1,2,3,4,5,6,7,8,8,9,10,6,8,10,6,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32,33,34,35,33,35,36,40,37,38,38,39,40,44,41,42,42,43,44,45,46,47],"trislength":20,"triTopoly":[0,1,2,2,2,2,3,4,5,6,7,8,9,10,10,11,11,12,12,13],"baseVert":[0,3,6,12,15,18,21,24,27,30,33,37,41,45],"vertsCount":[3,3,6,3,3,3,3,3,3,3,4,4,4,3],"baseTri":[0,1,2,6,7,8,9,10,11,12,13,15,17,19],"triCount":[1,1,4,1,1,1,1,1,1,1,2,2,2,`
++`1]},"links":{"poly":[9,13,9,10,10,13],"cost":[1106.3375244140625,1093.04833984375,1350],"type":[1,1,1],"pos":[-2007.18359375,-697.3412475585938,1480,-2002,-724,1480,-2193.15234375,-733.5018310546875,1480,-2188,-760,1480,-1990,-760,1480,-1990,-730,1480],"length":3}}],["1_0",{"tileId":"1_0","tx":1,"ty":0,"mesh":{"verts":[-1990,-760,1480,-1990,-796,1480,-1480,-796,1480,-1480,-760,1480,-1510,-334,1105,-1510,-310,1105,-1696,-310,1105,-1480,-346,1105,-1510,-334,1105,-1696,-310,1105,-1696,-400,1105,-14`
++`80,-346,1105,-1696,-400,1105,-1708,-412,1105,-1480,-790,1105,-1708,-412,1105,-1990,-412,1105,-1990,-790,1105,-1480,-790,1105,-1942,-712,1480,-1990,-724,1480,-1990,-730,1480,-1480,-730,1480,-1480,-712,1480,-1480,-592,1480,-1480,-310,1480,-1738,-310,1480,-1990,-484,1480,-1990,-694,1480,-1990,-310,1284,-1990,-388,1284,-1720,-388,1284,-1720,-310,1284,-1990,-310,1105,-1990,-382,1105,-1726,-382,1105,-1726,-310,1105,-1480,-682,1480,-1480,-622,1480,-1762,-676,1480,-1480,-322,1284,-1480,-310,1284,-1486,-`
++`310,1284],"vertslength":43,"polys":[0,3,4,6,7,10,11,14,15,18,19,23,24,28,29,32,33,36,37,39,40,42],"polyslength":11,"regions":[6,1,1,1,1,7,2,3,4,5,8],"neighbors":[[[0],[0],[0],[0]],[[0],[0],[1,2]],[[0],[1,1],[0],[1,3]],[[1,2],[0],[1,4],[0]],[[0],[0],[0],[1,3]],[[0],[0],[0],[0],[0]],[[0],[0],[0],[0],[0]],[[0],[0],[0],[0]],[[0],[0],[0],[0]],[[0],[0],[0]],[[0],[0],[0]]]},"detail":{"verts":[-1990,-760,1480,-1990,-796,1480,-1480,-796,1480,-1480,-760,1480,-1510,-334,1105,-1510,-310,1105,-1696,-310,1105`
++`,-1480,-346,1105,-1510,-334,1105,-1696,-310,1105,-1696,-400,1105,-1480,-346,1105,-1696,-400,1105,-1708,-412,1105,-1480,-790,1105,-1708,-412,1105,-1990,-412,1105,-1990,-790,1105,-1480,-790,1105,-1942,-712,1480,-1990,-724,1480,-1990,-730,1480,-1480,-730,1480,-1480,-712,1480,-1480,-592,1480,-1480,-310,1480,-1738,-310,1480,-1990,-484,1480,-1990,-694,1480,-1990,-310,1284,-1990,-388,1284,-1720,-388,1284,-1720,-310,1284,-1990,-310,1105,-1990,-382,1105,-1726,-382,1105,-1726,-310,1105,-1480,-682,1480,-14`
++`80,-622,1480,-1762,-676,1480,-1480,-322,1284,-1480,-310,1284,-1486,-310,1284],"vertslength":43,"tris":[3,0,1,1,2,3,4,5,6,7,8,9,7,9,10,11,12,13,11,13,14,15,16,17,15,17,18,19,20,21,22,23,19,19,21,22,24,25,26,26,27,28,24,26,28,32,29,30,30,31,32,36,33,34,34,35,36,37,38,39,40,41,42],"trislength":21,"triTopoly":[0,0,1,2,2,3,3,4,4,5,5,5,6,6,6,7,7,8,8,9,10],"baseVert":[0,4,7,11,15,19,24,29,33,37,40],"vertsCount":[4,3,4,4,4,5,5,4,4,3,3],"baseTri":[0,2,3,5,7,9,12,15,17,19,20],"triCount":[2,1,2,2,2,3,3,2,2`
++`,1,1]},"links":{"poly":[0,5,5,6,5,9,6,9],"cost":[1350,1098.6922607421875,1350,1098.6922607421875],"type":[1,1,1,1],"pos":[-1990,-760,1480,-1990,-730,1480,-1942,-712,1480,-1947.3077392578125,-685.4615478515625,1480,-1480,-712,1480,-1480,-682,1480,-1767.3077392578125,-649.4615478515625,1480,-1762,-676,1480],"length":4}}],["2_0",{"tileId":"2_0","tx":2,"ty":0,"mesh":{"verts":[-1480,-760,1480,-1480,-796,1480,-970,-796,1480,-970,-760,1480,-1480,-346,1105,-1480,-790,1105,-970,-790,1105,-970,-346,1105,-`
++`1480,-712,1480,-1480,-730,1480,-970,-730,1480,-970,-712,1480,-1480,-622,1480,-1480,-682,1480,-970,-682,1480,-970,-520,1480,-970,-490,1480,-970,-310,1480,-1480,-310,1480,-1480,-592,1480,-1480,-310,1284,-1480,-322,1284,-970,-322,1284,-970,-310,1284,-1480,-316,1105,-1306,-310,1105,-1480,-310,1105,-970,-316,1105,-970,-310,1105,-1270,-310,1105],"vertslength":30,"polys":[0,3,4,7,8,11,12,15,16,19,20,23,24,26,27,29],"polyslength":8,"regions":[4,1,5,3,2,6,7,8],"neighbors":[[[0],[0],[0],[0]],[[0],[0],[0],`
++`[0]],[[0],[0],[0],[0]],[[0],[0],[0],[0]],[[0],[0],[0],[0]],[[0],[0],[0],[0]],[[0],[0],[0]],[[0],[0],[0]]]},"detail":{"verts":[-1480,-760,1480,-1480,-796,1480,-970,-796,1480,-970,-760,1480,-1480,-346,1105,-1480,-790,1105,-970,-790,1105,-970,-346,1105,-1480,-712,1480,-1480,-730,1480,-970,-730,1480,-970,-712,1480,-1480,-622,1480,-1480,-682,1480,-970,-682,1480,-970,-520,1480,-970,-490,1480,-970,-310,1480,-1480,-310,1480,-1480,-592,1480,-1480,-310,1284,-1480,-322,1284,-970,-322,1284,-970,-310,1284,-1`
++`480,-316,1105,-1306,-310,1105,-1480,-310,1105,-970,-316,1105,-970,-310,1105,-1270,-310,1105],"vertslength":30,"tris":[3,0,1,1,2,3,7,4,5,5,6,7,11,8,9,9,10,11,12,13,14,12,14,15,16,17,18,16,18,19,23,20,21,21,22,23,24,25,26,27,28,29],"trislength":14,"triTopoly":[0,0,1,1,2,2,3,3,4,4,5,5,6,7],"baseVert":[0,4,8,12,16,20,24,27],"vertsCount":[4,4,4,4,4,4,3,3],"baseTri":[0,2,4,6,8,10,12,13],"triCount":[2,2,2,2,2,2,1,1]},"links":{"poly":[0,2,2,3,3,4],"cost":[1350,1350,1298.076904296875],"type":[1,1,1],"pos`
++`":[-1480,-760,1480,-1480,-730,1480,-1480,-712,1480,-1480,-682,1480,-1474.230712890625,-620.8461303710938,1480,-1480,-592,1480],"length":3}}],["3_0",{"tileId":"3_0","tx":3,"ty":0,"mesh":{"verts":[-970,-760,1480,-970,-796,1480,-460,-796,1480,-460,-760,1480,-784,-616,1105,-802,-604,1105,-970,-598,1105,-970,-790,1105,-766,-790,1105,-970,-712,1480,-970,-730,1480,-460,-730,1480,-460,-712,1480,-970,-520,1480,-970,-682,1480,-460,-682,1480,-460,-520,1480,-766,-604,1105,-688,-466,1105,-706,-454,1105,-790,`
++`-586,1105,-802,-604,1105,-790,-586,1105,-706,-454,1105,-904,-346,1105,-970,-346,1105,-970,-598,1105,-706,-310,1105,-892,-310,1105,-904,-346,1105,-706,-454,1105,-706,-442,1480,-706,-310,1480,-970,-310,1480,-970,-490,1480,-970,-310,1284,-970,-322,1284,-916,-322,1284,-916,-310,1284,-970,-316,1105,-922,-310,1105,-970,-310,1105,-796,-490,1480,-574,-484,1480,-760,-478,1480,-766,-604,1105,-784,-616,1105,-766,-790,1105,-688,-466,1105,-766,-604,1105,-766,-790,1105,-460,-790,1105,-460,-466,1105,-460,-478,`
++`1480,-460,-460,1480,-538,-460,1480],"vertslength":56,"polys":[0,3,4,8,9,12,13,16,17,20,21,26,27,30,31,34,35,38,39,41,42,44,45,47,48,52,53,55],"polyslength":14,"regions":[6,3,7,4,2,2,2,5,8,9,10,1,1,11],"neighbors":[[[0],[0],[0],[0]],[[0],[1,5],[0],[0],[1,11]],[[0],[0],[0],[0]],[[0],[0],[0],[0]],[[1,12],[0],[1,5],[0]],[[0],[1,4],[1,6],[0],[0],[1,1]],[[0],[0],[1,5],[0]],[[0],[0],[0],[0]],[[0],[0],[0],[0]],[[0],[0],[0]],[[0],[0],[0]],[[0],[1,1],[1,12]],[[1,4],[1,11],[0],[0],[0]],[[0],[0],[0]]]},"det`
++`ail":{"verts":[-970,-760,1480,-970,-796,1480,-460,-796,1480,-460,-760,1480,-784,-616,1105,-802,-604,1105,-970,-598,1105,-970,-790,1105,-766,-790,1105,-970,-712,1480,-970,-730,1480,-460,-730,1480,-460,-712,1480,-970,-520,1480,-970,-682,1480,-460,-682,1480,-460,-520,1480,-766,-604,1105,-688,-466,1105,-706,-454,1105,-790,-586,1105,-802,-604,1105,-790,-586,1105,-706,-454,1105,-904,-346,1105,-970,-346,1105,-970,-598,1105,-706,-310,1105,-892,-310,1105,-904,-346,1105,-706,-454,1105,-706,-442,1480,-706,`
++`-310,1480,-970,-310,1480,-970,-490,1480,-970,-310,1284,-970,-322,1284,-916,-322,1284,-916,-310,1284,-970,-316,1105,-922,-310,1105,-970,-310,1105,-796,-490,1480,-574,-484,1480,-760,-478,1480,-766,-604,1105,-784,-616,1105,-766,-790,1105,-688,-466,1105,-766,-604,1105,-766,-790,1105,-460,-790,1105,-460,-466,1105,-460,-478,1480,-460,-460,1480,-538,-460,1480],"vertslength":56,"tris":[3,0,1,1,2,3,4,5,6,4,6,7,4,7,8,12,9,10,10,11,12,16,13,14,14,15,16,18,19,20,17,18,20,21,22,23,23,24,25,26,21,23,23,25,26,`
++`27,28,29,27,29,30,31,32,33,31,33,34,38,35,36,36,37,38,39,40,41,42,43,44,45,46,47,48,49,50,51,52,48,48,50,51,53,54,55],"trislength":28,"triTopoly":[0,0,1,1,1,2,2,3,3,4,4,5,5,5,5,6,6,7,7,8,8,9,10,11,12,12,12,13],"baseVert":[0,4,9,13,17,21,27,31,35,39,42,45,48,53],"vertsCount":[4,5,4,4,4,6,4,4,4,3,3,3,5,3],"baseTri":[0,2,5,7,9,11,15,17,19,21,22,23,24,27],"triCount":[2,3,2,2,2,4,2,2,2,1,1,1,3,1]},"links":{"poly":[0,2,2,3,3,7,3,10,7,10],"cost":[1350,1350,1350,1350,995.3280029296875],"type":[1,1,1,1,1`
++`],"pos":[-970,-760,1480,-970,-730,1480,-970,-712,1480,-970,-682,1480,-970,-520,1480,-970,-490,1480,-796,-520,1480,-796,-490,1480,-764.6079711914062,-452.656005859375,1480,-760,-478,1480],"length":5}}],["4_0",{"tileId":"4_0","tx":4,"ty":0,"mesh":{"verts":[-460,-760,1480,-460,-796,1480,50,-796,1480,50,-760,1480,50,-310,1105,-196,-310,1105,-196,-454,1105,50,-310,1105,-196,-454,1105,-208,-466,1105,-460,-790,1105,50,-790,1105,-208,-466,1105,-460,-466,1105,-460,-790,1105,-460,-712,1480,-460,-730,1480,`
++`50,-730,1480,50,-712,1480,-376,-520,1480,-460,-520,1480,-460,-682,1480,50,-682,1480,50,-598,1480,50,-460,1480,-460,-460,1480,-460,-478,1480,50,-568,1480],"vertslength":28,"polys":[0,3,4,6,7,11,12,14,15,18,19,23,24,27],"polyslength":7,"regions":[4,1,1,1,5,2,3],"neighbors":[[[0],[0],[0],[0]],[[0],[0],[1,2]],[[1,1],[0],[1,3],[0],[0]],[[0],[0],[1,2]],[[0],[0],[0],[0]],[[0],[0],[0],[0],[0]],[[0],[0],[0],[0]]]},"detail":{"verts":[-460,-760,1480,-460,-796,1480,50,-796,1480,50,-760,1480,50,-310,1105,-19`
++`6,-310,1105,-196,-454,1105,50,-310,1105,-196,-454,1105,-208,-466,1105,-460,-790,1105,50,-790,1105,-208,-466,1105,-460,-466,1105,-460,-790,1105,-460,-712,1480,-460,-730,1480,50,-730,1480,50,-712,1480,-376,-520,1480,-460,-520,1480,-460,-682,1480,50,-682,1480,50,-598,1480,50,-460,1480,-460,-460,1480,-460,-478,1480,50,-568,1480],"vertslength":28,"tris":[3,0,1,1,2,3,4,5,6,7,8,9,11,7,9,9,10,11,12,13,14,18,15,16,16,17,18,19,20,21,22,23,19,19,21,22,24,25,26,24,26,27],"trislength":14,"triTopoly":[0,0,1,2`
++`,2,2,3,4,4,5,5,5,6,6],"baseVert":[0,4,7,12,15,19,24],"vertsCount":[4,3,5,3,4,5,4],"baseTri":[0,2,3,6,7,9,12],"triCount":[2,1,3,1,2,3,2]},"links":{"poly":[0,4,4,5,5,6],"cost":[1350,1350,1074.382568359375],"type":[1,1,1],"pos":[-460,-760,1480,-460,-730,1480,-460,-712,1480,-460,-682,1480,-376,-520,1480,-371.3489990234375,-493.644287109375,1480],"length":3}}],["5_0",{"tileId":"5_0","tx":5,"ty":0,"mesh":{"verts":[50,-760,1480,50,-796,1480,560,-796,1480,560,-760,1480,260,-790,1105,260,-742,1105,242,-7`
++`18,1105,50,-790,1105,50,-790,1105,242,-718,1105,260,-706,1105,416,-454,1105,416,-310,1105,50,-310,1105,260,-706,1105,272,-724,1105,434,-466,1105,416,-454,1105,50,-712,1480,50,-730,1480,560,-730,1480,560,-712,1480,50,-682,1480,476,-682,1480,50,-604,1480,560,-466,1480,50,-460,1480,50,-568,1480,560,-664,1480,272,-724,1105,260,-742,1105,260,-790,1105,272,-724,1105,260,-790,1105,560,-790,1105,560,-466,1105,434,-466,1105],"vertslength":37,"polys":[0,3,4,7,8,13,14,17,18,21,22,24,25,28,29,31,32,36],"pol`
++`yslength":9,"regions":[5,1,1,1,6,4,3,2,2],"neighbors":[[[0],[0],[0],[0]],[[1,7],[0],[1,2],[0]],[[1,1],[0],[1,3],[0],[0],[0]],[[0],[1,8],[0],[1,2]],[[0],[0],[0],[0]],[[0],[0],[0]],[[0],[0],[0],[0]],[[0],[1,1],[1,8]],[[1,7],[0],[0],[0],[1,3]]]},"detail":{"verts":[50,-760,1480,50,-796,1480,560,-796,1480,560,-760,1480,260,-790,1105,260,-742,1105,242,-718,1105,50,-790,1105,50,-790,1105,242,-718,1105,260,-706,1105,416,-454,1105,416,-310,1105,50,-310,1105,260,-706,1105,272,-724,1105,434,-466,1105,416,-`
++`454,1105,50,-712,1480,50,-730,1480,560,-730,1480,560,-712,1480,50,-682,1480,476,-682,1480,50,-604,1480,560,-466,1480,50,-460,1480,50,-568,1480,560,-664,1480,272,-724,1105,260,-742,1105,260,-790,1105,272,-724,1105,260,-790,1105,560,-790,1105,560,-466,1105,434,-466,1105],"vertslength":37,"tris":[3,0,1,1,2,3,4,5,6,4,6,7,8,9,10,10,11,12,13,8,10,10,12,13,16,17,14,14,15,16,21,18,19,19,20,21,22,23,24,25,26,27,25,27,28,29,30,31,32,33,34,34,35,36,32,34,36],"trislength":19,"triTopoly":[0,0,1,1,2,2,2,2,3,3`
++`,4,4,5,6,6,7,8,8,8],"baseVert":[0,4,8,14,18,22,25,29,32],"vertsCount":[4,4,6,4,4,3,4,3,5],"baseTri":[0,2,4,8,10,12,13,15,16],"triCount":[2,2,4,2,2,1,2,1,3]},"links":{"poly":[0,4,4,5],"cost":[1350,1350],"type":[1,1],"pos":[50,-760,1480,50,-730,1480,50,-712,1480,50,-682,1480],"length":2}}],["6_0",{"tileId":"6_0","tx":6,"ty":0,"mesh":{"verts":[1070,-796,1480,1070,-784,1480,938,-760,1480,560,-760,1480,560,-796,1480,1070,-310,1105,914,-310,1105,914,-454,1105,1070,-310,1105,914,-454,1105,902,-466,1105`
++`,1070,-790,1105,902,-466,1105,560,-466,1105,560,-790,1105,1070,-790,1105,674,-712,1480,560,-712,1480,560,-730,1480,740,-730,1480,1070,-310,1480,908,-310,1480,908,-454,1480,1070,-310,1480,908,-454,1480,896,-466,1480,1070,-754,1480,896,-466,1480,560,-466,1480,560,-664,1480,1070,-754,1480],"vertslength":31,"polys":[0,4,5,7,8,11,12,15,16,19,20,22,23,26,27,30],"polyslength":8,"regions":[3,1,1,1,4,2,2,2],"neighbors":[[[0],[0],[0],[0],[0]],[[0],[0],[1,2]],[[1,1],[0],[1,3],[0]],[[0],[0],[0],[1,2]],[[0],`
++`[0],[0],[0]],[[0],[0],[1,6]],[[1,5],[0],[1,7],[0]],[[0],[0],[0],[1,6]]]},"detail":{"verts":[1070,-796,1480,1070,-784,1480,938,-760,1480,560,-760,1480,560,-796,1480,1070,-310,1105,914,-310,1105,914,-454,1105,1070,-310,1105,914,-454,1105,902,-466,1105,1070,-790,1105,902,-466,1105,560,-466,1105,560,-790,1105,1070,-790,1105,674,-712,1480,560,-712,1480,560,-730,1480,740,-730,1480,1070,-310,1480,908,-310,1480,908,-454,1480,1070,-310,1480,908,-454,1480,896,-466,1480,1070,-754,1480,896,-466,1480,560,-46`
++`6,1480,560,-664,1480,1070,-754,1480],"vertslength":31,"tris":[0,1,2,2,3,4,0,2,4,5,6,7,8,9,10,8,10,11,12,13,14,12,14,15,16,17,18,16,18,19,20,21,22,23,24,25,23,25,26,27,28,29,27,29,30],"trislength":15,"triTopoly":[0,0,0,1,2,2,3,3,4,4,5,6,6,7,7],"baseVert":[0,5,8,12,16,20,23,27],"vertsCount":[5,3,4,4,4,3,4,4],"baseTri":[0,3,4,6,8,10,11,13],"triCount":[3,1,2,2,2,1,2,2]},"links":{"poly":[0,7,0,4,4,7],"cost":[1248.34228515625,1350,1130.91943359375],"type":[1,1,1],"pos":[938,-760,1480,943.013427734375,`
++`-731.590576171875,1480,560,-760,1480,560,-730,1480,674,-712,1480,678.7717895507812,-684.959716796875,1480],"length":3}}],["7_0",{"tileId":"7_0","tx":7,"ty":0,"mesh":{"verts":[1070,-796,1480,1100,-796,1480,1070,-790,1480,1070,-310,1105,1070,-790,1105,1238,-790,1105,1238,-310,1105,1244,-310,1480,1070,-310,1480,1070,-754,1480,1244,-790,1480],"vertslength":11,"polys":[0,2,3,6,7,10],"polyslength":3,"regions":[3,2,1],"neighbors":[[[0],[0],[0]],[[0],[0],[0],[0]],[[0],[0],[0],[0]]]},"detail":{"verts":[1`
++`070,-796,1480,1100,-796,1480,1070,-790,1480,1070,-310,1105,1070,-790,1105,1238,-790,1105,1238,-310,1105,1244,-310,1480,1070,-310,1480,1070,-754,1480,1244,-790,1480],"vertslength":11,"tris":[0,1,2,6,3,4,4,5,6,7,8,9,7,9,10],"trislength":5,"triTopoly":[0,1,1,2,2],"baseVert":[0,3,7],"vertsCount":[3,4,4],"baseTri":[0,1,3],"triCount":[1,2,2]},"links":{"poly":[],"cost":[],"type":[],"pos":[],"length":0}}],["0_1",{"tileId":"0_1","tx":0,"ty":1,"mesh":{"verts":[-2470,200,1480,-2470,-310,1480,-2332,-310,148`
++`0,-2176,200,1480,-2110,-4,1105,-1990,-4,1105,-1990,200,1105,-2122,-16,1105,-2110,-4,1105,-1990,200,1105,-2458,200,1105,-2458,-310,1105,-2122,-310,1105,-2122,-16,1105,-2458,200,1105,-2098,-28,1284,-2098,-310,1284,-1990,-310,1284,-1990,-28,1284,-2092,-34,1105,-2092,-310,1105,-1990,-310,1105,-1990,-34,1105],"vertslength":23,"polys":[0,3,4,6,7,10,11,14,15,18,19,22],"polyslength":6,"regions":[2,1,1,1,3,4],"neighbors":[[[0],[0],[0],[0]],[[0],[0],[1,2]],[[0],[1,1],[0],[1,3]],[[0],[0],[1,2],[0]],[[0],[0`
++`],[0],[0]],[[0],[0],[0],[0]]]},"detail":{"verts":[-2470,200,1480,-2470,-310,1480,-2332,-310,1480,-2176,200,1480,-2110,-4,1105,-1990,-4,1105,-1990,200,1105,-2122,-16,1105,-2110,-4,1105,-1990,200,1105,-2458,200,1105,-2458,-310,1105,-2122,-310,1105,-2122,-16,1105,-2458,200,1105,-2098,-28,1284,-2098,-310,1284,-1990,-310,1284,-1990,-28,1284,-2092,-34,1105,-2092,-310,1105,-1990,-310,1105,-1990,-34,1105],"vertslength":23,"tris":[0,1,2,0,2,3,4,5,6,7,8,9,7,9,10,11,12,13,11,13,14,18,15,16,16,17,18,22,19,2`
++`0,20,21,22],"trislength":11,"triTopoly":[0,0,1,2,2,3,3,4,4,5,5],"baseVert":[0,4,7,11,15,19],"vertsCount":[4,3,4,4,4,4],"baseTri":[0,2,3,5,7,9],"triCount":[2,1,2,2,2,2]},"links":{"poly":[],"cost":[],"type":[],"pos":[],"length":0}}],["1_1",{"tileId":"1_1","tx":1,"ty":1,"mesh":{"verts":[-1990,-34,1105,-1990,-310,1105,-1726,-310,1105,-1726,-34,1105,-1486,-166,1284,-1486,-310,1284,-1480,-310,1284,-1480,158,1284,-1486,-118,1285,-1990,-310,1284,-1720,-310,1284,-1708,-268,1285,-1720,-238,1284,-1720,-28,`
++`1284,-1990,-28,1284,-1990,-310,1284,-1702,-250,1285,-1720,-238,1284,-1990,-310,1284,-1708,-268,1285,-1702,-250,1285,-1708,-268,1285,-1510,-154,1285,-1486,-118,1285,-1486,-118,1285,-1510,-154,1285,-1486,-166,1284,-1510,170,1105,-1480,182,1105,-1480,200,1105,-1696,-16,1105,-1696,-310,1105,-1510,-310,1105,-1510,170,1105,-1990,200,1105,-1990,-4,1105,-1708,-4,1105,-1510,170,1105,-1480,200,1105,-1708,-4,1105,-1696,-16,1105,-1510,170,1105,-1726,-310,1480,-1480,-310,1480,-1480,-142,1480],"vertslength":4`
++`5,"polys":[0,3,4,8,9,11,12,15,16,19,20,23,24,26,27,29,30,33,34,38,39,41,42,44],"polyslength":12,"regions":[2,1,1,1,1,1,1,3,3,3,3,4],"neighbors":[[[0],[0],[0],[0]],[[0],[0],[0],[0],[1,6]],[[0],[0],[1,4]],[[0],[0],[0],[1,4]],[[0],[1,3],[1,2],[1,5]],[[1,4],[0],[1,6],[0]],[[1,5],[0],[1,1]],[[0],[0],[1,9]],[[0],[0],[0],[1,10]],[[0],[0],[1,10],[1,7],[0]],[[0],[1,8],[1,9]],[[0],[0],[0]]]},"detail":{"verts":[-1990,-34,1105,-1990,-310,1105,-1726,-310,1105,-1726,-34,1105,-1486,-166,1284,-1486,-310,1284,-1`
++`480,-310,1284,-1480,158,1284,-1486,-118,1284,-1990,-310,1284,-1720,-310,1284,-1708,-268,1285,-1720,-238,1284,-1720,-28,1284,-1990,-28,1284,-1990,-310,1284,-1702,-250,1285,-1720,-238,1284,-1990,-310,1284,-1708,-268,1285,-1702,-250,1285,-1708,-268,1285,-1510,-154,1285,-1486,-118,1284,-1486,-118,1284,-1510,-154,1285,-1486,-166,1284,-1510,170,1105,-1480,182,1105,-1480,200,1105,-1696,-16,1105,-1696,-310,1105,-1510,-310,1105,-1510,170,1105,-1990,200,1105,-1990,-4,1105,-1708,-4,1105,-1510,170,1105,-148`
++`0,200,1105,-1708,-4,1105,-1696,-16,1105,-1510,170,1105,-1726,-310,1480,-1480,-310,1480,-1480,-142,1480],"vertslength":45,"tris":[3,0,1,1,2,3,4,5,6,8,4,6,6,7,8,9,10,11,12,13,14,12,14,15,19,16,17,17,18,19,20,21,22,20,22,23,24,25,26,27,28,29,30,31,32,30,32,33,36,37,38,34,35,36,34,36,38,39,40,41,42,43,44],"trislength":21,"triTopoly":[0,0,1,1,1,2,3,3,4,4,5,5,6,7,8,8,9,9,9,10,11],"baseVert":[0,4,9,12,16,20,24,27,30,34,39,42],"vertsCount":[4,5,3,4,4,4,3,3,4,5,3,3],"baseTri":[0,2,5,6,8,10,12,13,14,16,19`
++`,20],"triCount":[2,3,1,2,2,2,1,1,2,3,1,1]},"links":{"poly":[],"cost":[],"type":[],"pos":[],"length":0}}],["2_1",{"tileId":"2_1","tx":2,"ty":1,"mesh":{"verts":[-1480,152,1105,-1480,-310,1105,-970,-310,1105,-970,152,1105,-1480,158,1284,-1480,-310,1284,-970,-310,1284,-970,158,1284,-970,-310,1480,-970,200,1480,-982,200,1480,-1480,-136,1480,-1480,-310,1480,-1480,200,1105,-1480,182,1105,-970,182,1105,-970,200,1105],"vertslength":17,"polys":[0,3,4,7,8,12,13,16],"polyslength":4,"regions":[2,1,3,4],"neig`
++`hbors":[[[0],[0],[0],[0]],[[0],[0],[0],[0]],[[0],[0],[0],[0],[0]],[[0],[0],[0],[0]]]},"detail":{"verts":[-1480,152,1105,-1480,-310,1105,-970,-310,1105,-970,152,1105,-1480,158,1284,-1480,-310,1284,-970,-310,1284,-970,158,1284,-970,-310,1480,-970,200,1480,-982,200,1480,-1480,-136,1480,-1480,-310,1480,-1480,200,1105,-1480,182,1105,-970,182,1105,-970,200,1105],"vertslength":17,"tris":[3,0,1,1,2,3,7,4,5,5,6,7,8,9,10,11,12,8,8,10,11,16,13,14,14,15,16],"trislength":9,"triTopoly":[0,0,1,1,2,2,2,3,3],"ba`
++`seVert":[0,4,8,13],"vertsCount":[4,4,5,4],"baseTri":[0,2,4,7],"triCount":[2,2,3,2]},"links":{"poly":[],"cost":[],"type":[],"pos":[],"length":0}}],["3_1",{"tileId":"3_1","tx":3,"ty":1,"mesh":{"verts":[-970,152,1105,-970,-310,1105,-922,-310,1105,-922,152,1105,-970,158,1284,-970,-310,1284,-916,-310,1284,-916,158,1284,-970,200,1480,-970,-310,1480,-706,-310,1480,-706,200,1480,-970,200,1105,-970,182,1105,-904,182,1105,-706,200,1105,-706,200,1105,-904,182,1105,-892,170,1105,-892,170,1105,-892,-310,1105`
++`,-706,-310,1105,-706,200,1105],"vertslength":23,"polys":[0,3,4,7,8,11,12,15,16,18,19,22],"polyslength":6,"regions":[4,3,1,2,2,2],"neighbors":[[[0],[0],[0],[0]],[[0],[0],[0],[0]],[[0],[0],[0],[0]],[[0],[0],[1,4],[0]],[[1,3],[0],[1,5]],[[0],[0],[0],[1,4]]]},"detail":{"verts":[-970,152,1105,-970,-310,1105,-922,-310,1105,-922,152,1105,-970,158,1284,-970,-310,1284,-916,-310,1284,-916,158,1284,-970,200,1480,-970,-310,1480,-706,-310,1480,-706,200,1480,-970,200,1105,-970,182,1105,-904,182,1105,-706,200,`
++`1105,-706,200,1105,-904,182,1105,-892,170,1105,-892,170,1105,-892,-310,1105,-706,-310,1105,-706,200,1105],"vertslength":23,"tris":[3,0,1,1,2,3,7,4,5,5,6,7,11,8,9,9,10,11,12,13,14,12,14,15,16,17,18,19,20,21,19,21,22],"trislength":11,"triTopoly":[0,0,1,1,2,2,3,3,4,5,5],"baseVert":[0,4,8,12,16,19],"vertsCount":[4,4,4,4,3,4],"baseTri":[0,2,4,6,8,9],"triCount":[2,2,2,2,1,2]},"links":{"poly":[],"cost":[],"type":[],"pos":[],"length":0}}],["4_1",{"tileId":"4_1","tx":4,"ty":1,"mesh":{"verts":[-196,-220,1`
++`105,-196,-310,1105,50,-310,1105,50,-220,1105],"vertslength":4,"polys":[0,3],"polyslength":1,"regions":[1],"neighbors":[[[0],[0],[0],[0]]]},"detail":{"verts":[-196,-220,1105,-196,-310,1105,50,-310,1105,50,-220,1105],"vertslength":4,"tris":[3,0,1,1,2,3],"trislength":2,"triTopoly":[0,0],"baseVert":[0],"vertsCount":[4],"baseTri":[0],"triCount":[2]},"links":{"poly":[],"cost":[],"type":[],"pos":[],"length":0}}],["5_1",{"tileId":"5_1","tx":5,"ty":1,"mesh":{"verts":[110,-220,1105,50,-220,1105,50,-310,11`
++`05,122,-208,1105,110,-220,1105,50,-310,1105,416,-310,1105,416,200,1105,122,200,1105,122,-208,1105,416,-310,1105],"vertslength":11,"polys":[0,2,3,6,7,10],"polyslength":3,"regions":[1,1,1],"neighbors":[[[0],[0],[1,1]],[[0],[1,0],[0],[1,2]],[[0],[0],[1,1],[0]]]},"detail":{"verts":[110,-220,1105,50,-220,1105,50,-310,1105,122,-208,1105,110,-220,1105,50,-310,1105,416,-310,1105,416,200,1105,122,200,1105,122,-208,1105,416,-310,1105],"vertslength":11,"tris":[0,1,2,3,4,5,3,5,6,7,8,9,7,9,10],"trislength":5`
++`,"triTopoly":[0,1,1,2,2],"baseVert":[0,3,7],"vertsCount":[3,4,4],"baseTri":[0,1,3],"triCount":[1,2,2]},"links":{"poly":[],"cost":[],"type":[],"pos":[],"length":0}}],["6_1",{"tileId":"6_1","tx":6,"ty":1,"mesh":{"verts":[908,200,1480,908,-310,1480,1070,-310,1480,1070,200,1480,914,200,1105,914,-310,1105,1070,-310,1105,1070,200,1105],"vertslength":8,"polys":[0,3,4,7],"polyslength":2,"regions":[1,2],"neighbors":[[[0],[0],[0],[0]],[[0],[0],[0],[0]]]},"detail":{"verts":[908,200,1480,908,-310,1480,1070,`
++`-310,1480,1070,200,1480,914,200,1105,914,-310,1105,1070,-310,1105,1070,200,1105],"vertslength":8,"tris":[3,0,1,1,2,3,7,4,5,5,6,7],"trislength":4,"triTopoly":[0,0,1,1],"baseVert":[0,4],"vertsCount":[4,4],"baseTri":[0,2],"triCount":[2,2]},"links":{"poly":[],"cost":[],"type":[],"pos":[],"length":0}}],["7_1",{"tileId":"7_1","tx":7,"ty":1,"mesh":{"verts":[1070,200,1105,1070,-310,1105,1238,-310,1105,1238,200,1105,1070,200,1480,1070,-310,1480,1244,-310,1480,1244,200,1480],"vertslength":8,"polys":[0,3,4`
++`,7],"polyslength":2,"regions":[2,1],"neighbors":[[[0],[0],[0],[0]],[[0],[0],[0],[0]]]},"detail":{"verts":[1070,200,1105,1070,-310,1105,1238,-310,1105,1238,200,1105,1070,200,1480,1070,-310,1480,1244,-310,1480,1244,200,1480],"vertslength":8,"tris":[3,0,1,1,2,3,7,4,5,5,6,7],"trislength":4,"triTopoly":[0,0,1,1],"baseVert":[0,4],"vertsCount":[4,4],"baseTri":[0,2],"triCount":[2,2]},"links":{"poly":[],"cost":[],"type":[],"pos":[],"length":0}}],["0_2",{"tileId":"0_2","tx":0,"ty":2,"mesh":{"verts":[-2470`
++`,710,1480,-2470,200,1480,-2176,200,1480,-2020,710,1480,-1990,200,1105,-1990,344,1105,-2122,344,1105,-1990,200,1105,-2122,344,1105,-2134,356,1105,-2458,200,1105,-2134,356,1105,-2134,710,1105,-2458,710,1105,-2458,200,1105,-2110,368,1165,-1990,368,1165,-1990,710,1165,-2110,710,1165,-2104,374,1105,-1990,374,1105,-1990,710,1105,-2104,710,1105],"vertslength":23,"polys":[0,3,4,6,7,10,11,14,15,18,19,22],"polyslength":6,"regions":[1,2,2,2,3,4],"neighbors":[[[0],[0],[0],[0]],[[0],[0],[1,2]],[[1,1],[0],[1,`
++`3],[0]],[[0],[0],[0],[1,2]],[[0],[0],[0],[0]],[[0],[0],[0],[0]]]},"detail":{"verts":[-2470,710,1480,-2470,200,1480,-2176,200,1480,-2020,710,1480,-1990,200,1105,-1990,344,1105,-2122,344,1105,-1990,200,1105,-2122,344,1105,-2134,356,1105,-2458,200,1105,-2134,356,1105,-2134,710,1105,-2458,710,1105,-2458,200,1105,-2110,368,1165,-1990,368,1165,-1990,710,1165,-2110,710,1165,-2104,374,1105,-1990,374,1105,-1990,710,1105,-2104,710,1105],"vertslength":23,"tris":[0,1,2,0,2,3,4,5,6,7,8,9,7,9,10,11,12,13,11,1`
++`3,14,18,15,16,16,17,18,22,19,20,20,21,22],"trislength":11,"triTopoly":[0,0,1,2,2,3,3,4,4,5,5],"baseVert":[0,4,7,11,15,19],"vertsCount":[4,3,4,4,4,4],"baseTri":[0,2,3,5,7,9],"triCount":[2,1,2,2,2,2]},"links":{"poly":[1,4],"cost":[6264],"type":[2],"pos":[-1990,344,1105,-1990,368,1165],"length":1}}],["1_2",{"tileId":"1_2","tx":1,"ty":2,"mesh":{"verts":[-1990,344,1105,-1990,200,1105,-1480,200,1105,-1480,344,1105,-1990,710,1165,-1990,368,1165,-1480,368,1165,-1480,710,1165,-1990,710,1105,-1990,374,110`
++`5,-1480,374,1105,-1480,710,1105],"vertslength":12,"polys":[0,3,4,7,8,11],"polyslength":3,"regions":[3,1,2],"neighbors":[[[0],[0],[0],[0]],[[0],[0],[0],[0]],[[0],[0],[0],[0]]]},"detail":{"verts":[-1990,344,1105,-1990,200,1105,-1480,200,1105,-1480,344,1105,-1990,710,1165,-1990,368,1165,-1480,368,1165,-1480,710,1165,-1990,710,1105,-1990,374,1105,-1480,374,1105,-1480,710,1105],"vertslength":12,"tris":[3,0,1,1,2,3,7,4,5,5,6,7,11,8,9,9,10,11],"trislength":6,"triTopoly":[0,0,1,1,2,2],"baseVert":[0,4,8]`
++`,"vertsCount":[4,4,4],"baseTri":[0,2,4],"triCount":[2,2,2]},"links":{"poly":[0,1],"cost":[6264],"type":[2],"pos":[-1990,344,1105,-1990,368,1165],"length":1}}],["2_2",{"tileId":"2_2","tx":2,"ty":2,"mesh":{"verts":[-1258,344,1105,-1480,344,1105,-1480,200,1105,-970,200,1105,-970,710,1105,-1246,710,1105,-1246,356,1105,-970,200,1105,-1246,356,1105,-1258,344,1105,-970,200,1105,-1480,710,1165,-1480,368,1165,-1270,368,1165,-1270,710,1165,-1480,710,1105,-1480,374,1105,-1276,374,1105,-1276,710,1105,-976,2`
++`00,1480,-970,200,1480,-970,206,1480],"vertslength":22,"polys":[0,3,4,7,8,10,11,14,15,18,19,21],"polyslength":6,"regions":[1,1,1,2,3,4],"neighbors":[[[0],[0],[0],[1,2]],[[0],[0],[1,2],[0]],[[0],[1,0],[1,1]],[[0],[0],[0],[0]],[[0],[0],[0],[0]],[[0],[0],[0]]]},"detail":{"verts":[-1258,344,1105,-1480,344,1105,-1480,200,1105,-970,200,1105,-970,710,1105,-1246,710,1105,-1246,356,1105,-970,200,1105,-1246,356,1105,-1258,344,1105,-970,200,1105,-1480,710,1165,-1480,368,1165,-1270,368,1165,-1270,710,1165,-1`
++`480,710,1105,-1480,374,1105,-1276,374,1105,-1276,710,1105,-976,200,1480,-970,200,1480,-970,206,1480],"vertslength":22,"tris":[0,1,2,0,2,3,4,5,6,4,6,7,8,9,10,14,11,12,12,13,14,18,15,16,16,17,18,19,20,21],"trislength":10,"triTopoly":[0,0,1,1,2,3,3,4,4,5],"baseVert":[0,4,8,11,15,19],"vertsCount":[4,4,3,4,4,3],"baseTri":[0,2,4,5,7,9],"triCount":[2,2,1,2,2,1]},"links":{"poly":[0,3,1,3],"cost":[6264,6264],"type":[2,2],"pos":[-1480,344,1105,-1480,368,1165,-1246,710,1105,-1270,710,1165],"length":2}}],["`
++`3_2",{"tileId":"3_2","tx":3,"ty":2,"mesh":{"verts":[-970,200,1105,-706,200,1105,-706,404,1105,-970,200,1105,-706,404,1105,-694,416,1105,-460,710,1105,-970,710,1105,-694,416,1105,-460,416,1105,-460,710,1105,-970,206,1480,-970,200,1480,-706,200,1480,-706,380,1480],"vertslength":15,"polys":[0,2,3,7,8,10,11,14],"polyslength":4,"regions":[1,1,1,2],"neighbors":[[[0],[0],[1,1]],[[1,0],[0],[1,2],[0],[0]],[[0],[0],[1,1]],[[0],[0],[0],[0]]]},"detail":{"verts":[-970,200,1105,-706,200,1105,-706,404,1105,-97`
++`0,200,1105,-706,404,1105,-694,416,1105,-460,710,1105,-970,710,1105,-694,416,1105,-460,416,1105,-460,710,1105,-970,206,1480,-970,200,1480,-706,200,1480,-706,380,1480],"vertslength":15,"tris":[0,1,2,3,4,5,7,3,5,5,6,7,8,9,10,11,12,13,11,13,14],"trislength":7,"triTopoly":[0,1,1,1,2,3,3],"baseVert":[0,3,8,11],"vertsCount":[3,5,3,4],"baseTri":[0,1,4,5],"triCount":[1,3,1,2]},"links":{"poly":[],"cost":[],"type":[],"pos":[],"length":0}}],["4_2",{"tileId":"4_2","tx":4,"ty":2,"mesh":{"verts":[-460,710,1105`
++`,-460,416,1105,50,416,1105,50,710,1105],"vertslength":4,"polys":[0,3],"polyslength":1,"regions":[1],"neighbors":[[[0],[0],[0],[0]]]},"detail":{"verts":[-460,710,1105,-460,416,1105,50,416,1105,50,710,1105],"vertslength":4,"tris":[3,0,1,1,2,3],"trislength":2,"triTopoly":[0,0],"baseVert":[0],"vertsCount":[4],"baseTri":[0],"triCount":[2]},"links":{"poly":[],"cost":[],"type":[],"pos":[],"length":0}}],["5_2",{"tileId":"5_2","tx":5,"ty":2,"mesh":{"verts":[50,710,1105,50,416,1105,110,416,1105,50,710,110`
++`5,110,416,1105,122,404,1105,416,404,1105,428,416,1105,560,710,1105,428,416,1105,560,416,1105,560,710,1105,122,404,1105,122,200,1105,416,200,1105,416,404,1105,434,410,1480,560,410,1480,560,710,1480,386,710,1480],"vertslength":20,"polys":[0,2,3,8,9,11,12,15,16,19],"polyslength":5,"regions":[1,1,1,1,2],"neighbors":[[[0],[0],[1,1]],[[1,0],[0],[1,3],[0],[1,2],[0]],[[0],[0],[1,1]],[[0],[0],[0],[1,1]],[[0],[0],[0],[0]]]},"detail":{"verts":[50,710,1105,50,416,1105,110,416,1105,50,710,1105,110,416,1105,1`
++`22,404,1105,416,404,1105,428,416,1105,560,710,1105,428,416,1105,560,416,1105,560,710,1105,122,404,1105,122,200,1105,416,200,1105,416,404,1105,434,410,1480,560,410,1480,560,710,1480,386,710,1480],"vertslength":20,"tris":[0,1,2,4,5,6,4,6,7,3,4,7,3,7,8,9,10,11,15,12,13,13,14,15,16,17,18,16,18,19],"trislength":10,"triTopoly":[0,1,1,1,1,2,3,3,4,4],"baseVert":[0,3,9,12,16],"vertsCount":[3,6,3,4,4],"baseTri":[0,1,5,6,8],"triCount":[1,4,1,2,2]},"links":{"poly":[],"cost":[],"type":[],"pos":[],"length":0}`
++`}],["6_2",{"tileId":"6_2","tx":6,"ty":2,"mesh":{"verts":[908,398,1480,908,200,1480,1070,200,1480,1070,710,1480,560,710,1480,560,410,1480,896,410,1480,1070,710,1480,896,410,1480,908,398,1480,1070,710,1480,914,404,1105,914,200,1105,1070,200,1105,1070,710,1105,560,710,1105,560,416,1105,902,416,1105,1070,710,1105,902,416,1105,914,404,1105,1070,710,1105],"vertslength":22,"polys":[0,3,4,7,8,10,11,14,15,18,19,21],"polyslength":6,"regions":[1,1,1,2,2,2],"neighbors":[[[0],[0],[0],[1,2]],[[0],[0],[1,2],[0`
++`]],[[0],[1,0],[1,1]],[[0],[0],[0],[1,5]],[[0],[0],[1,5],[0]],[[0],[1,3],[1,4]]]},"detail":{"verts":[908,398,1480,908,200,1480,1070,200,1480,1070,710,1480,560,710,1480,560,410,1480,896,410,1480,1070,710,1480,896,410,1480,908,398,1480,1070,710,1480,914,404,1105,914,200,1105,1070,200,1105,1070,710,1105,560,710,1105,560,416,1105,902,416,1105,1070,710,1105,902,416,1105,914,404,1105,1070,710,1105],"vertslength":22,"tris":[0,1,2,0,2,3,4,5,6,4,6,7,8,9,10,11,12,13,11,13,14,15,16,17,15,17,18,19,20,21],"tr`
++`islength":10,"triTopoly":[0,0,1,1,2,3,3,4,4,5],"baseVert":[0,4,8,11,15,19],"vertsCount":[4,4,3,4,4,3],"baseTri":[0,2,4,5,7,9],"triCount":[2,2,1,2,2,1]},"links":{"poly":[],"cost":[],"type":[],"pos":[],"length":0}}],["7_2",{"tileId":"7_2","tx":7,"ty":2,"mesh":{"verts":[1070,710,1105,1070,200,1105,1238,200,1105,1238,710,1105,1070,710,1480,1070,200,1480,1244,200,1480,1244,710,1480],"vertslength":8,"polys":[0,3,4,7],"polyslength":2,"regions":[2,1],"neighbors":[[[0],[0],[0],[0]],[[0],[0],[0],[0]]]},"d`
++`etail":{"verts":[1070,710,1105,1070,200,1105,1238,200,1105,1238,710,1105,1070,710,1480,1070,200,1480,1244,200,1480,1244,710,1480],"vertslength":8,"tris":[3,0,1,1,2,3,7,4,5,5,6,7],"trislength":4,"triTopoly":[0,0,1,1],"baseVert":[0,4],"vertsCount":[4,4],"baseTri":[0,2],"triCount":[2,2]},"links":{"poly":[],"cost":[],"type":[],"pos":[],"length":0}}],["0_3",{"tileId":"0_3","tx":0,"ty":3,"mesh":{"verts":[-2470,710,1480,-2014,710,1480,-1990,788,1480,-1990,1220,1480,-2470,1220,1480,-2458,710,1105,-2134,`
++`710,1105,-2122,740,1105,-1990,1220,1105,-2458,1220,1105,-2122,740,1105,-1990,740,1105,-1990,1220,1105,-2110,710,1165,-1990,710,1165,-1990,716,1165],"vertslength":16,"polys":[0,4,5,9,10,12,13,15],"polyslength":4,"regions":[1,2,2,3],"neighbors":[[[0],[0],[0],[0],[0]],[[0],[0],[1,2],[0],[0]],[[0],[0],[1,1]],[[0],[0],[0]]]},"detail":{"verts":[-2470,710,1480,-2014,710,1480,-1990,788,1480,-1990,1220,1480,-2470,1220,1480,-2458,710,1105,-2134,710,1105,-2122,740,1105,-1990,1220,1105,-2458,1220,1105,-2122`
++`,740,1105,-1990,740,1105,-1990,1220,1105,-2110,710,1165,-1990,710,1165,-1990,716,1165],"vertslength":16,"tris":[0,1,2,2,3,4,0,2,4,5,6,7,9,5,7,7,8,9,10,11,12,13,14,15],"trislength":8,"triTopoly":[0,0,0,1,1,1,2,3],"baseVert":[0,5,10,13],"vertsCount":[5,5,3,3],"baseTri":[0,3,6,7],"triCount":[3,3,1,1]},"links":{"poly":[1,3],"cost":[6144.82763671875],"type":[2],"pos":[-2130.689697265625,718.27587890625,1105,-2110,710,1165],"length":1}}],["1_3",{"tileId":"1_3","tx":1,"ty":3,"mesh":{"verts":[-1990,716,`
++`1165,-1990,710,1165,-1480,710,1165,-1480,716,1165,-1480,740,1105,-1480,926,1105,-1648,926,1105,-1480,740,1105,-1648,926,1105,-1660,938,1105,-1990,740,1105,-1660,938,1105,-1660,1220,1105,-1990,1220,1105,-1990,740,1105,-1990,806,1480,-1858,1220,1480,-1990,1220,1480],"vertslength":18,"polys":[0,3,4,6,7,10,11,14,15,17],"polyslength":5,"regions":[3,1,1,1,2],"neighbors":[[[0],[0],[0],[0]],[[0],[0],[1,2]],[[1,1],[0],[1,3],[0]],[[0],[0],[0],[1,2]],[[0],[0],[0]]]},"detail":{"verts":[-1990,716,1165,-1990,`
++`710,1165,-1480,710,1165,-1480,716,1165,-1480,740,1105,-1480,926,1105,-1648,926,1105,-1480,740,1105,-1648,926,1105,-1660,938,1105,-1990,740,1105,-1660,938,1105,-1660,1220,1105,-1990,1220,1105,-1990,740,1105,-1990,806,1480,-1858,1220,1480,-1990,1220,1480],"vertslength":18,"tris":[3,0,1,1,2,3,4,5,6,7,8,9,7,9,10,11,12,13,11,13,14,15,16,17],"trislength":8,"triTopoly":[0,0,1,2,2,3,3,4],"baseVert":[0,4,7,11,15],"vertsCount":[4,3,4,4,3],"baseTri":[0,2,3,5,7],"triCount":[2,1,2,2,1]},"links":{"poly":[0,2,`
++`0,1],"cost":[6264,6264],"type":[2,2],"pos":[-1990,716,1165,-1990,740,1105,-1480,716,1165,-1480,740,1105],"length":2}}],["2_3",{"tileId":"2_3","tx":2,"ty":3,"mesh":{"verts":[-1480,710,1165,-1270,710,1165,-1480,716,1165,-1258,740,1105,-1246,710,1105,-970,710,1105,-1480,926,1105,-1480,740,1105,-1258,740,1105,-1258,740,1105,-970,710,1105,-970,926,1105,-1480,926,1105],"vertslength":13,"polys":[0,2,3,5,6,8,9,12],"polyslength":4,"regions":[2,1,1,1],"neighbors":[[[0],[0],[0]],[[0],[0],[1,3]],[[0],[0],[1`
++`,3]],[[1,1],[0],[0],[1,2]]]},"detail":{"verts":[-1480,710,1165,-1270,710,1165,-1480,716,1165,-1258,740,1105,-1246,710,1105,-970,710,1105,-1480,926,1105,-1480,740,1105,-1258,740,1105,-1258,740,1105,-970,710,1105,-970,926,1105,-1480,926,1105],"vertslength":13,"tris":[0,1,2,3,4,5,6,7,8,9,10,11,9,11,12],"trislength":5,"triTopoly":[0,1,2,3,3],"baseVert":[0,3,6,9],"vertsCount":[3,3,3,4],"baseTri":[0,1,2,3],"triCount":[1,1,1,2]},"links":{"poly":[0,2],"cost":[6264],"type":[2],"pos":[-1480,716,1165,-1480`
++`,740,1105],"length":1}}],["3_3",{"tileId":"3_3","tx":3,"ty":3,"mesh":{"verts":[-778,710,1105,-784,746,1105,-802,758,1105,-970,710,1105,-802,758,1105,-784,776,1105,-862,926,1105,-970,926,1105,-970,710,1105,-844,938,1105,-862,926,1105,-784,776,1105,-766,758,1105,-652,926,1105,-670,938,1105,-844,938,1105,-670,938,1105,-670,1220,1105,-844,1220,1105,-736,1220,1480,-844,1220,1480,-844,956,1480,-664,956,1480,-766,758,1105,-784,746,1105,-778,710,1105,-652,926,1105,-766,758,1105,-778,710,1105,-460,710,11`
++`05,-460,926,1105],"vertslength":31,"polys":[0,3,4,8,9,14,15,18,19,22,23,25,26,30],"polyslength":7,"regions":[3,3,1,1,4,2,2],"neighbors":[[[1,5],[0],[1,1],[0]],[[0],[1,2],[0],[0],[1,0]],[[0],[1,1],[0],[1,6],[0],[1,3]],[[1,2],[0],[0],[0]],[[0],[0],[0],[0]],[[0],[1,0],[1,6]],[[1,2],[1,5],[0],[0],[0]]]},"detail":{"verts":[-778,710,1105,-784,746,1105,-802,758,1105,-970,710,1105,-802,758,1105,-784,776,1105,-862,926,1105,-970,926,1105,-970,710,1105,-844,938,1105,-862,926,1105,-784,776,1105,-766,758,110`
++`5,-652,926,1105,-670,938,1105,-844,938,1105,-670,938,1105,-670,1220,1105,-844,1220,1105,-736,1220,1480,-844,1220,1480,-844,956,1480,-664,956,1480,-766,758,1105,-784,746,1105,-778,710,1105,-652,926,1105,-766,758,1105,-778,710,1105,-460,710,1105,-460,926,1105],"vertslength":31,"tris":[0,1,2,0,2,3,4,5,6,4,6,7,4,7,8,9,10,11,13,14,9,9,11,12,9,12,13,18,15,16,16,17,18,19,20,21,19,21,22,23,24,25,26,27,28,29,30,26,26,28,29],"trislength":17,"triTopoly":[0,0,1,1,1,2,2,2,2,3,3,4,4,5,6,6,6],"baseVert":[0,4,9`
++`,15,19,23,26],"vertsCount":[4,5,6,4,4,3,5],"baseTri":[0,2,5,9,11,13,14],"triCount":[2,3,4,2,2,1,3]},"links":{"poly":[],"cost":[],"type":[],"pos":[],"length":0}}],["4_3",{"tileId":"4_3","tx":4,"ty":3,"mesh":{"verts":[-460,926,1105,-460,710,1105,50,710,1105,50,926,1105],"vertslength":4,"polys":[0,3],"polyslength":1,"regions":[1],"neighbors":[[[0],[0],[0],[0]]]},"detail":{"verts":[-460,926,1105,-460,710,1105,50,710,1105,50,926,1105],"vertslength":4,"tris":[3,0,1,1,2,3],"trislength":2,"triTopoly":[0`
++`,0],"baseVert":[0],"vertsCount":[4],"baseTri":[0],"triCount":[2]},"links":{"poly":[],"cost":[],"type":[],"pos":[],"length":0}}],["5_3",{"tileId":"5_3","tx":5,"ty":3,"mesh":{"verts":[560,1220,1105,356,1220,1105,356,938,1105,560,710,1105,344,926,1105,50,926,1105,50,710,1105,560,710,1105,560,710,1105,356,938,1105,344,926,1105,560,1220,1480,512,1220,1480,416,1046,1480,560,710,1480,560,1220,1480,416,1046,1480,350,956,1480,386,710,1480],"vertslength":19,"polys":[0,3,4,7,8,10,11,13,14,18],"polyslength"`
++`:5,"regions":[1,1,1,2,2],"neighbors":[[[0],[0],[1,2],[0]],[[0],[0],[0],[1,2]],[[1,0],[0],[1,1]],[[0],[0],[1,4]],[[0],[1,3],[0],[0],[0]]]},"detail":{"verts":[560,1220,1105,356,1220,1105,356,938,1105,560,710,1105,344,926,1105,50,926,1105,50,710,1105,560,710,1105,560,710,1105,356,938,1105,344,926,1105,560,1220,1480,512,1220,1480,416,1046,1480,560,710,1480,560,1220,1480,416,1046,1480,350,956,1480,386,710,1480],"vertslength":19,"tris":[0,1,2,0,2,3,4,5,6,4,6,7,8,9,10,11,12,13,15,16,17,17,18,14,14,15,1`
++`7],"trislength":9,"triTopoly":[0,0,1,1,2,3,4,4,4],"baseVert":[0,4,8,11,14],"vertsCount":[4,4,3,3,5],"baseTri":[0,2,4,5,6],"triCount":[2,2,1,1,3]},"links":{"poly":[],"cost":[],"type":[],"pos":[],"length":0}}],["6_3",{"tileId":"6_3","tx":6,"ty":3,"mesh":{"verts":[560,1220,1105,560,710,1105,1070,710,1105,1070,1220,1105,560,1220,1480,560,710,1480,1070,710,1480,1070,1220,1480],"vertslength":8,"polys":[0,3,4,7],"polyslength":2,"regions":[1,2],"neighbors":[[[0],[0],[0],[0]],[[0],[0],[0],[0]]]},"detail"`
++`:{"verts":[560,1220,1105,560,710,1105,1070,710,1105,1070,1220,1105,560,1220,1480,560,710,1480,1070,710,1480,1070,1220,1480],"vertslength":8,"tris":[3,0,1,1,2,3,7,4,5,5,6,7],"trislength":4,"triTopoly":[0,0,1,1],"baseVert":[0,4],"vertsCount":[4,4],"baseTri":[0,2],"triCount":[2,2]},"links":{"poly":[],"cost":[],"type":[],"pos":[],"length":0}}],["7_3",{"tileId":"7_3","tx":7,"ty":3,"mesh":{"verts":[1070,1220,1105,1070,710,1105,1238,710,1105,1238,1220,1105,1070,1220,1480,1070,710,1480,1244,710,1480,124`
++`4,1220,1480],"vertslength":8,"polys":[0,3,4,7],"polyslength":2,"regions":[2,1],"neighbors":[[[0],[0],[0],[0]],[[0],[0],[0],[0]]]},"detail":{"verts":[1070,1220,1105,1070,710,1105,1238,710,1105,1238,1220,1105,1070,1220,1480,1070,710,1480,1244,710,1480,1244,1220,1480],"vertslength":8,"tris":[3,0,1,1,2,3,7,4,5,5,6,7],"trislength":4,"triTopoly":[0,0,1,1],"baseVert":[0,4],"vertsCount":[4,4],"baseTri":[0,2],"triCount":[2,2]},"links":{"poly":[],"cost":[],"type":[],"pos":[],"length":0}}],["0_4",{"tileId"`
++`:"0_4","tx":0,"ty":4,"mesh":{"verts":[-2470,1730,1480,-2470,1220,1480,-1990,1220,1480,-1990,1730,1480,-2458,1730,1105,-2458,1220,1105,-1990,1220,1105,-1990,1730,1105],"vertslength":8,"polys":[0,3,4,7],"polyslength":2,"regions":[1,2],"neighbors":[[[0],[0],[0],[0]],[[0],[0],[0],[0]]]},"detail":{"verts":[-2470,1730,1480,-2470,1220,1480,-1990,1220,1480,-1990,1730,1480,-2458,1730,1105,-2458,1220,1105,-1990,1220,1105,-1990,1730,1105],"vertslength":8,"tris":[3,0,1,1,2,3,7,4,5,5,6,7],"trislength":4,"tri`
++`Topoly":[0,0,1,1],"baseVert":[0,4],"vertsCount":[4,4],"baseTri":[0,2],"triCount":[2,2]},"links":{"poly":[],"cost":[],"type":[],"pos":[],"length":0}}],["1_4",{"tileId":"1_4","tx":1,"ty":4,"mesh":{"verts":[-1648,1688,1105,-1480,1688,1105,-1480,1730,1105,-1990,1730,1105,-1660,1676,1105,-1648,1688,1105,-1990,1730,1105,-1990,1220,1105,-1660,1220,1105,-1660,1676,1105,-1990,1730,1105,-1990,1730,1480,-1990,1220,1480,-1858,1220,1480,-1702,1730,1480,-1636,1682,1480,-1480,1682,1480,-1480,1730,1480,-1636,17`
++`30,1480],"vertslength":19,"polys":[0,3,4,6,7,10,11,14,15,18],"polyslength":5,"regions":[1,1,1,2,3],"neighbors":[[[0],[0],[0],[1,1]],[[0],[1,0],[1,2]],[[0],[0],[1,1],[0]],[[0],[0],[0],[0]],[[0],[0],[0],[0]]]},"detail":{"verts":[-1648,1688,1105,-1480,1688,1105,-1480,1730,1105,-1990,1730,1105,-1660,1676,1105,-1648,1688,1105,-1990,1730,1105,-1990,1220,1105,-1660,1220,1105,-1660,1676,1105,-1990,1730,1105,-1990,1730,1480,-1990,1220,1480,-1858,1220,1480,-1702,1730,1480,-1636,1682,1480,-1480,1682,1480,-`
++`1480,1730,1480,-1636,1730,1480],"vertslength":19,"tris":[0,1,2,0,2,3,4,5,6,7,8,9,7,9,10,11,12,13,11,13,14,18,15,16,16,17,18],"trislength":9,"triTopoly":[0,0,1,2,2,3,3,4,4],"baseVert":[0,4,7,11,15],"vertsCount":[4,3,4,4,4],"baseTri":[0,2,3,5,7],"triCount":[2,1,2,2,2]},"links":{"poly":[],"cost":[],"type":[],"pos":[],"length":0}}],["2_4",{"tileId":"2_4","tx":2,"ty":4,"mesh":{"verts":[-1480,1730,1480,-1480,1682,1480,-970,1682,1480,-970,1730,1480,-1480,1730,1105,-1480,1688,1105,-970,1688,1105,-970,17`
++`30,1105],"vertslength":8,"polys":[0,3,4,7],"polyslength":2,"regions":[1,2],"neighbors":[[[0],[0],[0],[0]],[[0],[0],[0],[0]]]},"detail":{"verts":[-1480,1730,1480,-1480,1682,1480,-970,1682,1480,-970,1730,1480,-1480,1730,1105,-1480,1688,1105,-970,1688,1105,-970,1730,1105],"vertslength":8,"tris":[3,0,1,1,2,3,7,4,5,5,6,7],"trislength":4,"triTopoly":[0,0,1,1],"baseVert":[0,4],"vertsCount":[4,4],"baseTri":[0,2],"triCount":[2,2]},"links":{"poly":[],"cost":[],"type":[],"pos":[],"length":0}}],["3_4",{"til`
++`eId":"3_4","tx":3,"ty":4,"mesh":{"verts":[-700,1238,1480,-670,1220,1480,-664,1220,1480,-664,1670,1480,-706,1436,1480,-832,1688,1480,-808,1664,1480,-796,1670,1480,-970,1730,1480,-970,1682,1480,-832,1688,1480,-652,1682,1480,-460,1682,1480,-460,1730,1480,-970,1730,1480,-832,1688,1480,-766,1652,1480,-760,1460,1480,-706,1436,1480,-664,1670,1480,-766,1652,1480,-664,1670,1480,-652,1682,1480,-796,1670,1480,-832,1688,1480,-796,1670,1480,-652,1682,1480,-970,1730,1105,-970,1688,1105,-856,1688,1105,-658,168`
++`8,1105,-460,1688,1105,-460,1730,1105,-658,1688,1105,-856,1688,1105,-844,1676,1105,-670,1676,1105,-670,1676,1105,-844,1676,1105,-844,1220,1105,-670,1220,1105,-844,1220,1480,-736,1220,1480,-838,1580,1480],"vertslength":44,"polys":[0,4,5,7,8,10,11,15,16,19,20,23,24,26,27,32,33,36,37,40,41,43],"polyslength":11,"regions":[2,2,2,2,2,2,2,1,1,1,3],"neighbors":[[[0],[0],[0],[1,4],[0]],[[0],[0],[1,6]],[[0],[0],[1,3]],[[0],[0],[0],[1,2],[1,6]],[[0],[0],[1,0],[1,5]],[[1,4],[0],[1,6],[0]],[[1,1],[1,5],[1,3]]`
++`,[[0],[0],[1,8],[0],[0],[0]],[[1,7],[0],[1,9],[0]],[[1,8],[0],[0],[0]],[[0],[0],[0]]]},"detail":{"verts":[-700,1238,1480,-670,1220,1480,-664,1220,1480,-664,1670,1480,-706,1436,1480,-832,1688,1480,-808,1664,1480,-796,1670,1480,-970,1730,1480,-970,1682,1480,-832,1688,1480,-652,1682,1480,-460,1682,1480,-460,1730,1480,-970,1730,1480,-832,1688,1480,-766,1652,1480,-760,1460,1480,-706,1436,1480,-664,1670,1480,-766,1652,1480,-664,1670,1480,-652,1682,1480,-796,1670,1480,-832,1688,1480,-796,1670,1480,-652`
++`,1682,1480,-970,1730,1105,-970,1688,1105,-856,1688,1105,-658,1688,1105,-460,1688,1105,-460,1730,1105,-658,1688,1105,-856,1688,1105,-844,1676,1105,-670,1676,1105,-670,1676,1105,-844,1676,1105,-844,1220,1105,-670,1220,1105,-844,1220,1480,-736,1220,1480,-838,1580,1480],"vertslength":44,"tris":[0,1,2,4,0,2,2,3,4,5,6,7,8,9,10,11,12,13,14,15,11,11,13,14,16,17,18,16,18,19,20,21,22,20,22,23,24,25,26,27,28,29,30,31,32,27,29,30,27,30,32,34,35,36,33,34,36,40,37,38,38,39,40,41,42,43],"trislength":22,"triTop`
++`oly":[0,0,0,1,2,3,3,3,4,4,5,5,6,7,7,7,7,8,8,9,9,10],"baseVert":[0,5,8,11,16,20,24,27,33,37,41],"vertsCount":[5,3,3,5,4,4,3,6,4,4,3],"baseTri":[0,3,4,5,8,10,12,13,17,19,21],"triCount":[3,1,1,3,2,2,1,4,2,2,1]},"links":{"poly":[],"cost":[],"type":[],"pos":[],"length":0}}],["4_4",{"tileId":"4_4","tx":4,"ty":4,"mesh":{"verts":[-460,1730,1480,-460,1682,1480,50,1682,1480,50,1730,1480,-460,1730,1105,-460,1688,1105,50,1688,1105,50,1730,1105],"vertslength":8,"polys":[0,3,4,7],"polyslength":2,"regions":[1,`
++`2],"neighbors":[[[0],[0],[0],[0]],[[0],[0],[0],[0]]]},"detail":{"verts":[-460,1730,1480,-460,1682,1480,50,1682,1480,50,1730,1480,-460,1730,1105,-460,1688,1105,50,1688,1105,50,1730,1105],"vertslength":8,"tris":[3,0,1,1,2,3,7,4,5,5,6,7],"trislength":4,"triTopoly":[0,0,1,1],"baseVert":[0,4],"vertsCount":[4,4],"baseTri":[0,2],"triCount":[2,2]},"links":{"poly":[],"cost":[],"type":[],"pos":[],"length":0}}],["5_4",{"tileId":"5_4","tx":5,"ty":4,"mesh":{"verts":[50,1730,1480,50,1682,1480,332,1682,1480,33`
++`2,1730,1480,50,1730,1105,50,1688,1105,344,1688,1105,560,1730,1105,560,1730,1105,344,1688,1105,356,1676,1105,356,1676,1105,356,1220,1105,560,1220,1105,560,1730,1105,518,1220,1480,560,1220,1480,560,1286,1480],"vertslength":18,"polys":[0,3,4,7,8,10,11,14,15,17],"polyslength":5,"regions":[2,1,1,1,3],"neighbors":[[[0],[0],[0],[0]],[[0],[0],[1,2],[0]],[[1,1],[0],[1,3]],[[0],[0],[0],[1,2]],[[0],[0],[0]]]},"detail":{"verts":[50,1730,1480,50,1682,1480,332,1682,1480,332,1730,1480,50,1730,1105,50,1688,1105`
++`,344,1688,1105,560,1730,1105,560,1730,1105,344,1688,1105,356,1676,1105,356,1676,1105,356,1220,1105,560,1220,1105,560,1730,1105,518,1220,1480,560,1220,1480,560,1286,1480],"vertslength":18,"tris":[3,0,1,1,2,3,4,5,6,4,6,7,8,9,10,11,12,13,11,13,14,15,16,17],"trislength":8,"triTopoly":[0,0,1,1,2,3,3,4],"baseVert":[0,4,8,11,15],"vertsCount":[4,4,3,4,3],"baseTri":[0,2,4,5,7],"triCount":[2,2,1,2,1]},"links":{"poly":[],"cost":[],"type":[],"pos":[],"length":0}}],["6_4",{"tileId":"6_4","tx":6,"ty":4,"mesh"`
++`:{"verts":[596,1370,1105,596,1730,1105,560,1730,1105,560,1220,1105,1070,1730,1105,1022,1730,1105,1022,1370,1105,1070,1220,1105,608,1358,1105,596,1370,1105,560,1220,1105,1010,1358,1105,608,1358,1105,560,1220,1105,1070,1220,1105,1070,1220,1105,1022,1370,1105,1010,1358,1105,560,1298,1480,560,1220,1480,1070,1220,1480,1070,1730,1480,824,1730,1480,998,1382,1162,998,1730,1162,620,1730,1162,620,1382,1162,992,1388,1105,992,1730,1105,626,1730,1105,626,1388,1105],"vertslength":31,"polys":[0,3,4,7,8,10,11,1`
++`4,15,17,18,22,23,26,27,30],"polyslength":8,"regions":[4,4,4,4,4,1,2,3],"neighbors":[[[0],[0],[0],[1,2]],[[0],[0],[1,4],[0]],[[0],[1,0],[1,3]],[[0],[1,2],[0],[1,4]],[[1,1],[0],[1,3]],[[0],[0],[0],[0],[0]],[[0],[0],[0],[0]],[[0],[0],[0],[0]]]},"detail":{"verts":[596,1370,1105,596,1730,1105,560,1730,1105,560,1220,1105,1070,1730,1105,1022,1730,1105,1022,1370,1105,1070,1220,1105,608,1358,1105,596,1370,1105,560,1220,1105,1010,1358,1105,608,1358,1105,560,1220,1105,1070,1220,1105,1070,1220,1105,1022,137`
++`0,1105,1010,1358,1105,560,1298,1480,560,1220,1480,1070,1220,1480,1070,1730,1480,824,1730,1480,998,1382,1162,998,1730,1162,620,1730,1162,620,1382,1162,992,1388,1105,992,1730,1105,626,1730,1105,626,1388,1105],"vertslength":31,"tris":[0,1,2,0,2,3,4,5,6,4,6,7,8,9,10,11,12,13,11,13,14,15,16,17,18,19,20,20,21,22,18,20,22,26,23,24,24,25,26,30,27,28,28,29,30],"trislength":15,"triTopoly":[0,0,1,1,2,3,3,4,5,5,5,6,6,7,7],"baseVert":[0,4,8,11,15,18,23,27],"vertsCount":[4,4,3,4,3,5,4,4],"baseTri":[0,2,4,5,7,`
++`8,11,13],"triCount":[2,2,1,2,1,3,2,2]},"links":{"poly":[0,6,1,6,4,6,6,0],"cost":[5737.5,5737.5,5845.5,5737.5],"type":[2,2,2,2],"pos":[596,1382,1105,620,1382,1162,1022,1730,1105,998,1730,1162,1016,1364,1105,998,1382,1162,620,1730,1162,596,1730,1105],"length":4}}],["7_4",{"tileId":"7_4","tx":7,"ty":4,"mesh":{"verts":[1070,1730,1105,1070,1220,1105,1238,1220,1105,1238,1730,1105,1070,1730,1480,1070,1220,1480,1244,1220,1480,1244,1730,1480],"vertslength":8,"polys":[0,3,4,7],"polyslength":2,"regions":[2`
++`,1],"neighbors":[[[0],[0],[0],[0]],[[0],[0],[0],[0]]]},"detail":{"verts":[1070,1730,1105,1070,1220,1105,1238,1220,1105,1238,1730,1105,1070,1730,1480,1070,1220,1480,1244,1220,1480,1244,1730,1480],"vertslength":8,"tris":[3,0,1,1,2,3,7,4,5,5,6,7],"trislength":4,"triTopoly":[0,0,1,1],"baseVert":[0,4],"vertsCount":[4,4],"baseTri":[0,2],"triCount":[2,2]},"links":{"poly":[],"cost":[],"type":[],"pos":[],"length":0}}],["0_5",{"tileId":"0_5","tx":0,"ty":5,"mesh":{"verts":[-1990,2114,1480,-2176,2240,1480,-`
++`2470,2240,1480,-2470,1730,1480,-1990,1730,1480,-2458,2240,1105,-2458,1730,1105,-1990,1730,1105,-1990,2240,1105],"vertslength":9,"polys":[0,4,5,8],"polyslength":2,"regions":[1,2],"neighbors":[[[0],[0],[0],[0],[0]],[[0],[0],[0],[0]]]},"detail":{"verts":[-1990,2114,1480,-2176,2240,1480,-2470,2240,1480,-2470,1730,1480,-1990,1730,1480,-2458,2240,1105,-2458,1730,1105,-1990,1730,1105,-1990,2240,1105],"vertslength":9,"tris":[0,1,2,3,4,0,0,2,3,8,5,6,6,7,8],"trislength":5,"triTopoly":[0,0,0,1,1],"baseVert`
++`":[0,5],"vertsCount":[5,4],"baseTri":[0,3],"triCount":[3,2]},"links":{"poly":[],"cost":[],"type":[],"pos":[],"length":0}}],["1_5",{"tileId":"1_5","tx":1,"ty":5,"mesh":{"verts":[-1648,2144,1105,-1480,2144,1105,-1480,2240,1105,-1990,2240,1105,-1480,1730,1105,-1480,1874,1105,-1648,1874,1105,-1990,1730,1105,-1660,2132,1105,-1648,2144,1105,-1990,2240,1105,-1660,1886,1105,-1660,2132,1105,-1990,2240,1105,-1990,1730,1105,-1990,1730,1105,-1648,1874,1105,-1660,1886,1105,-1666,1856,1480,-1648,1868,1480,-16`
++`42,1874,1480,-1990,2108,1480,-1990,1730,1480,-1990,1730,1480,-1702,1730,1480,-1666,1856,1480,-1672,2144,1480,-1654,2144,1480,-1654,2240,1480,-1912,2240,1480,-1642,1874,1480,-1648,1868,1480,-1636,1856,1480,-1480,1874,1480,-1636,1856,1480,-1636,1730,1480,-1480,1730,1480,-1480,1874,1480],"vertslength":38,"polys":[0,3,4,7,8,10,11,14,15,17,18,22,23,25,26,29,30,33,34,37],"polyslength":10,"regions":[1,1,1,1,1,2,2,4,3,3],"neighbors":[[[0],[0],[0],[1,2]],[[0],[0],[1,4],[0]],[[0],[1,0],[1,3]],[[0],[1,2],[`
++`0],[1,4]],[[1,1],[0],[1,3]],[[0],[1,8],[0],[0],[1,6]],[[0],[0],[1,5]],[[0],[0],[0],[0]],[[1,5],[0],[1,9],[0]],[[0],[0],[0],[1,8]]]},"detail":{"verts":[-1648,2144,1105,-1480,2144,1105,-1480,2240,1105,-1990,2240,1105,-1480,1730,1105,-1480,1874,1105,-1648,1874,1105,-1990,1730,1105,-1660,2132,1105,-1648,2144,1105,-1990,2240,1105,-1660,1886,1105,-1660,2132,1105,-1990,2240,1105,-1990,1730,1105,-1990,1730,1105,-1648,1874,1105,-1660,1886,1105,-1666,1856,1480,-1648,1868,1480,-1642,1874,1480,-1990,2108,14`
++`80,-1990,1730,1480,-1990,1730,1480,-1702,1730,1480,-1666,1856,1480,-1672,2144,1480,-1654,2144,1480,-1654,2240,1480,-1912,2240,1480,-1642,1874,1480,-1648,1868,1480,-1636,1856,1480,-1480,1874,1480,-1636,1856,1480,-1636,1730,1480,-1480,1730,1480,-1480,1874,1480],"vertslength":38,"tris":[0,1,2,0,2,3,4,5,6,4,6,7,8,9,10,11,12,13,11,13,14,15,16,17,18,19,20,22,18,20,20,21,22,23,24,25,26,27,28,26,28,29,30,31,32,30,32,33,34,35,36,34,36,37],"trislength":18,"triTopoly":[0,0,1,1,2,3,3,4,5,5,5,6,7,7,8,8,9,9],`
++`"baseVert":[0,4,8,11,15,18,23,26,30,34],"vertsCount":[4,4,3,4,3,5,3,4,4,4],"baseTri":[0,2,4,5,7,8,11,12,14,16],"triCount":[2,2,1,2,1,3,1,2,2,2]},"links":{"poly":[],"cost":[],"type":[],"pos":[],"length":0}}],["2_5",{"tileId":"2_5","tx":2,"ty":5,"mesh":{"verts":[-1480,1874,1105,-1480,1730,1105,-970,1730,1105,-970,1874,1105,-1480,1874,1480,-1480,1730,1480,-970,1730,1480,-970,1874,1480,-1480,2240,1105,-1480,2144,1105,-970,2144,1105,-970,2240,1105],"vertslength":12,"polys":[0,3,4,7,8,11],"polyslength`
++`":3,"regions":[1,2,3],"neighbors":[[[0],[0],[0],[0]],[[0],[0],[0],[0]],[[0],[0],[0],[0]]]},"detail":{"verts":[-1480,1874,1105,-1480,1730,1105,-970,1730,1105,-970,1874,1105,-1480,1874,1480,-1480,1730,1480,-970,1730,1480,-970,1874,1480,-1480,2240,1105,-1480,2144,1105,-970,2144,1105,-970,2240,1105],"vertslength":12,"tris":[3,0,1,1,2,3,7,4,5,5,6,7,11,8,9,9,10,11],"trislength":6,"triTopoly":[0,0,1,1,2,2],"baseVert":[0,4,8],"vertsCount":[4,4,4],"baseTri":[0,2,4],"triCount":[2,2,2]},"links":{"poly":[],`
++`"cost":[],"type":[],"pos":[],"length":0}}],["3_5",{"tileId":"3_5","tx":3,"ty":5,"mesh":{"verts":[-856,1874,1105,-970,1874,1105,-970,1730,1105,-844,1886,1105,-856,1874,1105,-970,1730,1105,-460,1730,1105,-658,1874,1105,-460,1730,1105,-460,1874,1105,-658,1874,1105,-670,1886,1105,-670,2126,1105,-844,2126,1105,-844,1886,1105,-658,1874,1105,-670,1886,1105,-844,1886,1105,-862,1874,1480,-970,1874,1480,-970,1730,1480,-850,1886,1480,-862,1874,1480,-970,1730,1480,-460,1730,1480,-658,1880,1480,-460,1730,148`
++`0,-460,1880,1480,-658,1880,1480,-658,1880,1480,-850,2108,1480,-850,1886,1480,-970,2240,1105,-970,2144,1105,-856,2144,1105,-658,2144,1105,-460,2144,1105,-460,2240,1105,-856,2144,1105,-844,2126,1105,-670,2126,1105,-658,2144,1105,-664,2138,1480,-460,2138,1480,-460,2240,1480,-970,2240,1480,-970,2234,1480],"vertslength":47,"polys":[0,2,3,7,8,10,11,14,15,17,18,20,21,25,26,28,29,31,32,37,38,41,42,46],"polyslength":12,"regions":[2,2,2,2,2,1,1,1,1,3,3,4],"neighbors":[[[0],[0],[1,1]],[[0],[1,0],[0],[1,2],`
++`[1,4]],[[0],[0],[1,1]],[[0],[1,10],[0],[1,4]],[[0],[1,3],[1,1]],[[0],[0],[1,6]],[[0],[1,5],[0],[1,7],[1,8]],[[0],[0],[1,6]],[[0],[0],[1,6]],[[0],[0],[1,10],[0],[0],[0]],[[0],[1,3],[0],[1,9]],[[0],[0],[0],[0],[0]]]},"detail":{"verts":[-856,1874,1105,-970,1874,1105,-970,1730,1105,-844,1886,1105,-856,1874,1105,-970,1730,1105,-460,1730,1105,-658,1874,1105,-460,1730,1105,-460,1874,1105,-658,1874,1105,-670,1886,1105,-670,2126,1105,-844,2126,1105,-844,1886,1105,-658,1874,1105,-670,1886,1105,-844,1886,1`
++`105,-862,1874,1480,-970,1874,1480,-970,1730,1480,-850,1886,1480,-862,1874,1480,-970,1730,1480,-460,1730,1480,-658,1880,1480,-460,1730,1480,-460,1880,1480,-658,1880,1480,-658,1880,1480,-850,2108,1480,-850,1886,1480,-970,2240,1105,-970,2144,1105,-856,2144,1105,-658,2144,1105,-460,2144,1105,-460,2240,1105,-856,2144,1105,-844,2126,1105,-670,2126,1105,-658,2144,1105,-664,2138,1480,-460,2138,1480,-460,2240,1480,-970,2240,1480,-970,2234,1480],"vertslength":47,"tris":[0,1,2,3,4,5,7,3,5,5,6,7,8,9,10,14,1`
++`1,12,12,13,14,15,16,17,18,19,20,21,22,23,25,21,23,23,24,25,26,27,28,29,30,31,32,33,34,35,36,37,32,34,35,32,35,37,38,39,40,38,40,41,42,43,44,45,46,42,42,44,45],"trislength":23,"triTopoly":[0,1,1,1,2,3,3,4,5,6,6,6,7,8,9,9,9,9,10,10,11,11,11],"baseVert":[0,3,8,11,15,18,21,26,29,32,38,42],"vertsCount":[3,5,3,4,3,3,5,3,3,6,4,5],"baseTri":[0,1,4,5,7,8,9,12,13,14,18,20],"triCount":[1,3,1,2,1,1,3,1,1,4,2,3]},"links":{"poly":[],"cost":[],"type":[],"pos":[],"length":0}}],["4_5",{"tileId":"4_5","tx":4,"ty"`
++`:5,"mesh":{"verts":[-460,1874,1105,-460,1730,1105,50,1730,1105,50,1874,1105,-460,1880,1480,-460,1730,1480,50,1730,1480,50,1880,1480,-460,2240,1480,-460,2138,1480,50,2138,1480,50,2240,1480,-460,2240,1105,-460,2144,1105,50,2144,1105,50,2240,1105],"vertslength":16,"polys":[0,3,4,7,8,11,12,15],"polyslength":4,"regions":[2,1,3,4],"neighbors":[[[0],[0],[0],[0]],[[0],[0],[0],[0]],[[0],[0],[0],[0]],[[0],[0],[0],[0]]]},"detail":{"verts":[-460,1874,1105,-460,1730,1105,50,1730,1105,50,1874,1105,-460,1880,1`
++`480,-460,1730,1480,50,1730,1480,50,1880,1480,-460,2240,1480,-460,2138,1480,50,2138,1480,50,2240,1480,-460,2240,1105,-460,2144,1105,50,2144,1105,50,2240,1105],"vertslength":16,"tris":[3,0,1,1,2,3,7,4,5,5,6,7,11,8,9,9,10,11,15,12,13,13,14,15],"trislength":8,"triTopoly":[0,0,1,1,2,2,3,3],"baseVert":[0,4,8,12],"vertsCount":[4,4,4,4],"baseTri":[0,2,4,6],"triCount":[2,2,2,2]},"links":{"poly":[],"cost":[],"type":[],"pos":[],"length":0}}],["5_5",{"tileId":"5_5","tx":5,"ty":5,"mesh":{"verts":[50,2240,110`
++`5,50,2144,1105,344,2144,1105,560,2240,1105,344,1874,1105,50,1874,1105,50,1730,1105,560,1730,1105,560,2240,1105,344,2144,1105,356,2132,1105,560,2240,1105,356,2132,1105,356,1886,1105,560,1730,1105,356,1886,1105,344,1874,1105,560,1730,1105,50,1880,1480,50,1730,1480,332,1730,1480,332,1880,1480,50,2240,1480,50,2138,1480,338,2138,1480,560,2240,1480,350,2126,1480,350,1904,1480,560,2024,1480,338,2138,1480,350,2126,1480,560,2024,1480,560,2240,1480],"vertslength":33,"polys":[0,3,4,7,8,10,11,14,15,17,18,21`
++`,22,25,26,28,29,32],"polyslength":9,"regions":[1,1,1,1,1,3,2,2,2],"neighbors":[[[0],[0],[1,2],[0]],[[0],[0],[0],[1,4]],[[1,0],[0],[1,3]],[[1,2],[0],[1,4],[0]],[[0],[1,1],[1,3]],[[0],[0],[0],[0]],[[0],[0],[1,8],[0]],[[0],[0],[1,8]],[[0],[1,7],[0],[1,6]]]},"detail":{"verts":[50,2240,1105,50,2144,1105,344,2144,1105,560,2240,1105,344,1874,1105,50,1874,1105,50,1730,1105,560,1730,1105,560,2240,1105,344,2144,1105,356,2132,1105,560,2240,1105,356,2132,1105,356,1886,1105,560,1730,1105,356,1886,1105,344,18`
++`74,1105,560,1730,1105,50,1880,1480,50,1730,1480,332,1730,1480,332,1880,1480,50,2240,1480,50,2138,1480,338,2138,1480,560,2240,1480,350,2126,1480,350,1904,1480,560,2024,1480,338,2138,1480,350,2126,1480,560,2024,1480,560,2240,1480],"vertslength":33,"tris":[0,1,2,0,2,3,4,5,6,4,6,7,8,9,10,11,12,13,11,13,14,15,16,17,21,18,19,19,20,21,22,23,24,22,24,25,26,27,28,29,30,31,29,31,32],"trislength":15,"triTopoly":[0,0,1,1,2,3,3,4,5,5,6,6,7,8,8],"baseVert":[0,4,8,11,15,18,22,26,29],"vertsCount":[4,4,3,4,3,4,4`
++`,3,4],"baseTri":[0,2,4,5,7,8,10,12,13],"triCount":[2,2,1,2,1,2,2,1,2]},"links":{"poly":[5,7],"cost":[1350],"type":[1],"pos":[332,1880,1480,350,1904,1480],"length":1}}],["6_5",{"tileId":"6_5","tx":6,"ty":5,"mesh":{"verts":[560,1730,1105,596,1730,1105,596,2102,1105,560,2240,1105,1022,2102,1105,1022,1730,1105,1070,1730,1105,1070,2240,1105,560,2240,1105,596,2102,1105,608,2114,1105,560,2240,1105,608,2114,1105,1010,2114,1105,1070,2240,1105,1010,2114,1105,1022,2102,1105,1070,2240,1105,560,2030,1480,902`
++`,2240,1480,560,2240,1480,620,2090,1162,620,1730,1162,998,1730,1162,998,2090,1162,626,2078,1105,626,1730,1105,992,1730,1105,992,2078,1105,830,1730,1480,1070,1730,1480,1070,2126,1480],"vertslength":32,"polys":[0,3,4,7,8,10,11,14,15,17,18,20,21,24,25,28,29,31],"polyslength":9,"regions":[5,5,5,5,5,4,1,2,3],"neighbors":[[[0],[0],[1,2],[0]],[[0],[0],[0],[1,4]],[[1,0],[0],[1,3]],[[1,2],[0],[1,4],[0]],[[0],[1,1],[1,3]],[[0],[0],[0]],[[0],[0],[0],[0]],[[0],[0],[0],[0]],[[0],[0],[0]]]},"detail":{"verts":[`
++`560,1730,1105,596,1730,1105,596,2102,1105,560,2240,1105,1022,2102,1105,1022,1730,1105,1070,1730,1105,1070,2240,1105,560,2240,1105,596,2102,1105,608,2114,1105,560,2240,1105,608,2114,1105,1010,2114,1105,1070,2240,1105,1010,2114,1105,1022,2102,1105,1070,2240,1105,560,2030,1480,902,2240,1480,560,2240,1480,620,2090,1162,620,1730,1162,998,1730,1162,998,2090,1162,626,2078,1105,626,1730,1105,992,1730,1105,992,2078,1105,830,1730,1480,1070,1730,1480,1070,2126,1480],"vertslength":32,"tris":[0,1,2,0,2,3,4,5`
++`,6,4,6,7,8,9,10,11,12,13,11,13,14,15,16,17,18,19,20,24,21,22,22,23,24,28,25,26,26,27,28,29,30,31],"trislength":14,"triTopoly":[0,0,1,1,2,3,3,4,5,6,6,7,7,8],"baseVert":[0,4,8,11,15,18,21,25,29],"vertsCount":[4,4,3,4,3,3,4,4,3],"baseTri":[0,2,4,5,7,8,9,11,13],"triCount":[2,2,1,2,1,1,2,2,1]},"links":{"poly":[0,6,1,6,2,6,4,6],"cost":[5737.5,5737.5,5845.5,5845.5],"type":[2,2,2,2],"pos":[596,1730,1105,620,1730,1162,1022,1730,1105,998,1730,1162,602,2108,1105,620,2090,1162,1016,2108,1105,998,2090,1162],`
++`"length":4}}],["7_5",{"tileId":"7_5","tx":7,"ty":5,"mesh":{"verts":[1070,2240,1105,1070,1730,1105,1238,1730,1105,1238,2240,1105,1244,2240,1480,1130,2240,1480,1070,2138,1480,1070,1730,1480,1244,1730,1480],"vertslength":9,"polys":[0,3,4,8],"polyslength":2,"regions":[2,1],"neighbors":[[[0],[0],[0],[0]],[[0],[0],[0],[0],[0]]]},"detail":{"verts":[1070,2240,1105,1070,1730,1105,1238,1730,1105,1238,2240,1105,1244,2240,1480,1130,2240,1480,1070,2138,1480,1070,1730,1480,1244,1730,1480],"vertslength":9,"tri`
++`s":[3,0,1,1,2,3,4,5,6,6,7,8,4,6,8],"trislength":5,"triTopoly":[0,0,1,1,1],"baseVert":[0,4],"vertsCount":[4,5],"baseTri":[0,2],"triCount":[2,3]},"links":{"poly":[],"cost":[],"type":[],"pos":[],"length":0}}],["0_6",{"tileId":"0_6","tx":0,"ty":6,"mesh":{"verts":[-2452,2426,1480,-2470,2426,1480,-2470,2240,1480,-2188,2240,1480,-2440,2396,1105,-2458,2402,1105,-2458,2240,1105,-2428,2408,1105,-2440,2396,1105,-2458,2240,1105,-1990,2240,1105,-1990,2426,1105,-1990,2426,1105,-2434,2426,1105,-2428,2408,1105,`
++`-1990,2270,1480,-1990,2426,1480,-2398,2426,1480],"vertslength":18,"polys":[0,3,4,6,7,11,12,14,15,17],"polyslength":5,"regions":[2,1,1,1,3],"neighbors":[[[0],[0],[0],[0]],[[0],[0],[1,2]],[[0],[1,1],[0],[0],[1,3]],[[0],[0],[1,2]],[[0],[0],[0]]]},"detail":{"verts":[-2452,2426,1480,-2470,2426,1480,-2470,2240,1480,-2188,2240,1480,-2440,2396,1105,-2458,2402,1105,-2458,2240,1105,-2428,2408,1105,-2440,2396,1105,-2458,2240,1105,-1990,2240,1105,-1990,2426,1105,-1990,2426,1105,-2434,2426,1105,-2428,2408,11`
++`05,-1990,2270,1480,-1990,2426,1480,-2398,2426,1480],"vertslength":18,"tris":[0,1,2,0,2,3,4,5,6,7,8,9,10,11,7,7,9,10,12,13,14,15,16,17],"trislength":8,"triTopoly":[0,0,1,2,2,2,3,4],"baseVert":[0,4,7,12,15],"vertsCount":[4,3,5,3,3],"baseTri":[0,2,3,6,7],"triCount":[2,1,3,1,1]},"links":{"poly":[0,4],"cost":[1450.9541015625],"type":[1],"pos":[-2415.9130859375,2400.5751953125,1480,-2398,2426,1480],"length":1}}],["1_6",{"tileId":"1_6","tx":1,"ty":6,"mesh":{"verts":[-1558,2240,1105,-1570,2282,1105,-158`
++`8,2294,1105,-1990,2240,1105,-1588,2294,1105,-1570,2312,1105,-1564,2426,1105,-1990,2426,1105,-1990,2240,1105,-1990,2426,1480,-1990,2264,1480,-1924,2240,1480,-1654,2240,1480,-1654,2426,1480,-1558,2300,1105,-1570,2282,1105,-1558,2240,1105,-1480,2240,1105,-1570,2312,1105,-1558,2300,1105,-1480,2240,1105,-1480,2426,1105,-1564,2426,1105,-1480,2402,1480,-1480,2426,1480,-1552,2426,1480],"vertslength":26,"polys":[0,3,4,8,9,13,14,17,18,22,23,25],"polyslength":6,"regions":[1,1,2,3,3,4],"neighbors":[[[1,3],[`
++`0],[1,1],[0]],[[0],[1,4],[0],[0],[1,0]],[[0],[0],[0],[0],[0]],[[0],[1,0],[0],[1,4]],[[0],[1,3],[0],[0],[1,1]],[[0],[0],[0]]]},"detail":{"verts":[-1558,2240,1105,-1570,2282,1105,-1588,2294,1105,-1990,2240,1105,-1588,2294,1105,-1570,2312,1105,-1564,2426,1105,-1990,2426,1105,-1990,2240,1105,-1990,2426,1480,-1990,2264,1480,-1924,2240,1480,-1654,2240,1480,-1654,2426,1480,-1558,2300,1105,-1570,2282,1105,-1558,2240,1105,-1480,2240,1105,-1570,2312,1105,-1558,2300,1105,-1480,2240,1105,-1480,2426,1105,-15`
++`64,2426,1105,-1480,2402,1480,-1480,2426,1480,-1552,2426,1480],"vertslength":26,"tris":[0,1,2,0,2,3,4,5,6,4,6,7,4,7,8,9,10,11,11,12,13,9,11,13,14,15,16,14,16,17,18,19,20,21,22,18,18,20,21,23,24,25],"trislength":14,"triTopoly":[0,0,1,1,1,2,2,2,3,3,4,4,4,5],"baseVert":[0,4,9,14,18,23],"vertsCount":[4,5,5,4,5,3],"baseTri":[0,2,5,8,10,13],"triCount":[2,3,3,2,3,1]},"links":{"poly":[],"cost":[],"type":[],"pos":[],"length":0}}],["2_6",{"tileId":"2_6","tx":2,"ty":6,"mesh":{"verts":[-1480,2426,1105,-1480,`
++`2240,1105,-970,2240,1105,-970,2426,1105,-988,2240,1480,-970,2240,1480,-970,2426,1480,-1480,2426,1480,-1480,2396,1480],"vertslength":9,"polys":[0,3,4,8],"polyslength":2,"regions":[1,2],"neighbors":[[[0],[0],[0],[0]],[[0],[0],[0],[0],[0]]]},"detail":{"verts":[-1480,2426,1105,-1480,2240,1105,-970,2240,1105,-970,2426,1105,-988,2240,1480,-970,2240,1480,-970,2426,1480,-1480,2426,1480,-1480,2396,1480],"vertslength":9,"tris":[3,0,1,1,2,3,4,5,6,6,7,8,4,6,8],"trislength":5,"triTopoly":[0,0,1,1,1],"baseVer`
++`t":[0,4],"vertsCount":[4,5],"baseTri":[0,2],"triCount":[2,3]},"links":{"poly":[],"cost":[],"type":[],"pos":[],"length":0}}],["3_6",{"tileId":"3_6","tx":3,"ty":6,"mesh":{"verts":[-970,2426,1105,-970,2240,1105,-460,2240,1105,-460,2426,1105,-970,2426,1480,-970,2240,1480,-460,2240,1480,-460,2426,1480],"vertslength":8,"polys":[0,3,4,7],"polyslength":2,"regions":[1,2],"neighbors":[[[0],[0],[0],[0]],[[0],[0],[0],[0]]]},"detail":{"verts":[-970,2426,1105,-970,2240,1105,-460,2240,1105,-460,2426,1105,-970,`
++`2426,1480,-970,2240,1480,-460,2240,1480,-460,2426,1480],"vertslength":8,"tris":[3,0,1,1,2,3,7,4,5,5,6,7],"trislength":4,"triTopoly":[0,0,1,1],"baseVert":[0,4],"vertsCount":[4,4],"baseTri":[0,2],"triCount":[2,2]},"links":{"poly":[],"cost":[],"type":[],"pos":[],"length":0}}],["4_6",{"tileId":"4_6","tx":4,"ty":6,"mesh":{"verts":[-460,2426,1105,-460,2240,1105,50,2240,1105,50,2426,1105,-460,2426,1480,-460,2240,1480,50,2240,1480,50,2426,1480],"vertslength":8,"polys":[0,3,4,7],"polyslength":2,"regions"`
++`:[1,2],"neighbors":[[[0],[0],[0],[0]],[[0],[0],[0],[0]]]},"detail":{"verts":[-460,2426,1105,-460,2240,1105,50,2240,1105,50,2426,1105,-460,2426,1480,-460,2240,1480,50,2240,1480,50,2426,1480],"vertslength":8,"tris":[3,0,1,1,2,3,7,4,5,5,6,7],"trislength":4,"triTopoly":[0,0,1,1],"baseVert":[0,4],"vertsCount":[4,4],"baseTri":[0,2],"triCount":[2,2]},"links":{"poly":[],"cost":[],"type":[],"pos":[],"length":0}}],["5_6",{"tileId":"5_6","tx":5,"ty":6,"mesh":{"verts":[224,2240,1105,206,2282,1105,188,2300,1`
++`105,50,2240,1105,188,2300,1105,212,2312,1105,218,2426,1105,50,2426,1105,50,2240,1105,50,2426,1480,50,2240,1480,560,2240,1480,560,2438,1480,224,2294,1105,206,2282,1105,224,2240,1105,560,2240,1105,218,2426,1105,212,2312,1105,224,2294,1105,560,2240,1105,560,2426,1105],"vertslength":22,"polys":[0,3,4,8,9,12,13,16,17,21],"polyslength":5,"regions":[3,3,1,2,2],"neighbors":[[[1,3],[0],[1,1],[0]],[[0],[1,4],[0],[0],[1,0]],[[0],[0],[0],[0]],[[0],[1,0],[0],[1,4]],[[1,1],[0],[1,3],[0],[0]]]},"detail":{"vert`
++`s":[224,2240,1105,206,2282,1105,188,2300,1105,50,2240,1105,188,2300,1105,212,2312,1105,218,2426,1105,50,2426,1105,50,2240,1105,50,2426,1480,50,2240,1480,560,2240,1480,560,2438,1480,224,2294,1105,206,2282,1105,224,2240,1105,560,2240,1105,218,2426,1105,212,2312,1105,224,2294,1105,560,2240,1105,560,2426,1105],"vertslength":22,"tris":[0,1,2,0,2,3,4,5,6,4,6,7,4,7,8,9,10,11,9,11,12,13,14,15,13,15,16,17,18,19,21,17,19,19,20,21],"trislength":12,"triTopoly":[0,0,1,1,1,2,2,3,3,4,4,4],"baseVert":[0,4,9,13,`
++`17],"vertsCount":[4,5,4,4,5],"baseTri":[0,2,5,7,9],"triCount":[2,3,2,2,3]},"links":{"poly":[],"cost":[],"type":[],"pos":[],"length":0}}],["6_6",{"tileId":"6_6","tx":6,"ty":6,"mesh":{"verts":[560,2426,1105,560,2240,1105,1070,2240,1105,1070,2426,1105,908,2240,1480,1070,2336,1480,1070,2438,1480,560,2438,1480,560,2240,1480],"vertslength":9,"polys":[0,3,4,8],"polyslength":2,"regions":[2,1],"neighbors":[[[0],[0],[0],[0]],[[0],[0],[0],[0],[0]]]},"detail":{"verts":[560,2426,1105,560,2240,1105,1070,2240,`
++`1105,1070,2426,1105,908,2240,1480,1070,2336,1480,1070,2438,1480,560,2438,1480,560,2240,1480],"vertslength":9,"tris":[3,0,1,1,2,3,4,5,6,7,8,4,4,6,7],"trislength":5,"triTopoly":[0,0,1,1,1],"baseVert":[0,4],"vertsCount":[4,5],"baseTri":[0,2],"triCount":[2,3]},"links":{"poly":[],"cost":[],"type":[],"pos":[],"length":0}}],["7_6",{"tileId":"7_6","tx":7,"ty":6,"mesh":{"verts":[1208,2420,1105,1226,2408,1105,1238,2426,1105,1238,2426,1105,1226,2408,1105,1214,2384,1105,1238,2240,1105,1208,2420,1105,1238,24`
++`26,1105,1070,2426,1105,1196,2396,1105,1208,2420,1105,1070,2426,1105,1214,2384,1105,1196,2396,1105,1070,2426,1105,1070,2240,1105,1238,2240,1105,1070,2342,1480,1226,2432,1480,1070,2438,1480,1136,2240,1480,1244,2240,1480,1244,2414,1480],"vertslength":24,"polys":[0,2,3,6,7,9,10,12,13,17,18,20,21,23],"polyslength":7,"regions":[1,1,1,1,1,3,2],"neighbors":[[[0],[1,1],[1,2]],[[1,0],[0],[1,4],[0]],[[1,0],[0],[1,3]],[[0],[1,2],[1,4]],[[0],[1,3],[0],[0],[1,1]],[[0],[0],[0]],[[0],[0],[0]]]},"detail":{"verts`
++`":[1208,2420,1105,1226,2408,1105,1238,2426,1105,1238,2426,1105,1226,2408,1105,1214,2384,1105,1238,2240,1105,1208,2420,1105,1238,2426,1105,1070,2426,1105,1196,2396,1105,1208,2420,1105,1070,2426,1105,1214,2384,1105,1196,2396,1105,1070,2426,1105,1070,2240,1105,1238,2240,1105,1070,2342,1480,1226,2432,1480,1070,2438,1480,1136,2240,1480,1244,2240,1480,1244,2414,1480],"vertslength":24,"tris":[0,1,2,3,4,5,3,5,6,7,8,9,10,11,12,13,14,15,16,17,13,13,15,16,18,19,20,21,22,23],"trislength":10,"triTopoly":[0,1`
++`,1,2,3,4,4,4,5,6],"baseVert":[0,3,7,10,13,18,21],"vertsCount":[3,4,3,3,5,3,3],"baseTri":[0,1,3,4,5,8,9],"triCount":[1,2,1,1,3,1,1]},"links":{"poly":[5,6],"cost":[972],"type":[1],"pos":[1226,2432,1480,1244,2414,1480],"length":1}}],["0_7",{"tileId":"0_7","tx":0,"ty":7,"mesh":{"verts":[],"vertslength":0,"polys":[],"polyslength":0,"regions":[],"neighbors":[]},"detail":{"verts":[],"vertslength":0,"tris":[],"trislength":0,"triTopoly":[],"baseVert":[],"vertsCount":[],"baseTri":[],"triCount":[]},"links"`
++`:{"poly":[],"cost":[],"type":[],"pos":[],"length":0}}],["1_7",{"tileId":"1_7","tx":1,"ty":7,"mesh":{"verts":[],"vertslength":0,"polys":[],"polyslength":0,"regions":[],"neighbors":[]},"detail":{"verts":[],"vertslength":0,"tris":[],"trislength":0,"triTopoly":[],"baseVert":[],"vertsCount":[],"baseTri":[],"triCount":[]},"links":{"poly":[],"cost":[],"type":[],"pos":[],"length":0}}],["2_7",{"tileId":"2_7","tx":2,"ty":7,"mesh":{"verts":[],"vertslength":0,"polys":[],"polyslength":0,"regions":[],"neighbo`
++`rs":[]},"detail":{"verts":[],"vertslength":0,"tris":[],"trislength":0,"triTopoly":[],"baseVert":[],"vertsCount":[],"baseTri":[],"triCount":[]},"links":{"poly":[],"cost":[],"type":[],"pos":[],"length":0}}],["3_7",{"tileId":"3_7","tx":3,"ty":7,"mesh":{"verts":[],"vertslength":0,"polys":[],"polyslength":0,"regions":[],"neighbors":[]},"detail":{"verts":[],"vertslength":0,"tris":[],"trislength":0,"triTopoly":[],"baseVert":[],"vertsCount":[],"baseTri":[],"triCount":[]},"links":{"poly":[],"cost":[],"ty`
++`pe":[],"pos":[],"length":0}}],["4_7",{"tileId":"4_7","tx":4,"ty":7,"mesh":{"verts":[],"vertslength":0,"polys":[],"polyslength":0,"regions":[],"neighbors":[]},"detail":{"verts":[],"vertslength":0,"tris":[],"trislength":0,"triTopoly":[],"baseVert":[],"vertsCount":[],"baseTri":[],"triCount":[]},"links":{"poly":[],"cost":[],"type":[],"pos":[],"length":0}}],["5_7",{"tileId":"5_7","tx":5,"ty":7,"mesh":{"verts":[],"vertslength":0,"polys":[],"polyslength":0,"regions":[],"neighbors":[]},"detail":{"verts"`
++`:[],"vertslength":0,"tris":[],"trislength":0,"triTopoly":[],"baseVert":[],"vertsCount":[],"baseTri":[],"triCount":[]},"links":{"poly":[],"cost":[],"type":[],"pos":[],"length":0}}],["6_7",{"tileId":"6_7","tx":6,"ty":7,"mesh":{"verts":[],"vertslength":0,"polys":[],"polyslength":0,"regions":[],"neighbors":[]},"detail":{"verts":[],"vertslength":0,"tris":[],"trislength":0,"triTopoly":[],"baseVert":[],"vertsCount":[],"baseTri":[],"triCount":[]},"links":{"poly":[],"cost":[],"type":[],"pos":[],"length":`
++`0}}],["7_7",{"tileId":"7_7","tx":7,"ty":7,"mesh":{"verts":[],"vertslength":0,"polys":[],"polyslength":0,"regions":[],"neighbors":[]},"detail":{"verts":[],"vertslength":0,"tris":[],"trislength":0,"triTopoly":[],"baseVert":[],"vertsCount":[],"baseTri":[],"triCount":[]},"links":{"poly":[],"cost":[],"type":[],"pos":[],"length":0}}]]}`;
     }
 }
 
@@ -19266,6 +20675,7 @@ class NavMesh {
             this.importNavData(new StaticData().Data);
         }
         this._refreshRuntime();
+        this.debug();
     }
     /**
      * 更新指定位置所在 Tile 的导航网格。
@@ -19426,7 +20836,7 @@ class NavMesh {
         //this.debugTools.debugDrawPolyPath(polyPath.path,0.5);
         //if (!polyPath || polyPath.path.length === 0) return [];
         const funnelPath = this.funnel.build(polyPath.path, polyPath.start, polyPath.end);
-        this.debugTools.debugDrawfunnelPath(funnelPath,0.5);
+        //this.debugTools.debugDrawfunnelPath(funnelPath,0.5);
         return funnelPath;
         //if (!ans || ans.length === 0) return [];
         //多边形总数：649跳点数：82
@@ -19443,6 +20853,8 @@ class NavMesh {
 
 /** 世界重力 (hu/s²) */
 const gravity = 800;
+/** 跳跃过程速度 (hu/s) */
+const jumpSpeed = 450;
 /** 地面摩擦系数 */
 const friction = 6;
 /** 爬台阶高度 (hu) */
@@ -19453,6 +20865,12 @@ const goalTolerance = 20;
 const arriveDistance = 1;
 /** 转向速度 (度/s) */
 const turnSpeed = 360;
+/** movement.update 最多拆成多少个轮转分片。 */
+const movementUpdateShardCount = 2;
+/** 异常长帧时单个实体单次最多消费多少累计 dt (s)。 */
+const movementMaxAccumulatedDt = 0.25;
+/** 真实地面检测最小间隔 (s)，沿用原 64Hz 下每 8 tick 的语义。 */
+const groundUpdateInterval = 8 / 64;
 
 // ── 碰撞相关 ────────────────────────────────────────────────
 /** 碰撞盒最小点 */
@@ -19468,9 +20886,9 @@ const surfaceEpsilon = 4;
  */
 const separationRadius = 32;
 /** 分离力满额生效的近距离半径 (hu) */
-const separationMinRadius = 10;
+const separationMinRadius = 24;
 /** 最大分离速度 (hu/s) */
-const separationMaxStrength = 150;
+const separationMaxStrength = 120;
 
 // ── 卡死检测 ────────────────────────────────────────────────
 /** 低于此距离认为没动 (hu) */
@@ -19569,17 +20987,18 @@ class MoveProbe {
      */
     tryStep(start, move, step, ignoreEntities) {
         const up = vec$1.Zfly(start, step);
-        const trUp = this.traceMove(start, up, ignoreEntities);
-        if (trUp.hit) return { success: false, endPos: trUp.hitPos };
 
         const forwardEnd = vec$1.add(up, move);
         const trForward = this.traceMove(up, forwardEnd, ignoreEntities);
-        if (trForward.hit) return { success: false, endPos: trUp.hitPos };
+        if (trForward.hit) return { success: false, endPos: start };
+
+        const trUp = this.traceMove(start, up, ignoreEntities);
+        if (trUp.hit) return { success: false, endPos: start };
 
         const downEnd = vec$1.Zfly(forwardEnd, -step);
         const trDown = this.traceMove(forwardEnd, downEnd, ignoreEntities);
         if (!trDown.hit) return { success: false, endPos: trDown.hitPos };
-        if (trDown.normal.z < 0.5) return { success: false, endPos: trDown.hitPos };
+        if (trDown.normal.z < 0.5) return { success: false, endPos: start };
 
         return { success: true, endPos: trDown.hitPos };
     }
@@ -19591,6 +21010,14 @@ class MoveProbe {
 
 /** @typedef {import("cs_script/point_script").Vector} Vector */
 /** @typedef {import("cs_script/point_script").Entity} Entity */
+
+const SEPARATION_RADIUS = separationRadius;
+const SEPARATION_MAX_STRENGTH = separationMaxStrength;
+const SEPARATION_MAX_STRENGTH_SQ = SEPARATION_MAX_STRENGTH * SEPARATION_MAX_STRENGTH;
+const SEPARATION_MIN_RADIUS_SQ = separationMinRadius * separationMinRadius;
+const SEPARATION_RADIUS_SQ = SEPARATION_RADIUS * SEPARATION_RADIUS;
+const SEPARATION_FALLOFF_RANGE_SQ = Math.max(1e-6, SEPARATION_RADIUS_SQ - SEPARATION_MIN_RADIUS_SQ);
+const SEPARATION_MIN_DIST_SQ = 16;
 
 /**
  * @typedef {object} SeparationContext
@@ -19634,6 +21061,7 @@ class Motor {
         // ── 卡死检测 ──
         this._stuckLastPos = vec$1.get(0, 0, 0);
         this._stuckTime = 0;
+        this._groundUpdateCooldown = 0;
     }
 
     // ───────────────────── 公共运动方法 ─────────────────────
@@ -19656,8 +21084,10 @@ class Motor {
         move.z = 0;
 
         let newPos = this._stepSlideMove(pos, move, sepCtx.entities).pos;
-        this._updateGround(newPos, sepCtx.entities);
-        newPos = this._snapToGround(newPos);
+        const didUpdateGround = this._updateGround(newPos, sepCtx.entities, dt);
+        if (didUpdateGround) {
+            newPos = this._snapToGround(newPos);
+        }
         this._updateStuck(newPos, dt);
         return newPos;
     }
@@ -19690,7 +21120,7 @@ class Motor {
                 this.velocity = this._clipVelocity(this.velocity, n);
             }
         }
-        this._updateGround(newPos, sepCtx.entities);
+        this._updateGround(newPos, sepCtx.entities, dt);
         this._updateStuck(newPos, dt);
         return newPos;
     }
@@ -19717,6 +21147,7 @@ class Motor {
             }
         }
         this.onGround = false;
+        this._groundUpdateCooldown = 0;
         this._updateStuck(newPos, dt);
         return newPos;
     }
@@ -19757,11 +21188,15 @@ class Motor {
             }
         }
         this.onGround = false;
+        this._groundUpdateCooldown = 0;
         this._updateStuck(newPos, dt);
         return newPos;
     }
 
-    stop() { this.velocity = vec$1.get(0, 0, 0); }
+    stop() {
+        this.velocity = vec$1.get(0, 0, 0);
+        this._groundUpdateCooldown = 0;
+    }
     isOnGround() { return this.onGround; }
     getVelocity() { return vec$1.clone(this.velocity); }
 
@@ -19824,13 +21259,6 @@ class Motor {
      */
     _computeSeparation(pos, sepCtx) {
         if (!sepCtx.spatialIndex) return vec$1.get(0, 0, 0);
-        const radius = separationRadius;
-        const maxStrength = separationMaxStrength;
-        const maxStrengthSq = maxStrength * maxStrength;
-        const minRadiusSq = separationMinRadius * separationMinRadius;
-        const radiusSq = radius * radius;
-        const falloffRangeSq = Math.max(1e-6, radiusSq - minRadiusSq);
-        const minDistSq = 16;
 
         let sep = vec$1.get(0, 0, 0);
         let hitCount = 0;
@@ -19839,26 +21267,26 @@ class Motor {
             const otherPos = neighbor.position;
             let delta = vec$1.sub(pos, otherPos);
             const dist2Dsq = vec$1.length2Dsq(delta);
-            if (dist2Dsq < minDistSq || vec$1.lengthsq(delta) > radiusSq) return;
+            if (dist2Dsq < SEPARATION_MIN_DIST_SQ || vec$1.lengthsq(delta) > SEPARATION_RADIUS_SQ) return;
             delta.z = 0;
             const l1 = Math.abs(delta.x) + Math.abs(delta.y);
             if (l1 < 1e-6) return;
             const dir = vec$1.scale(delta, 1 / l1);
             let strength = 1.0;
-            if (dist2Dsq > minRadiusSq) {
-                const t = Math.min(1, (dist2Dsq - minRadiusSq) / falloffRangeSq);
+            if (dist2Dsq > SEPARATION_MIN_RADIUS_SQ) {
+                const t = Math.min(1, (dist2Dsq - SEPARATION_MIN_RADIUS_SQ) / SEPARATION_FALLOFF_RANGE_SQ);
                 strength = 1 - t * t * (3 - 2 * t);
             }
-            sep = vec$1.add(sep, vec$1.scale(dir, strength * maxStrength));
+            sep = vec$1.add(sep, vec$1.scale(dir, strength * SEPARATION_MAX_STRENGTH));
             hitCount += 1;
         };
 
         if (typeof sepCtx.spatialIndex.forEachInSphere === "function") {
-            sepCtx.spatialIndex.forEachInSphere(pos, radius, accumulateNeighbor, {
+            sepCtx.spatialIndex.forEachInSphere(pos, SEPARATION_RADIUS, accumulateNeighbor, {
                 excludeEntity: sepCtx.selfBreakable,
             });
         } else {
-            const neighbors = sepCtx.spatialIndex.querySphere(pos, radius, {
+            const neighbors = sepCtx.spatialIndex.querySphere(pos, SEPARATION_RADIUS, {
                 excludeEntity: sepCtx.selfBreakable,
             });
             for (let i = 0; i < neighbors.length; i++) {
@@ -19869,7 +21297,7 @@ class Motor {
         if (hitCount === 0) return vec$1.get(0, 0, 0);
 
         const lenSq = vec$1.length2Dsq(sep);
-        if (lenSq > maxStrengthSq) sep = vec$1.scale(sep, maxStrengthSq / lenSq);
+        if (lenSq > SEPARATION_MAX_STRENGTH_SQ) sep = vec$1.scale(sep, SEPARATION_MAX_STRENGTH_SQ / lenSq);
         return sep;
     }
 
@@ -19887,7 +21315,7 @@ class Motor {
         const step = this.probe.tryStep(start, move, this.stepHeight, allm);
         if (step.success) return { pos: step.endPos };
 
-        const MAX_CLIPS = 3;
+        const MAX_CLIPS = 2;
         let remaining = vec$1.clone(move);
         const clipNormals = [];
         let pos = start;
@@ -19911,7 +21339,7 @@ class Motor {
      * @param {Entity[]} allm
      */
     _airSlideMove(start, move, allm) {
-        const MAX_CLIPS = 3;
+        const MAX_CLIPS = 2;
         let remaining = vec$1.clone(move);
         /** @type {Vector[]} */
         const clipNormals = [];
@@ -19972,17 +21400,32 @@ class Motor {
     /**
      * @param {Vector} pos
      * @param {Entity[]} allm
+     * @param {number} dt
+     * @returns {boolean}
      */
-    _updateGround(pos, allm) {
+    _updateGround(pos, allm, dt) {
+        this._groundUpdateCooldown = Math.max(0, this._groundUpdateCooldown - Math.max(0, dt));
+        if (this._groundUpdateCooldown > 1e-6) {
+            return false;
+        }
+        this._groundUpdateCooldown = groundUpdateInterval;
+
         const tr = this.probe.traceGround(pos, allm);
         this.wasOnGround = this.onGround;
         this.ground.hit = false;
-        if (!tr.hit || !tr.hitPos) { this.onGround = false; return; }
-        if (tr.normal.z < 0.5) { this.onGround = false; return; }
+        if (!tr.hit || !tr.hitPos) {
+            this.onGround = false;
+            return true;
+        }
+        if (tr.normal.z < 0.5) {
+            this.onGround = false;
+            return true;
+        }
         this.onGround = true;
         this.ground.hit = true;
         this.ground.normal = vec$1.clone(tr.normal);
         this.ground.point = vec$1.clone(tr.hitPos);
+        return true;
     }
 
     /**
@@ -20119,7 +21562,7 @@ class MoveWalk extends MoveMode {
 
         // 路径节点驱动的模式切换请求
         if (goal?.mode === PathState.JUMP) {
-            ctx.motor.velocity.z = 400;
+            ctx.motor.velocity.z = jumpSpeed;
             ctx.requestModeSwitch("air");
             return pos;
         }
@@ -20230,7 +21673,7 @@ class MoveLadder extends MoveMode {
             return pos;
         }
         if (goal.mode !== PathState.LADDER) {
-            ctx.motor.velocity.z = 400;
+            ctx.motor.velocity.z = jumpSpeed;
             ctx.requestModeSwitch("air");
             return pos;
         }
@@ -20263,7 +21706,7 @@ function computeWish(ctx, goal) {
             return;
         }
         ctx.wishDir = vec$1.normalize(toGoal);
-        ctx.wishSpeed = 400;
+        ctx.wishSpeed = jumpSpeed;
     } else {
         if (dist <= arriveDistance * arriveDistance) {
             ctx.wishDir = vec$1.get(0, 0, 0);
@@ -20705,12 +22148,15 @@ class SpatialHashGrid {
      * @param {{ cellSize?: number; minNodeSize?: number; padding?: number }} [config]
      */
     constructor(config = {}) {
-        const legacyMinNodeSize = config.minNodeSize ?? 64;
+        /**
+         * 单元格边长。较小的 cellSize 可以减少每个桶内的实体数量，提高查询效率，但会增加桶的总数和维护开销。
+         */
+        const legacyMinNodeSize = config.minNodeSize ?? 48;
         /**
          * 哈希网格边长。
          * 默认沿用旧 minNodeSize 的一半，使默认值为 32，贴近当前分离查询半径。
          */
-        this.cellSize = Math.max(1, config.cellSize ?? Math.max(16, legacyMinNodeSize * 0.5));
+        this.cellSize = Math.max(1, config.cellSize ?? Math.max(48, legacyMinNodeSize * 0.5));
         /**
          * 保留旧配置字段，避免外部传参报废；空间哈希本身不依赖该值。
          */
@@ -20875,6 +22321,7 @@ class SpatialHashGrid {
         for (let cellZ = minCellZ; cellZ <= maxCellZ; cellZ++) {
             for (let cellY = minCellY; cellY <= maxCellY; cellY++) {
                 for (let cellX = minCellX; cellX <= maxCellX; cellX++) {
+                    
                     const bucket = this._cells.get(this._getCellKey(cellX, cellY, cellZ));
                     if (!bucket) continue;
 
@@ -21090,6 +22537,7 @@ class SpatialHashGrid {
 /**
  * @module 实体移动/移动管理器
  */
+
 /**
  * 通用实体 Movement 管理器。
  * 由 main 持有，负责注册/注销任意实体的 Movement 实例，
@@ -21116,6 +22564,9 @@ const EMPTY_SEPARATION_CONTEXT = {
  * @property {boolean}  usePathRefresh  当前任务是否允许刷新路径
  * @property {Entity|null}  targetEntity  追击目标实体（来自最后一次 Move 请求）
  * @property {Vector|null}  targetPosition  目标坐标（来自最后一次 Move 请求）
+ * @property {number}  pendingUpdateDt  尚未消费的累计更新时长
+ * @property {number}  lastAccumulatedAt  上次同步累计时长的游戏时间
+ * @property {boolean}  isUpdateActive  当前是否允许累计并执行 movement.update
  */
 
 /**
@@ -21139,6 +22590,11 @@ class MovementManager {
         /** @type {Map<Entity, number>} */
         this._breakableIgnoreEntityIndexes = new Map();
         this._separationSpatialHash = new SpatialHashGrid();
+        /** @type {Entity[]} */
+        this._updateOrder = [];
+        /** @type {Map<Entity, number>} */
+        this._updateOrderIndexes = new Map();
+        this._updateShardCursor = 0;
 
         /** 路径调度最小堆，按上次更新时间排序。 */
         this._pathHeap = new _MinHeap(256);
@@ -21213,7 +22669,11 @@ class MovementManager {
             usePathRefresh: false,
             targetEntity: null,
             targetPosition: null,
+            pendingUpdateDt: 0,
+            lastAccumulatedAt: 0,
+            isUpdateActive: false,
         });
+        this._addUpdateEntity(key);
         this._pathHeap.push(key, 0);
         eventBus.emit(event.Movement.Out.OnRegistered, {
             entity: key,
@@ -21236,6 +22696,7 @@ class MovementManager {
             this._modelToBreakable.delete(key);
         }
         this._entries.delete(key);
+        this._removeUpdateEntity(key);
         this._pathHeap.remove(key);
         eventBus.emit(event.Movement.Out.OnRemoved, {
             entity: key,
@@ -21284,18 +22745,18 @@ class MovementManager {
      * @param {number} now 当前游戏时间
      * @param {number} dt 帧间隔
      */
-    tick(now,dt) {
-        this._consumeRequests();
-        this._tickPathRefresh(now);
-        this._updateAll(dt);
+    tick(now, dt) {
+        this._consumeRequests(now);
+        this._tickPathRefresh(now);//以上2.5ms
+        this._updateAll(now);//5.5ms
     }
 
     // ═══════════════════════════════════════════════
     // 内部：请求消费
     // ═══════════════════════════════════════════════
 
-    /** 按 entity 合并队列中的请求（保留最高优先级），然后逐条应用。 */
-    _consumeRequests() {
+    /** @param {number} now 按 entity 合并队列中的请求（保留最高优先级），然后逐条应用。 */
+    _consumeRequests(now) {
         if (this._pendingRequests.length === 0) return;
         const merged = new Map();
         for (const req of this._pendingRequests) {
@@ -21306,7 +22767,7 @@ class MovementManager {
         }
         this._pendingRequests.length = 0;
         for (const [, req] of merged) {
-            this._applyRequest(req);
+            this._applyRequest(req, now);
         }
     }
 
@@ -21314,8 +22775,9 @@ class MovementManager {
      * 应用单条移动请求（Move / Stop / Remove）。
      * 内部按请求字段映射到具体 Movement API，同时更新 entry 长期任务状态。
      * @param {import("../util/definition").MovementRequest} req
+        * @param {number} now
      */
-    _applyRequest(req) {
+    _applyRequest(req, now) {
         let key = req.entity;
         if (!this._entries.has(key) && req.type === "Move") {
             this.register(key, {
@@ -21339,6 +22801,7 @@ class MovementManager {
             entry.usePathRefresh = false;
             entry.targetEntity = null;
             entry.targetPosition = null;
+            this._deactivateEntryUpdate(entry, now);
             eventBus.emit(event.Movement.Out.OnStopped, {
                 entity: key,
             });
@@ -21374,6 +22837,7 @@ class MovementManager {
         }
 
         entry.movement.resume();
+        this._activateEntryUpdate(entry, now);
     }
 
     // ═══════════════════════════════════════════════
@@ -21534,10 +22998,26 @@ class MovementManager {
     // ═══════════════════════════════════════════════
 
     /**
-     * @param {number} dt
+    * @param {number} now
      */
-    _updateAll(dt) {
-        for (const [key, entry] of this._entries) {
+    _updateAll(now) {
+        const totalEntries = this._updateOrder.length;
+        if (totalEntries === 0) return;
+
+        const shardCount = this._getShardCount(totalEntries);
+        if (this._updateShardCursor >= shardCount) {
+            this._updateShardCursor = 0;
+        }
+
+        const shardIndex = this._updateShardCursor;
+        for (let index = shardIndex; index < totalEntries; index += shardCount) {
+            const key = this._updateOrder[index];
+            const entry = this._entries.get(key);
+            if (!entry) continue;
+
+            const updateDt = this._consumeEntryUpdateDt(entry, now);
+            if (updateDt <= 0) continue;
+
             const selfBreakable = this._modelToBreakable.get(key) ?? null;
             const sepCtx = entry.useNPCSeparation
                 ? {
@@ -21546,11 +23026,87 @@ class MovementManager {
                     selfBreakable,
                 }
                 : EMPTY_SEPARATION_CONTEXT;
-            const newPos = entry.movement.update(dt, sepCtx);
+            const newPos = entry.movement.update(updateDt, sepCtx);
             if (selfBreakable?.IsValid?.() && newPos) {
                 this._separationSpatialHash.update(selfBreakable, newPos);
             }
         }
+
+        this._updateShardCursor = (shardIndex + 1) % shardCount;
+    }
+
+    /** @param {Entity} key */
+    _addUpdateEntity(key) {
+        if (!key || this._updateOrderIndexes.has(key)) return false;
+        this._updateOrderIndexes.set(key, this._updateOrder.length);
+        this._updateOrder.push(key);
+        return true;
+    }
+
+    /** @param {Entity} key */
+    _removeUpdateEntity(key) {
+        const index = this._updateOrderIndexes.get(key);
+        if (index === undefined) return false;
+
+        const lastIndex = this._updateOrder.length - 1;
+        const lastKey = this._updateOrder[lastIndex];
+
+        this._updateOrder[index] = lastKey;
+        this._updateOrder.pop();
+        this._updateOrderIndexes.delete(key);
+
+        if (lastKey && lastKey !== key) {
+            this._updateOrderIndexes.set(lastKey, index);
+        }
+
+        return true;
+    }
+
+    /** @param {MovementEntry} entry @param {number} now */
+    _activateEntryUpdate(entry, now) {
+        if (entry.isUpdateActive) return;
+        entry.isUpdateActive = true;
+        entry.pendingUpdateDt = 0;
+        entry.lastAccumulatedAt = now;
+    }
+
+    /** @param {MovementEntry} entry @param {number} now */
+    _deactivateEntryUpdate(entry, now) {
+        entry.isUpdateActive = false;
+        entry.pendingUpdateDt = 0;
+        entry.lastAccumulatedAt = now;
+    }
+
+    /** @param {MovementEntry} entry @param {number} now */
+    _consumeEntryUpdateDt(entry, now) {
+        if (!entry.isUpdateActive) {
+            entry.pendingUpdateDt = 0;
+            entry.lastAccumulatedAt = now;
+            return 0;
+        }
+
+        if (entry.lastAccumulatedAt <= 0) {
+            entry.lastAccumulatedAt = now;
+            return 0;
+        }
+
+        const elapsed = Math.max(0, now - entry.lastAccumulatedAt);
+        if (elapsed > 0) {
+            entry.pendingUpdateDt = Math.min(
+                movementMaxAccumulatedDt,
+                entry.pendingUpdateDt + elapsed
+            );
+            entry.lastAccumulatedAt = now;
+        }
+
+        const updateDt = entry.pendingUpdateDt;
+        entry.pendingUpdateDt = 0;
+        return updateDt;
+    }
+
+    /** @param {number} totalEntries */
+    _getShardCount(totalEntries) {
+        return Math.max(1, Math.min(movementUpdateShardCount, totalEntries));
     }
 
     // ═══════════════════════════════════════════════
@@ -21569,6 +23125,9 @@ class MovementManager {
         this._breakableIgnoreEntities = [];
         this._breakableIgnoreEntityIndexes.clear();
         this._separationSpatialHash.clear();
+        this._updateOrder.length = 0;
+        this._updateOrderIndexes.clear();
+        this._updateShardCursor = 0;
         this._pathHeap.clear();
         this._pendingRequests.length = 0;
     }
@@ -21716,8 +23275,8 @@ class AreaEffect {
         this.id = AreaEffect._nextId++;
         /** 效果类型标识（如 "fire"）。 */
         this.effectName = areaEffectStatics[desc.areaEffectStaticKey].effectName;
-        /** Buff 类型名字。 */
-        this.buffName = areaEffectStatics[desc.areaEffectStaticKey].buffName;
+        /** Buff 配置 id。 */
+        this.buffConfigId = areaEffectStatics[desc.areaEffectStaticKey].buffConfigId;
         /** 关联的粒子效果名字。
          * @type {string} */
         this.particleName = areaEffectStatics[desc.areaEffectStaticKey].particleName;
@@ -21855,7 +23414,7 @@ class AreaEffect {
                 effectId: this.id,
                 targetType: Target.Player,
                 hit: slot,
-                buffName: this.buffName,
+                buffConfigId: this.buffConfigId,
             };
             eventBus.emit(event.AreaEffects.Out.OnHitPlayer, payload);
         }
@@ -21883,7 +23442,7 @@ class AreaEffect {
                 effectId: this.id,
                 targetType: Target.Monster,
                 hit: monsterId,
-                buffName: this.buffName
+                buffConfigId: this.buffConfigId
             };
             eventBus.emit(event.AreaEffects.Out.OnHitMonster, payload);
         }
@@ -21914,7 +23473,7 @@ class AreaEffect {
 
         /** @type {import("../buff/buff_const").BuffAddRequest} */
         const addRequest = {
-            configid: this.buffName,
+            configid: this.buffConfigId,
             target,
             targetType,
             result: -1,
@@ -22094,6 +23653,441 @@ class AreaEffectManager {
 }
 
 /**
+ * @module 投掷物系统/投掷物运行单元
+ */
+
+/** @typedef {import("cs_script/point_script").Vector} Vector */
+/** @typedef {import("./throw_const").ThrowCreateRequest} ThrowCreateRequest */
+/** @typedef {import("./throw_const").ProjectileTickContext} ProjectileTickContext */
+/** @typedef {import("./throw_const").ProjectileHitEntry} ProjectileHitEntry */
+
+/**
+ * 单个投掷物实例的飞行与命中采样逻辑。
+ *
+ * 该类不直接依赖 eventBus；它只负责：
+ * - 根据初始参数推进飞行
+ * - 在结束时记录落点
+ * - 按目标类型与半径采样命中结果
+ * - 由 manager 在外层统一把结果组装成事件
+ *
+ * @navigationTitle 投掷物运行单元
+ */
+class ProjectileRunner {
+    /**
+     * @param {number} id
+     * @param {ThrowCreateRequest} params
+     */
+    constructor(id, params) {
+        this.id = id;
+        this.entity = params.entity;
+        this.source = params.source ?? null;
+        this.meta = params.meta ?? {};
+        this.speed = params.speed;
+        this.gravityScale = Math.max(0, params.gravityScale ?? 1);
+        this.radius = Math.max(0, params.radius ?? 128);
+        this.maxLifetime = Math.max(0.05, params.maxLifetime ?? 10);
+        this.maxTargets = Number.isFinite(params.maxTargets)
+            ? Math.max(0, Math.trunc(params.maxTargets ?? 0))
+            : 0;
+        this.targetType = params.targetType;
+
+        this._finished = false;
+        this._entityRemoved = false;
+        this._elapsed = 0;
+        /** @type {Vector|null} */
+        this._impactPos = null;
+        /** @type {ProjectileHitEntry[]} */
+        this._hitResults = [];
+
+        const startPos = vec$1.clone(params.startPos);
+        const endPos = vec$1.clone(params.endPos);
+        const toTarget = vec$1.sub(endPos, startPos);
+        const distance = vec$1.length(toTarget);
+        const duration = this.speed > 0 ? distance / this.speed : this.maxLifetime;
+        this._duration = Math.max(duration, 0.05);
+
+        if (this.gravityScale > 0) {
+            const gravity$1 = gravity * this.gravityScale;
+            this.velocity = vec$1.get(
+                toTarget.x / this._duration,
+                toTarget.y / this._duration,
+                (toTarget.z + 0.5 * gravity$1 * this._duration * this._duration) / this._duration
+            );
+        } else {
+            const direction = distance > 1e-6 ? vec$1.scale(toTarget, 1 / distance) : vec$1.get(0, 0, 0);
+            this.velocity = vec$1.scale(direction, this.speed);
+        }
+
+        this.entity.Teleport({
+            position: startPos,
+            velocity: vec$1.clone(this.velocity),
+        });
+    }
+
+    /**
+     * @param {number} dt
+     * @param {ProjectileTickContext} tickContext
+     * @returns {boolean} true 表示仍在飞行，false 表示已结束
+     */
+    update(dt, tickContext) {
+        if (this._finished) return false;
+        if (!this.entity?.IsValid?.()) {
+            this.abort();
+            return false;
+        }
+
+        const remainingDuration = this._duration - this._elapsed;
+        const remainingLifetime = this.maxLifetime - this._elapsed;
+        const stepDt = Math.min(dt, remainingDuration, remainingLifetime);
+        if (stepDt <= 0) {
+            this._finish(this.entity.GetAbsOrigin(), tickContext);
+            return false;
+        }
+
+        const start = this.entity.GetAbsOrigin();
+        const end = this._computeStepEnd(start, stepDt);
+        const trace = Instance.TraceLine({
+            start,
+            end,
+            ignorePlayers: false,
+            ignoreEntity: this._getIgnoredEntities(),
+        });
+
+        this._elapsed += stepDt;
+
+        if (trace?.didHit) {
+            const hitPos = vec$1.add(trace.end, vec$1.scale(trace.normal, surfaceEpsilon));
+            this.entity.Teleport({
+                position: hitPos,
+                velocity: vec$1.clone(this.velocity),
+            });
+            this._finish(hitPos, tickContext);
+            return false;
+        }
+
+        this.entity.Teleport({
+            position: end,
+            velocity: vec$1.clone(this.velocity),
+        });
+
+        if (this._elapsed >= this._duration || this._elapsed >= this.maxLifetime) {
+            this._finish(end, tickContext);
+            return false;
+        }
+
+        return true;
+    }
+
+    /**
+     * 提前终止，不产生命中结果。
+     */
+    abort() {
+        this._finished = true;
+        this._impactPos = null;
+        this._hitResults = [];
+    }
+
+    /**
+     * 移除投掷物实体。
+     * @returns {boolean}
+     */
+    removeEntity() {
+        if (this._entityRemoved) return false;
+        if (!this.entity?.IsValid?.()) {
+            this._entityRemoved = true;
+            return false;
+        }
+
+        this.entity.Remove();
+        this._entityRemoved = true;
+        return true;
+    }
+
+    /** @returns {boolean} */
+    isFinished() {
+        return this._finished;
+    }
+
+    /** @returns {Vector|null} */
+    getImpactPos() {
+        return this._impactPos ? vec$1.clone(this._impactPos) : null;
+    }
+
+    /** @returns {ProjectileHitEntry[]} */
+    getHitResults() {
+        return this._hitResults.map((entry) => ({ ...entry }));
+    }
+
+    /**
+     * @param {Vector} start
+     * @param {number} dt
+     * @returns {Vector}
+     */
+    _computeStepEnd(start, dt) {
+        if (this.gravityScale <= 0) {
+            return vec$1.add(start, vec$1.scale(this.velocity, dt));
+        }
+
+        const gravity$1 = gravity * this.gravityScale;
+        const end = vec$1.get(
+            start.x + this.velocity.x * dt,
+            start.y + this.velocity.y * dt,
+            start.z + this.velocity.z * dt - 0.5 * gravity$1 * dt * dt
+        );
+        this.velocity = vec$1.get(
+            this.velocity.x,
+            this.velocity.y,
+            this.velocity.z - gravity$1 * dt
+        );
+        return end;
+    }
+
+    /**
+     * @param {Vector} impactPos
+     * @param {ProjectileTickContext} tickContext
+     */
+    _finish(impactPos, tickContext) {
+        this._finished = true;
+        this._impactPos = vec$1.clone(impactPos);
+        this._hitResults = this._collectHits(impactPos, tickContext);
+    }
+
+    /**
+     * @param {Vector} center
+     * @param {ProjectileTickContext} tickContext
+     * @returns {ProjectileHitEntry[]}
+     */
+    _collectHits(center, tickContext) {
+        /** @type {ProjectileHitEntry[]} */
+        const results = [];
+
+        if (this.targetType === ThrowTarget.Player) {
+            for (const player of tickContext?.players ?? []) {
+                const pawn = player?.entityBridge?.pawn;
+                if (!pawn?.IsValid?.()) continue;
+
+                const distance = vec$1.length(pawn.GetAbsOrigin(), center);
+                if (distance > this.radius) continue;
+
+                results.push({
+                    targetType: ThrowTarget.Player,
+                    hit: player.slot,
+                    distance,
+                    player,
+                });
+            }
+        }
+
+        if (this.targetType === ThrowTarget.Monster) {
+            for (const monster of tickContext?.monsters ?? []) {
+                const model = monster?.model;
+                if (!model?.IsValid?.()) continue;
+
+                const distance = vec$1.length(model.GetAbsOrigin(), center);
+                if (distance > this.radius) continue;
+
+                results.push({
+                    targetType: ThrowTarget.Monster,
+                    hit: monster.id,
+                    distance,
+                    monster,
+                });
+            }
+        }
+
+        results.sort((left, right) => left.distance - right.distance);
+        if (this.maxTargets > 0 && results.length > this.maxTargets) {
+            return results.slice(0, this.maxTargets);
+        }
+
+        return results;
+    }
+
+    /**
+     * @returns {import("cs_script/point_script").Entity[]}
+     */
+    _getIgnoredEntities() {
+        /** @type {import("cs_script/point_script").Entity[]} */
+        const ignored = [];
+
+        if (this.entity?.IsValid?.()) {
+            ignored.push(this.entity);
+        }
+        if (this.source?.IsValid?.()) {
+            ignored.push(this.source);
+        }
+
+        return ignored;
+    }
+}
+
+/**
+ * @module 投掷物系统/投掷物管理器
+ */
+
+/**
+ * 投掷物管理器。
+ *
+ * 负责：
+ * - 监听创建/停止请求
+ * - 统一管理所有活跃投掷物实例
+ * - 每帧驱动飞行
+ * - 在命中或停止时桥接 Throw 模块事件
+ *
+ * @navigationTitle 投掷物管理器
+ */
+class ProjectileManager {
+    constructor() {
+        /** @type {Map<number, ProjectileRunner>} */
+        this._projectiles = new Map();
+        this._nextProjectileId = 1;
+        /** @type {Array<() => boolean>} */
+        this._unsubscribers = [
+            eventBus.on(event.Throw.In.CreateRequest, (/** @type {import("./throw_const").ThrowCreateRequest} */ payload) => {
+                payload.result = this.create(payload);
+            }),
+            eventBus.on(event.Throw.In.StopRequest, (/** @type {import("./throw_const").ThrowStopRequest} */ payload) => {
+                payload.result = this.stop(payload.projectileId, payload.removeEntity !== false);
+            }),
+        ];
+    }
+
+    /**
+     * @param {import("./throw_const").ThrowCreateRequest} desc
+     * @returns {number}
+     */
+    create(desc) {
+        if (!this._isValidCreateRequest(desc)) {
+            return -1;
+        }
+
+        const projectileId = this._nextProjectileId++;
+        const runner = new ProjectileRunner(projectileId, desc);
+        this._projectiles.set(projectileId, runner);
+
+        /** @type {import("./throw_const").OnProjectileCreated} */
+        const payload = {
+            projectileId,
+            entity: runner.entity,
+            targetType: runner.targetType,
+            source: runner.source,
+            meta: runner.meta,
+        };
+        eventBus.emit(event.Throw.Out.OnProjectileCreated, payload);
+
+        return projectileId;
+    }
+
+    /**
+     * @param {number} projectileId
+     * @param {boolean} [removeEntity]
+     * @returns {boolean}
+     */
+    stop(projectileId, removeEntity = true) {
+        const runner = this._projectiles.get(projectileId);
+        if (!runner) return false;
+
+        this._projectiles.delete(projectileId);
+        runner.abort();
+        const removedEntity = removeEntity ? runner.removeEntity() : false;
+        this._emitStopped(runner, removedEntity);
+        return true;
+    }
+
+    /**
+     * @param {number} now
+     * @param {number} dt
+     * @param {import("./throw_const").ProjectileTickContext} tickContext
+     */
+    tick(now, dt, tickContext) {
+
+        for (const [projectileId, runner] of this._projectiles.entries()) {
+            if (runner.update(dt, tickContext)) {
+                continue;
+            }
+
+            this._projectiles.delete(projectileId);
+            this._emitCompletion(runner);
+        }
+    }
+
+    cleanup() {
+        for (const [projectileId, runner] of this._projectiles.entries()) {
+            this._projectiles.delete(projectileId);
+            runner.abort();
+            const removedEntity = runner.removeEntity();
+            this._emitStopped(runner, removedEntity);
+        }
+    }
+
+    destroy() {
+        this.cleanup();
+        for (const unsubscribe of this._unsubscribers) {
+            unsubscribe();
+        }
+        this._unsubscribers.length = 0;
+    }
+
+    /**
+     * @param {import("./throw_const").ThrowCreateRequest} desc
+     * @returns {boolean}
+     */
+    _isValidCreateRequest(desc) {
+        if (!desc) return false;
+        if (!desc.entity?.IsValid?.()) return false;
+        if (!desc.startPos || !desc.endPos) return false;
+        if (typeof desc.speed !== "number" || !Number.isFinite(desc.speed) || desc.speed <= 0) return false;
+        if (desc.targetType !== "player" && desc.targetType !== "monster") return false;
+        return true;
+    }
+
+    /**
+     * @param {ProjectileRunner} runner
+     */
+    _emitCompletion(runner) {
+        const impactPos = runner.getImpactPos();
+        const hitResults = runner.getHitResults();
+
+        if (impactPos && hitResults.length > 0) {
+            /** @type {import("./throw_const").OnProjectileHit} */
+            const hitPayload = {
+                projectileId: runner.id,
+                entity: runner.entity,
+                impactPos,
+                radius: runner.radius,
+                targetType: runner.targetType,
+                source: runner.source,
+                hitResults,
+                hitCount: hitResults.length,
+                meta: runner.meta,
+            };
+            eventBus.emit(event.Throw.Out.OnProjectileHit, hitPayload);
+        }
+
+        const removedEntity = runner.removeEntity();
+        this._emitStopped(runner, removedEntity);
+    }
+
+    /**
+     * @param {ProjectileRunner} runner
+     * @param {boolean} removedEntity
+     */
+    _emitStopped(runner, removedEntity) {
+        /** @type {import("./throw_const").OnProjectileStopped} */
+        const payload = {
+            projectileId: runner.id,
+            entity: runner.entity,
+            impactPos: runner.getImpactPos(),
+            removedEntity,
+            targetType: runner.targetType,
+            source: runner.source,
+            meta: runner.meta,
+        };
+        eventBus.emit(event.Throw.Out.OnProjectileStopped, payload);
+    }
+}
+
+/**
  * 已知漏洞
  * 怪物正常死亡后引擎实体从不移除 — 实体泄漏
  * fireuser1相关
@@ -22175,17 +24169,21 @@ movementManager.initPathScheduler((start, end) => navMesh.findPath(start, end));
 const buffManager = new BuffManager();
 const particleManager = new ParticleManager();
 const areaEffectManager = new AreaEffectManager();
+const projectileManager = new ProjectileManager();
 
+sentryManager.setMonsterProvider(() => monsterManager.getActiveMonsters());
 function cleanupFinishedMatch() {
     shopManager.closeAll();
     hudManager.clearAllSessions();
     waveManager.resetGame();
+    sentryManager.destroyAll();
     monsterManager.stopWave();
     for (const player of playerManager.getActivePlayers()) {
         player.stopInputTracking();
     }
     monsterManager.forceCleanup();
     movementManager.cleanup();
+    projectileManager.cleanup();
     areaEffectManager.cleanup();
     particleManager.cleanup();
     buffManager.clearAll();
@@ -22252,8 +24250,10 @@ eventBus.on(event.Game.Out.OnResetGame, (payload) => {
     hudManager.clearAllSessions();
     waveManager.resetGame();
     skillManager.clearAll();
+    sentryManager.destroyAll();
     monsterManager.resetAllGameStatus();
     movementManager.cleanup();
+    projectileManager.cleanup();
     areaEffectManager.cleanup();
     particleManager.cleanup();
     buffManager.clearAll();
@@ -22297,6 +24297,30 @@ eventBus.on(event.Monster.Out.OnAttack, (/** @type {import("./monster/monster_co
     if (!player) return;
 
     player.takeDamage(payload.damage, payload.monster.model ?? null);
+});
+eventBus.on(event.Throw.Out.OnProjectileHit, (/** @type {import("./throw/throw_const").OnProjectileHit} */ payload) => {
+    const damage = Number(payload.meta?.damage ?? 0);
+    if (!Number.isFinite(damage) || damage <= 0) return;
+
+    const attackerEntity = payload.source?.IsValid?.()
+        ? payload.source
+        : null;
+    const attackerPawn = payload.source instanceof CSPlayerPawn ? payload.source : null;
+    const reason = typeof payload.meta?.reason === "string" ? payload.meta.reason : "projectile";
+
+    for (const hit of payload.hitResults) {
+        if (hit.targetType === "player" && "player" in hit) {
+            hit.player.takeDamage(damage, attackerEntity);
+            continue;
+        }
+
+        if (hit.targetType === "monster" && "monster" in hit) {
+            hit.monster.takeDamage(damage, attackerPawn, {
+                source: attackerEntity,
+                reason,
+            });
+        }
+    }
 });
 eventBus.on(event.Monster.Out.OnAllMonstersDead, () => {
     eventBus.emit(event.Wave.In.WaveEndRequest, {result: false});
@@ -22479,7 +24503,6 @@ Instance.OnPlayerChat((chatEvent) => {
 
 /** 上一帧时间戳，用于计算 dt */
 let _lastTime = Instance.GetGameTime();
-
 Instance.SetThink(() => {
     const now = Instance.GetGameTime();
     const dt = Math.max(0, now - _lastTime);
@@ -22501,10 +24524,22 @@ Instance.SetThink(() => {
     }
     if (isGamePlaying) {
         skillManager.tick();
+        sentryManager.tick();
+
         const activeMonsters = monsterManager.getActiveMonsters();
+        for (const monster of activeMonsters) {
+            const breakable = monster.breakable;
+            if (!breakable?.IsValid?.()) continue;
+        }
+
         movementManager.tick(now, dt);
 
         monsterManager.syncMovementStates(movementManager.getAllStates());
+
+        projectileManager.tick(now, dt, {
+            players: alivePlayers,
+            monsters: activeMonsters,
+        });
         areaEffectManager.tick(now, {
             players: alivePlayers,
             monsters: activeMonsters,
@@ -22545,3 +24580,7 @@ Instance.SetNextThink(Instance.GetGameTime() + ticks);
 Instance.Msg("=== PvE Release 已启动 ===");
 
 playerManager.refresh();
+/**
+ * 200怪
+ * 除去movement,其他模块1.6ms
+ */

@@ -44,12 +44,15 @@ export class SpatialHashGrid {
      * @param {{ cellSize?: number; minNodeSize?: number; padding?: number }} [config]
      */
     constructor(config = {}) {
-        const legacyMinNodeSize = config.minNodeSize ?? 64;
+        /**
+         * 单元格边长。较小的 cellSize 可以减少每个桶内的实体数量，提高查询效率，但会增加桶的总数和维护开销。
+         */
+        const legacyMinNodeSize = config.minNodeSize ?? 48;
         /**
          * 哈希网格边长。
          * 默认沿用旧 minNodeSize 的一半，使默认值为 32，贴近当前分离查询半径。
          */
-        this.cellSize = Math.max(1, config.cellSize ?? Math.max(16, legacyMinNodeSize * 0.5));
+        this.cellSize = Math.max(1, config.cellSize ?? Math.max(48, legacyMinNodeSize * 0.5));
         /**
          * 保留旧配置字段，避免外部传参报废；空间哈希本身不依赖该值。
          */
@@ -214,6 +217,7 @@ export class SpatialHashGrid {
         for (let cellZ = minCellZ; cellZ <= maxCellZ; cellZ++) {
             for (let cellY = minCellY; cellY <= maxCellY; cellY++) {
                 for (let cellX = minCellX; cellX <= maxCellX; cellX++) {
+                    
                     const bucket = this._cells.get(this._getCellKey(cellX, cellY, cellZ));
                     if (!bucket) continue;
 

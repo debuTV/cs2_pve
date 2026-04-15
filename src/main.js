@@ -20,7 +20,7 @@
  * @module 主入口
  */
 
-import { Instance } from "cs_script/point_script";
+import { CSPlayerPawn, Instance } from "cs_script/point_script";
 import { eventBus } from "./util/event_bus";
 import { event, MovementRequestType } from "./util/definition";
 
@@ -34,12 +34,14 @@ import { InputManager } from "./input/input_manager";
 import { ShopManager } from "./shop/shop_manager";
 import { HudManager } from "./hud/hud_manager";
 import { SkillManager } from "./skill/skill_manager";
+import { sentryManager } from "./skill/skills/sentry/sentry_manager";
 import { MonsterManager } from "./monster/monster_manager";
 import { BuffManager } from "./buff/buff_manager";
 import { ParticleManager } from "./particle/particle_manager";
 import { NavMesh } from "./navmesh/path_manager";
 import { MovementManager } from "./movement/movement_manager";
 import { AreaEffectManager } from "./areaEffects/area_manager";
+import { ProjectileManager } from "./throw/projectile_manager";
 const ticks=1/64;
 // ═══════════════════════════════════════════════
 // 1. 服务器初始化
@@ -100,17 +102,21 @@ movementManager.initPathScheduler((start, end) => navMesh.findPath(start, end));
 const buffManager = new BuffManager();
 const particleManager = new ParticleManager();
 const areaEffectManager = new AreaEffectManager();
+const projectileManager = new ProjectileManager();
 
+sentryManager.setMonsterProvider(() => monsterManager.getActiveMonsters());
 function cleanupFinishedMatch() {
     shopManager.closeAll();
     hudManager.clearAllSessions();
     waveManager.resetGame();
+    sentryManager.destroyAll();
     monsterManager.stopWave();
     for (const player of playerManager.getActivePlayers()) {
         player.stopInputTracking();
     }
     monsterManager.forceCleanup();
     movementManager.cleanup();
+    projectileManager.cleanup();
     areaEffectManager.cleanup();
     particleManager.cleanup();
     buffManager.clearAll();
@@ -182,8 +188,10 @@ eventBus.on(event.Game.Out.OnResetGame, (payload) => {
     hudManager.clearAllSessions();
     waveManager.resetGame();
     skillManager.clearAll();
+    sentryManager.destroyAll();
     monsterManager.resetAllGameStatus();
     movementManager.cleanup();
+    projectileManager.cleanup();
     areaEffectManager.cleanup();
     particleManager.cleanup();
     buffManager.clearAll();
@@ -227,6 +235,30 @@ eventBus.on(event.Monster.Out.OnAttack, (/** @type {import("./monster/monster_co
     if (!player) return;
 
     player.takeDamage(payload.damage, payload.monster.model ?? null);
+});
+eventBus.on(event.Throw.Out.OnProjectileHit, (/** @type {import("./throw/throw_const").OnProjectileHit} */ payload) => {
+    const damage = Number(payload.meta?.damage ?? 0);
+    if (!Number.isFinite(damage) || damage <= 0) return;
+
+    const attackerEntity = payload.source?.IsValid?.()
+        ? payload.source
+        : null;
+    const attackerPawn = payload.source instanceof CSPlayerPawn ? payload.source : null;
+    const reason = typeof payload.meta?.reason === "string" ? payload.meta.reason : "projectile";
+
+    for (const hit of payload.hitResults) {
+        if (hit.targetType === "player" && "player" in hit) {
+            hit.player.takeDamage(damage, attackerEntity);
+            continue;
+        }
+
+        if (hit.targetType === "monster" && "monster" in hit) {
+            hit.monster.takeDamage(damage, attackerPawn, {
+                source: attackerEntity,
+                reason,
+            });
+        }
+    }
 });
 eventBus.on(event.Monster.Out.OnAllMonstersDead, () => {
     eventBus.emit(event.Wave.In.WaveEndRequest, {result: false});
@@ -414,7 +446,6 @@ Instance.OnPlayerChat((chatEvent) => {
 
 /** 上一帧时间戳，用于计算 dt */
 let _lastTime = Instance.GetGameTime();
-
 Instance.SetThink(() => {
     const now = Instance.GetGameTime();
     const dt = Math.max(0, now - _lastTime);
@@ -436,10 +467,25 @@ Instance.SetThink(() => {
     }
     if (isGamePlaying) {
         skillManager.tick();
+        sentryManager.tick();
+
         const activeMonsters = monsterManager.getActiveMonsters();
+        /** @type {import("cs_script/point_script").Entity[]} */
+        const activeMonsterBreakables = [];
+        for (const monster of activeMonsters) {
+            const breakable = monster.breakable;
+            if (!breakable?.IsValid?.()) continue;
+            activeMonsterBreakables.push(breakable);
+        }
+
         movementManager.tick(now, dt);
 
         monsterManager.syncMovementStates(movementManager.getAllStates());
+
+        projectileManager.tick(now, dt, {
+            players: alivePlayers,
+            monsters: activeMonsters,
+        });
         areaEffectManager.tick(now, {
             players: alivePlayers,
             monsters: activeMonsters,
@@ -480,3 +526,7 @@ Instance.SetNextThink(Instance.GetGameTime() + ticks);
 Instance.Msg("=== PvE Release 已启动 ===");
 
 playerManager.refresh();
+/**
+ * 200怪
+ * 除去movement,其他模块1.6ms
+ */

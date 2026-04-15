@@ -124,13 +124,11 @@ export class MonsterManager {
     /**
      * @param {number} monsterId
      * @param {string} typeId
-     * @param {Record<string, any>} params
      */
-    applyBuff(monsterId,typeId, params) {
+    applyBuff(monsterId,typeId) {
         if (!typeId) return null;
         const monster = this.monsters.get(monsterId);
         if (!monster) return null;
-        void params;
         return monster.addBuff(typeId);
     }
 
@@ -256,8 +254,8 @@ export class MonsterManager {
             }
             const spawnPoint = nearbySpawnPoints[Math.floor(Math.random() * nearbySpawnPoints.length)];
             const pos = spawnPoint.GetAbsOrigin();
-            const start = { x: pos.x, y: pos.y, z: pos.z + 50 };
-            const end = { x: pos.x, y: pos.y, z: pos.z + 50 };
+            const start = { x: pos.x, y: pos.y, z: pos.z };
+            const end = { x: pos.x, y: pos.y, z: pos.z };
             if (Instance.TraceSphere({ radius:30, start, end, ignorePlayers: true }).hitEntity) {
                 Instance.Msg("错误: 生成点有遮挡");
                 return null;

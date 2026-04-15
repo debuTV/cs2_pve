@@ -5,6 +5,8 @@
 
 /** 世界重力 (hu/s²) */
 export const gravity = 800;
+/** 跳跃过程速度 (hu/s) */
+export const jumpSpeed = 450;
 /** 地面摩擦系数 */
 export const friction = 6;
 /** 爬台阶高度 (hu) */
@@ -15,6 +17,12 @@ export const goalTolerance = 20;
 export const arriveDistance = 1;
 /** 转向速度 (度/s) */
 export const turnSpeed = 360;
+/** movement.update 最多拆成多少个轮转分片。 */
+export const movementUpdateShardCount = 2;
+/** 异常长帧时单个实体单次最多消费多少累计 dt (s)。 */
+export const movementMaxAccumulatedDt = 0.25;
+/** 真实地面检测最小间隔 (s)，沿用原 64Hz 下每 8 tick 的语义。 */
+export const groundUpdateInterval = 8 / 64;
 
 // ── 碰撞相关 ────────────────────────────────────────────────
 /** 碰撞盒最小点 */
@@ -32,9 +40,9 @@ export const surfaceEpsilon = 4;
  */
 export const separationRadius = 32;
 /** 分离力满额生效的近距离半径 (hu) */
-export const separationMinRadius = 10;
+export const separationMinRadius = 24;
 /** 最大分离速度 (hu/s) */
-export const separationMaxStrength = 150;
+export const separationMaxStrength = 120;
 
 // ── 卡死检测 ────────────────────────────────────────────────
 /** 低于此距离认为没动 (hu) */

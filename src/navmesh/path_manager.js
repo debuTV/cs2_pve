@@ -177,6 +177,7 @@ export class NavMesh {
         if(PRINT_NAV_MESH)this.exportNavData();
         this._refreshRuntime();
         if(PLUGIN_ENABLED)this.plugin?.init(this.tileManager,this.tile);
+        this.debug();
     }
     /**
      * 更新指定位置所在 Tile 的导航网格。
@@ -375,7 +376,7 @@ export class NavMesh {
         //this.debugTools.debugDrawPolyPath(polyPath.path,0.5);
         //if (!polyPath || polyPath.path.length === 0) return [];
         const funnelPath = this.funnel.build(polyPath.path, polyPath.start, polyPath.end);
-        this.debugTools.debugDrawfunnelPath(funnelPath,0.5);
+        //this.debugTools.debugDrawfunnelPath(funnelPath,0.5);
         if(ADJUST_HEIGHT)
         {
             const ans=this.heightfixer.fixHeight(funnelPath,polyPath.path);

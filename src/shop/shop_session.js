@@ -291,14 +291,14 @@ export class ShopSession {
             case "armor":
                 return { reward: { type: "armor", amount: payload.amount ?? 0 } };
             case "buff":
-                if (!payload.buffTypeId) {
+                if (!payload.buffConfigId) {
                     return { reward: null, message: "商品无 Buff 定义" };
                 }
 
                 return {
                     reward: {
                         type: "buff",
-                        buffTypeId: payload.buffTypeId,
+                        buffConfigId: payload.buffConfigId,
                     },
                 };
             case "money":

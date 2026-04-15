@@ -1,6 +1,8 @@
 /**
  * @module 怪物系统/怪物技能/重击
  */
+import { eventBus } from "../../util/event_bus";
+import { event } from "../../util/definition";
 import { MonsterRuntimeEvents } from "../../util/runtime_events.js";
 import { SkillTemplate } from "../skill_template";
 
@@ -13,21 +15,16 @@ export class PowerAttackSkill extends SkillTemplate {
      *   cooldown?: number;
      *   events?: string[];
      *   animation?: string | null;
-     *   impulse?: number;
-     *   verticalBoost?: number;
-     *   buffDuration?: number;
+     *   buffConfigId?: string;
      * }} [params]
      */
     constructor(player, monster, id, params = {}) {
         super(player, monster, "powerattack", id, params);
         this.animation = params.animation ?? null;
         this.events = params.events ?? [MonsterRuntimeEvents.AttackTrue];
-        this.buffTypeId = "knockup";
-        this.buffParams = {
-            impulse: params.impulse ?? 300,
-            verticalBoost: params.verticalBoost ?? 400,
-            duration: params.buffDuration ?? 0.6,
-        };
+        this.buffConfigId = typeof params.buffConfigId === "string"
+            ? params.buffConfigId.trim()
+            : "";
     }
 
     canTrigger(/** @type {any} */ event) {
@@ -58,6 +55,29 @@ export class PowerAttackSkill extends SkillTemplate {
         if (monster.distanceTosq(target) > monster.attackdist * monster.attackdist) return;
 
         this._markTriggered();
+        this._applyTargetBuff(target);
         monster.emitAttackEvent(Math.max(1, Math.round(monster.damage * 2)), target);
+    }
+
+    /**
+     * @param {import("cs_script/point_script").CSPlayerPawn} target
+     * @returns {boolean}
+     */
+    _applyTargetBuff(target) {
+        if (!this.buffConfigId) return false;
+
+        const slot = target?.GetPlayerController?.()?.GetPlayerSlot?.();
+        if (typeof slot !== "number" || slot < 0) return false;
+
+        const rewardRequest = {
+            slot,
+            reward: {
+                type: "buff",
+                buffConfigId: this.buffConfigId,
+            },
+            result: false,
+        };
+        eventBus.emit(event.Player.In.DispatchRewardRequest, rewardRequest);
+        return rewardRequest.result === true;
     }
 }

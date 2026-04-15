@@ -29,8 +29,8 @@ export class AreaEffect {
         this.id = AreaEffect._nextId++;
         /** 效果类型标识（如 "fire"）。 */
         this.effectName = areaEffectStatics[desc.areaEffectStaticKey].effectName;
-        /** Buff 类型名字。 */
-        this.buffName = areaEffectStatics[desc.areaEffectStaticKey].buffName;
+        /** Buff 配置 id。 */
+        this.buffConfigId = areaEffectStatics[desc.areaEffectStaticKey].buffConfigId;
         /** 关联的粒子效果名字。
          * @type {string} */
         this.particleName = areaEffectStatics[desc.areaEffectStaticKey].particleName;
@@ -168,7 +168,7 @@ export class AreaEffect {
                 effectId: this.id,
                 targetType: Target.Player,
                 hit: slot,
-                buffName: this.buffName,
+                buffConfigId: this.buffConfigId,
             };
             eventBus.emit(event.AreaEffects.Out.OnHitPlayer, payload);
         }
@@ -196,7 +196,7 @@ export class AreaEffect {
                 effectId: this.id,
                 targetType: Target.Monster,
                 hit: monsterId,
-                buffName: this.buffName
+                buffConfigId: this.buffConfigId
             };
             eventBus.emit(event.AreaEffects.Out.OnHitMonster, payload);
         }
@@ -227,7 +227,7 @@ export class AreaEffect {
 
         /** @type {import("../buff/buff_const").BuffAddRequest} */
         const addRequest = {
-            configid: this.buffName,
+            configid: this.buffConfigId,
             target,
             targetType,
             result: -1,

@@ -28,7 +28,7 @@ export class InitAnimSkill extends SkillTemplate {
         if (!this._cooldownReady()) return false;
         // 怪物专属技能
         if (!this.monster)return false;
-        if (this.monster && !this.monster.isOccupied()) return false;
+        if (this.monster && this.monster.isOccupied()) return false;
         if (this.animation === null) {
             this.trigger();
             return false;

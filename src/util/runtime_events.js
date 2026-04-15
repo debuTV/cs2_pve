@@ -128,7 +128,7 @@ export const MonsterRuntimeEvents = {
  * @typedef {Object} RuntimeSkillCastPayload
  * @property {number} [skillId]
  * @property {string} [skillTypeId]
- * @property {string} [buffTypeId]
+ * @property {string} [buffConfigId]
  * @property {import("cs_script/point_script").Entity|null} [source]
  * @property {import("cs_script/point_script").Entity|null} [target]
  */

@@ -145,8 +145,8 @@ export class SkillTemplate
 
     /**
      * 标记技能已触发——更新 `lastTriggerTime` 为当前游戏时间。
-     * 若技能配置了 `buffTypeId` 且怪物当前有目标，还会通过事件系统发布 `SkillCast` 事件，
-     * 携带构建好的 buff 负载供玩家 buff 系统接收。
+     * 需要附带 Buff 的技能应自行按 `configid` 调用对应宿主的 Buff 入口；
+     * 基类这里只负责更新时间戳。
      */
     _markTriggered() {
         this.lastTriggerTime = Instance.GetGameTime();

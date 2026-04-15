@@ -1,7 +1,11 @@
 /**
  * @module 怪物系统/怪物技能/投掷石头
  */
+import { Instance, PointTemplate } from "cs_script/point_script";
+import { eventBus } from "../../util/event_bus";
+import { event } from "../../util/definition";
 import { MonsterRuntimeEvents } from "../../util/runtime_events.js";
+import { ThrowTarget } from "../../throw/throw_const";
 import { SkillTemplate } from "../skill_template";
 
 export class ThrowStoneSkill extends SkillTemplate {
@@ -20,6 +24,7 @@ export class ThrowStoneSkill extends SkillTemplate {
      *   gravityScale?: number;
      *   radius?: number;
      *   maxTargets?: number;
+    *   templateName?: string;
      * }} [params]
      */
     constructor(player, monster, id, params = {}) {
@@ -33,6 +38,9 @@ export class ThrowStoneSkill extends SkillTemplate {
         this.gravityScale = params.gravityScale ?? 1;
         this.radius = params.radius ?? 32;
         this.maxTargets = params.maxTargets ?? 1;
+        this.templateName = typeof params.templateName === "string"
+            ? params.templateName.trim()
+            : "throwstone_projectile_template";
     }
 
     canTrigger(/** @type {any} */ event) {
@@ -70,16 +78,93 @@ export class ThrowStoneSkill extends SkillTemplate {
         }
         const monster = this.monster;
         const target = monster?.target;
-        if (!monster || !target) return;
+        const model = monster?.model;
+        if (!monster || !target || !model?.IsValid?.()) return;
 
         const distsq = monster.distanceTosq(target);
         const minDistSq = this.distanceMin * this.distanceMin;
         const maxDistSq = this.distanceMax * this.distanceMax;
         if (distsq < minDistSq || distsq > maxDistSq) return;
 
+        const startPos = model.GetEyePosition?.() ?? model.GetAbsOrigin?.();
+        const endPos = target.GetAbsOrigin?.();
+        if (!startPos || !endPos) return;
+
+        const projectileEntity = this._spawnProjectileEntity(startPos);
+        if (!projectileEntity) return;
+
+        /** @type {import("../../throw/throw_const").ThrowCreateRequest} */
+        const payload = {
+            startPos,
+            endPos,
+            entity: projectileEntity,
+            speed: this.projectileSpeed,
+            gravityScale: this.gravityScale,
+            radius: this.radius,
+            maxTargets: this.maxTargets,
+            targetType: ThrowTarget.Player,
+            source: model,
+            meta: {
+                damage: this.damage,
+                reason: "throwstone",
+                skillId: this.id,
+                skillTypeId: this.typeId,
+            },
+            result: -1,
+        };
+        eventBus.emit(event.Throw.In.CreateRequest, payload);
+        if (payload.result <= 0) {
+            if (projectileEntity.IsValid()) {
+                projectileEntity.Remove();
+            }
+            return;
+        }
+
         this.running = true;
         this._markTriggered();
-        monster.emitAttackEvent(this.damage, target);
-        this.running = false;
+    }
+
+    /**
+     * @param {import("cs_script/point_script").Vector} origin
+     * @returns {import("cs_script/point_script").Entity | null}
+     */
+    _spawnProjectileEntity(origin) {
+        if (!this.templateName) {
+            Instance.Msg("ThrowStone: 未配置 templateName\n");
+            return null;
+        }
+
+        const template = Instance.FindEntityByName(this.templateName);
+        if (!template || !(template instanceof PointTemplate)) {
+            Instance.Msg(`ThrowStone: 找不到 PointTemplate \"${this.templateName}\"\n`);
+            return null;
+        }
+
+        const spawned = template.ForceSpawn(origin);
+        if (!spawned || spawned.length !== 1) {
+            Instance.Msg(`ThrowStone: PointTemplate \"${this.templateName}\" 必须且只能生成 1 个实体\n`);
+            this._cleanupSpawnedEntities(spawned ?? []);
+            return null;
+        }
+
+        const projectileEntity = spawned[0];
+        if (!projectileEntity?.IsValid?.()) {
+            Instance.Msg(`ThrowStone: PointTemplate \"${this.templateName}\" 生成的实体无效\n`);
+            this._cleanupSpawnedEntities(spawned);
+            return null;
+        }
+
+        return projectileEntity;
+    }
+
+    /**
+     * @param {import("cs_script/point_script").Entity[]} entities
+     */
+    _cleanupSpawnedEntities(entities) {
+        for (const entity of entities) {
+            if (entity?.IsValid?.()) {
+                entity.Remove();
+            }
+        }
     }
 }

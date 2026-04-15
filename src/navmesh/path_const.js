@@ -41,18 +41,18 @@ export const PathState = {
 /** 是否启用 NavMesh 插件系统（tile 动态替换 / `OnScriptInput` 交互）。 */
 export const PLUGIN_ENABLED = false;
 //==============================世界相关设置=====================================
-/** NavMesh 世界原点坐标（体素空间的 (0,0,0) 对应的世界坐标）。 */
-export const origin = { x: -1400, y: -4510, z: 220 };
+/** NavMesh 世界左下角原点坐标（体素空间的 (0,0,0) 对应的世界坐标）。 */
+export const origin = { x: -2500, y: -820, z: 1080 };
 /** 体素水平方向尺寸（单位）。越小精度越高，构建越慢。 */
-export const MESH_CELL_SIZE_XY = 8;
+export const MESH_CELL_SIZE_XY = 6;
 /** 体素垂直方向尺寸（单位）。 */
 export const MESH_CELL_SIZE_Z = 1;
 /** 体素化射线方块高度（单位）。设置过高会忽略竖直方向的空隙。 */
 export const MESH_TRACE_SIZE_Z = 32;
 /** NavMesh 世界水平范围大小（单位）。 */
-export const MESH_WORLD_SIZE_XY = 3200;
+export const MESH_WORLD_SIZE_XY = 4000;
 /** NavMesh 世界垂直范围大小（单位）。 */
-export const MESH_WORLD_SIZE_Z = 1100;
+export const MESH_WORLD_SIZE_Z = 512;
 //==============================数据结构设置=====================================
 /** 多边形最大数量，受 16 位索引限制（不超过 65535）。 */
 export const MAX_POLYS = 65535;

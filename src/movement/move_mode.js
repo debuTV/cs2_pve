@@ -2,7 +2,7 @@
  * @module 实体移动/运动模式
  */
 import { vec } from "../util/vector";
-import { arriveDistance, PathState } from "./movement_const";
+import { arriveDistance, jumpSpeed, PathState } from "./movement_const";
 
 /**
  * @typedef {import("./motor").Motor} Motor
@@ -62,7 +62,7 @@ export class MoveWalk extends MoveMode {
 
         // 路径节点驱动的模式切换请求
         if (goal?.mode === PathState.JUMP) {
-            ctx.motor.velocity.z = 400;
+            ctx.motor.velocity.z = jumpSpeed;
             ctx.requestModeSwitch("air");
             return pos;
         }
@@ -173,7 +173,7 @@ export class MoveLadder extends MoveMode {
             return pos;
         }
         if (goal.mode !== PathState.LADDER) {
-            ctx.motor.velocity.z = 400;
+            ctx.motor.velocity.z = jumpSpeed;
             ctx.requestModeSwitch("air");
             return pos;
         }
@@ -206,7 +206,7 @@ function computeWish(ctx, goal) {
             return;
         }
         ctx.wishDir = vec.normalize(toGoal);
-        ctx.wishSpeed = 400;
+        ctx.wishSpeed = jumpSpeed;
     } else {
         if (dist <= arriveDistance * arriveDistance) {
             ctx.wishDir = vec.get(0, 0, 0);

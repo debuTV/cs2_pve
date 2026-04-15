@@ -5,7 +5,7 @@
  * 区域效果配置
  * @typedef {object} areaEffectStatic
  * @property {string} effectName - 区域预制效果名称
- * @property {string} buffName - 命中后要施加的预制 Buff 名字
+ * @property {string} buffConfigId - 命中后要施加的 Buff 配置 id
  * @property {string} particleName - 需要创建的粒子系统预制名字
  */
 /**
@@ -44,7 +44,7 @@
  * @property {number} effectId - 区域效果实例 id
  * @property {string} targetType - 命中的目标类型
  * @property {number} hit -  玩家：`slot`  怪物：`monsterId`
- * @property {string} buffName - 命中后要施加的预制 Buff 名称
+ * @property {string} buffConfigId - 命中后要施加的 Buff 配置 id
  */
 /**
  * @typedef {object} OnAreaEffectHitMonster
@@ -52,7 +52,7 @@
  * @property {number} effectId - 区域效果实例 id
  * @property {string} targetType - 命中的目标类型
  * @property {number} hit -  玩家：`slot`  怪物：`monsterId`
- * @property {string} buffName - 命中后要施加的预制 Buff 名称
+ * @property {string} buffConfigId - 命中后要施加的 Buff 配置 id
  */
 /**
  * 区域效果目标类型常量。
@@ -77,14 +77,14 @@ export const Target={
 export const areaEffectStatics = {
     "fire": {
         effectName: "fire_area_effect",
-        buffName: "burn",
+        buffConfigId: "burn",
         particleName: "fire",
     },
     "healing_field": {
         effectName: "healing_field_area_effect",
-        buffName: "regeneration",
+        buffConfigId: "regeneration",
         particleName: "healing_field",
     },
     // 后续在此添加更多预制区域效果，例如：
-    // firezone: { effectName: "firezone_area_effect", position: { x: 0, y: 0, z: 0 }, radius: 100, duration: 3, buffName: "burn", particleName: "firezone", targetTypes: [Target.Player, Target.Monster] },
+    // firezone: { effectName: "firezone_area_effect", position: { x: 0, y: 0, z: 0 }, radius: 100, duration: 3, buffConfigId: "burn", particleName: "firezone", targetTypes: [Target.Player, Target.Monster] },
 };

@@ -1,4 +1,4 @@
-/**
+﻿/**
  * @module 玩家系统/玩家常量配置
  */
 /**
@@ -69,7 +69,7 @@ export const PlayerState = {
  */
 
 /** 默认职业。 */
-export const DEFAULT_PLAYER_PROFESSION = "medic";
+export const DEFAULT_PLAYER_PROFESSION = "engineer";
 
 /** @type {Record<string, PlayerProfessionConfig>} */
 export const PLAYER_PROFESSIONS = {
@@ -103,6 +103,17 @@ export const PLAYER_PROFESSIONS = {
             cooldown: 10,
             heal: 20,
             armor: 15,
+        },
+    },
+    engineer: {
+        id: "engineer",
+        displayName: "工程师",
+        skillTypeId: "player_turret",
+        skillParams: {
+            cooldown: 0,
+            damage: 200,
+            lifetime: 120,
+            searchRadius: 640,
         },
     },
 };

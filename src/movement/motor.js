@@ -7,6 +7,7 @@ import { MoveProbe } from "./move_probe";
 import {
     friction as defaultFriction,
     gravity as defaultGravity,
+    groundUpdateInterval,
     stepHeight as defaultStepHeight,
     turnSpeed as defaultTurnSpeed,
     separationRadius,
@@ -18,6 +19,14 @@ import {
 
 /** @typedef {import("cs_script/point_script").Vector} Vector */
 /** @typedef {import("cs_script/point_script").Entity} Entity */
+
+const SEPARATION_RADIUS = separationRadius;
+const SEPARATION_MAX_STRENGTH = separationMaxStrength;
+const SEPARATION_MAX_STRENGTH_SQ = SEPARATION_MAX_STRENGTH * SEPARATION_MAX_STRENGTH;
+const SEPARATION_MIN_RADIUS_SQ = separationMinRadius * separationMinRadius;
+const SEPARATION_RADIUS_SQ = SEPARATION_RADIUS * SEPARATION_RADIUS;
+const SEPARATION_FALLOFF_RANGE_SQ = Math.max(1e-6, SEPARATION_RADIUS_SQ - SEPARATION_MIN_RADIUS_SQ);
+const SEPARATION_MIN_DIST_SQ = 16;
 
 /**
  * @typedef {object} SeparationContext
@@ -61,6 +70,7 @@ export class Motor {
         // ── 卡死检测 ──
         this._stuckLastPos = vec.get(0, 0, 0);
         this._stuckTime = 0;
+        this._groundUpdateCooldown = 0;
     }
 
     // ───────────────────── 公共运动方法 ─────────────────────
@@ -83,8 +93,10 @@ export class Motor {
         move.z = 0;
 
         let newPos = this._stepSlideMove(pos, move, sepCtx.entities).pos;
-        this._updateGround(newPos, sepCtx.entities);
-        newPos = this._snapToGround(newPos);
+        const didUpdateGround = this._updateGround(newPos, sepCtx.entities, dt);
+        if (didUpdateGround) {
+            newPos = this._snapToGround(newPos);
+        }
         this._updateStuck(newPos, dt);
         return newPos;
     }
@@ -117,7 +129,7 @@ export class Motor {
                 this.velocity = this._clipVelocity(this.velocity, n);
             }
         }
-        this._updateGround(newPos, sepCtx.entities);
+        this._updateGround(newPos, sepCtx.entities, dt);
         this._updateStuck(newPos, dt);
         return newPos;
     }
@@ -144,6 +156,7 @@ export class Motor {
             }
         }
         this.onGround = false;
+        this._groundUpdateCooldown = 0;
         this._updateStuck(newPos, dt);
         return newPos;
     }
@@ -184,11 +197,15 @@ export class Motor {
             }
         }
         this.onGround = false;
+        this._groundUpdateCooldown = 0;
         this._updateStuck(newPos, dt);
         return newPos;
     }
 
-    stop() { this.velocity = vec.get(0, 0, 0); }
+    stop() {
+        this.velocity = vec.get(0, 0, 0);
+        this._groundUpdateCooldown = 0;
+    }
     isOnGround() { return this.onGround; }
     getVelocity() { return vec.clone(this.velocity); }
 
@@ -251,13 +268,6 @@ export class Motor {
      */
     _computeSeparation(pos, sepCtx) {
         if (!sepCtx.spatialIndex) return vec.get(0, 0, 0);
-        const radius = separationRadius;
-        const maxStrength = separationMaxStrength;
-        const maxStrengthSq = maxStrength * maxStrength;
-        const minRadiusSq = separationMinRadius * separationMinRadius;
-        const radiusSq = radius * radius;
-        const falloffRangeSq = Math.max(1e-6, radiusSq - minRadiusSq);
-        const minDistSq = 16;
 
         let sep = vec.get(0, 0, 0);
         let hitCount = 0;
@@ -266,26 +276,26 @@ export class Motor {
             const otherPos = neighbor.position;
             let delta = vec.sub(pos, otherPos);
             const dist2Dsq = vec.length2Dsq(delta);
-            if (dist2Dsq < minDistSq || vec.lengthsq(delta) > radiusSq) return;
+            if (dist2Dsq < SEPARATION_MIN_DIST_SQ || vec.lengthsq(delta) > SEPARATION_RADIUS_SQ) return;
             delta.z = 0;
             const l1 = Math.abs(delta.x) + Math.abs(delta.y);
             if (l1 < 1e-6) return;
             const dir = vec.scale(delta, 1 / l1);
             let strength = 1.0;
-            if (dist2Dsq > minRadiusSq) {
-                const t = Math.min(1, (dist2Dsq - minRadiusSq) / falloffRangeSq);
+            if (dist2Dsq > SEPARATION_MIN_RADIUS_SQ) {
+                const t = Math.min(1, (dist2Dsq - SEPARATION_MIN_RADIUS_SQ) / SEPARATION_FALLOFF_RANGE_SQ);
                 strength = 1 - t * t * (3 - 2 * t);
             }
-            sep = vec.add(sep, vec.scale(dir, strength * maxStrength));
+            sep = vec.add(sep, vec.scale(dir, strength * SEPARATION_MAX_STRENGTH));
             hitCount += 1;
         };
 
         if (typeof sepCtx.spatialIndex.forEachInSphere === "function") {
-            sepCtx.spatialIndex.forEachInSphere(pos, radius, accumulateNeighbor, {
+            sepCtx.spatialIndex.forEachInSphere(pos, SEPARATION_RADIUS, accumulateNeighbor, {
                 excludeEntity: sepCtx.selfBreakable,
             });
         } else {
-            const neighbors = sepCtx.spatialIndex.querySphere(pos, radius, {
+            const neighbors = sepCtx.spatialIndex.querySphere(pos, SEPARATION_RADIUS, {
                 excludeEntity: sepCtx.selfBreakable,
             });
             for (let i = 0; i < neighbors.length; i++) {
@@ -296,7 +306,7 @@ export class Motor {
         if (hitCount === 0) return vec.get(0, 0, 0);
 
         const lenSq = vec.length2Dsq(sep);
-        if (lenSq > maxStrengthSq) sep = vec.scale(sep, maxStrengthSq / lenSq);
+        if (lenSq > SEPARATION_MAX_STRENGTH_SQ) sep = vec.scale(sep, SEPARATION_MAX_STRENGTH_SQ / lenSq);
         return sep;
     }
 
@@ -314,7 +324,7 @@ export class Motor {
         const step = this.probe.tryStep(start, move, this.stepHeight, allm);
         if (step.success) return { pos: step.endPos };
 
-        const MAX_CLIPS = 3;
+        const MAX_CLIPS = 2;
         let remaining = vec.clone(move);
         const clipNormals = [];
         let pos = start;
@@ -338,7 +348,7 @@ export class Motor {
      * @param {Entity[]} allm
      */
     _airSlideMove(start, move, allm) {
-        const MAX_CLIPS = 3;
+        const MAX_CLIPS = 2;
         let remaining = vec.clone(move);
         /** @type {Vector[]} */
         const clipNormals = [];
@@ -399,17 +409,32 @@ export class Motor {
     /**
      * @param {Vector} pos
      * @param {Entity[]} allm
+     * @param {number} dt
+     * @returns {boolean}
      */
-    _updateGround(pos, allm) {
+    _updateGround(pos, allm, dt) {
+        this._groundUpdateCooldown = Math.max(0, this._groundUpdateCooldown - Math.max(0, dt));
+        if (this._groundUpdateCooldown > 1e-6) {
+            return false;
+        }
+        this._groundUpdateCooldown = groundUpdateInterval;
+
         const tr = this.probe.traceGround(pos, allm);
         this.wasOnGround = this.onGround;
         this.ground.hit = false;
-        if (!tr.hit || !tr.hitPos) { this.onGround = false; return; }
-        if (tr.normal.z < 0.5) { this.onGround = false; return; }
+        if (!tr.hit || !tr.hitPos) {
+            this.onGround = false;
+            return true;
+        }
+        if (tr.normal.z < 0.5) {
+            this.onGround = false;
+            return true;
+        }
         this.onGround = true;
         this.ground.hit = true;
         this.ground.normal = vec.clone(tr.normal);
         this.ground.point = vec.clone(tr.hitPos);
+        return true;
     }
 
     /**
