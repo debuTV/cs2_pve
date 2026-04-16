@@ -147,5 +147,6 @@ export class ShopManager {
                 session.close();
             }
         }
+        this._sessions.clear();
     }
 }

@@ -49,11 +49,11 @@ export const WaveState = {
 export const wavesConfig=[
         { 
             name: "训练波", 
-            totalMonsters: 500, 
+            totalMonsters: 1, 
             reward: 500, 
             spawnInterval: 0.1, 
             preparationTime: 0, //波次开始到第一个怪物出现时间，这段时间可以用来发消息
-            aliveMonster:50, //同时存在的怪物数量
+            aliveMonster:1, //同时存在的怪物数量
             monster_spawn_points_name:["monster_spawnpoint"],//这一波生成点
             monster_breakablemins:{x:-30,y:-30,z:0},//最大怪物的breakable的mins
             monster_breakablemaxs:{x:30,y:30,z:75},//最大怪物的breakable的maxs
@@ -62,7 +62,7 @@ export const wavesConfig=[
             monsterTypes:[MonsterType.headcrab_classic]
         },{ 
             name: "训练波", 
-            totalMonsters: 5, 
+            totalMonsters: 1, 
             reward: 500, 
             spawnInterval: 0.1, 
             preparationTime: 0, //波次开始到第一个怪物出现时间，这段时间可以用来发消息

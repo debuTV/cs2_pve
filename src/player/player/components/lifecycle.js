@@ -168,7 +168,8 @@ export class PlayerLifecycle {
      * 给予基础出生装备。
      */
     _giveStartingEquipment() {
+        this.player.entityBridge.giveItem("item_assaultsuit");
         this.player.entityBridge.giveItem("weapon_knife");
-        this.player.entityBridge.giveItem("weapon_glock");
+        this.player.entityBridge.giveItem("weapon_usp_silencer");
     }
 }

@@ -58,7 +58,13 @@ export class InputManager {
         }
         this._unsubscribers.length = 0;
     }
-
+    cleanup(){
+        for (const source of this._sources.values()) {
+            source.use = false;
+            source.pawn = null;
+            source.detector.reset();
+        }
+    }
     /**
      * 每 tick 轮询全部已注册输入源，逐个回调新按键。
      */

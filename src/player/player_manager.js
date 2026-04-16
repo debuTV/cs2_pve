@@ -9,7 +9,7 @@ import { getPlayerProfessionConfig, getPlayerProfessionIds, PlayerState } from "
 
 /**
  * @typedef {object} TP_playerRewardPayload - 玩家奖励分发载荷
- * @property {"buff"|"money"|"exp"|"heal"|"armor"|"damage"|"weapon"|"ready"|"respawn"|"resetGameStatus"} type - 奖励类型
+ * @property {"buff"|"money"|"exp"|"heal"|"armor"|"damage"|"weapon"|"ready"|"respawn"|"resetGameStatus"|"profession"} type - 奖励类型
  * @property {string} [buffConfigId] - Buff 配置 ID（仅 type="buff" 时适用）
  * @property {number} [amount] - 数值（仅 type="money"、"exp"、"heal"、"armor"、"damage" 时适用）
  * @property {string} [weaponName] - 武器名称（仅 type="weapon" 时适用）
@@ -18,6 +18,7 @@ import { getPlayerProfessionConfig, getPlayerProfessionIds, PlayerState } from "
  * @property {number} [health] - 生命值（仅 type="respawn" 时适用）
  * @property {number} [armor] - 护甲值（仅 type="respawn" 时适用）
  * @property {number} [targetState] - 重生后的目标状态（仅 type="respawn" 时适用）
+ * @property {string} [professionId] - 职业ID（仅 type="profession" 时适用）
  */
 /**
  * 负责所有在线玩家实例的集合管理，以及引擎事件到脚本层的桥接。
@@ -107,6 +108,10 @@ export class PlayerManager {
             resetGameStatus: (player) => {
                 player.resetGameStatus();
                 return true;
+            },
+            profession: (player, payload) => {
+                if (!payload.professionId) return false;
+                return player.setProfession(payload.professionId);
             }
         };
         /** @type {Array<() => boolean>} */
@@ -116,21 +121,12 @@ export class PlayerManager {
                     ? this.getPlayerSummary(payload.slot)
                     : null;
             }),
-            eventBus.on(event.Player.In.DispatchRewardRequest, (payload = {}) => {
-                const rewards = Array.isArray(payload.rewards)
-                    ? payload.rewards
-                    : payload.reward
-                        ? [payload.reward]
-                        : [];
-                const targetSlot = typeof payload.slot === "number"
-                    ? payload.slot
-                    : payload.slot == null
-                        ? null
-                        : null;
-
+            eventBus.on(event.Player.In.DispatchRewardRequest, (payload) => {
+                const rewards = payload.rewards;
+                const targetSlot = payload.slot;
                 payload.result = this.dispatchRewardRequest(targetSlot, rewards);
             })
-        ];
+        ];/** @type {{rewards: import("./player_manager").TP_playerRewardPayload[], slot: number|null,result:boolean}} */
     }
     /**
      * 所有类初始化完成后调用
@@ -305,27 +301,15 @@ export class PlayerManager {
             this._setPlayerReady(player, true);
             return;
         }
-
-        if (command === "profession" || command === "!profession" || command === "class" || command === "!class") {
-            const professionId = parts[1];
-            if (!professionId) {
-                this._adapter.sendMessage(player.slot, `可用职业: ${getPlayerProfessionIds().join(", ")}`);
-                return;
-            }
-
-            const config = getPlayerProfessionConfig(professionId);
-            if (!config) {
-                this._adapter.sendMessage(player.slot, `未知职业 ${professionId}，可用职业: ${getPlayerProfessionIds().join(", ")}`);
-                return;
-            }
-
-            const changed = this.setProfession(player.slot, professionId);
-            this._adapter.sendMessage(
-                player.slot,
-                changed
-                    ? `当前职业已切换为 ${config.displayName} (${config.id})`
-                    : `职业切换失败：${config.displayName} (${config.id})`
-            );
+        if (command ==="money"||command === "!money") {
+            //测试用，给予金钱
+            player.addMoney(100000);
+            return;
+        }
+        if (command ==="exp"||command === "!exp") {
+            //测试用，给予经验
+            player.addExp(100000);
+            return;
         }
     }
 
@@ -355,9 +339,10 @@ export class PlayerManager {
     /**
      * 由 main.js 转发 ready 脚本输入，切换玩家准备状态。
      * @param {CSPlayerPawn|undefined|null} pawn
+     * @param {boolean} ready 
      * @returns {boolean}
      */
-    toggleReadyByPawn(pawn) {
+    toggleReadyByPawn(pawn, ready) {
         if (!(pawn instanceof CSPlayerPawn)) return false;
         const controller = pawn.GetPlayerController();
         if (!controller) return false;
@@ -365,7 +350,7 @@ export class PlayerManager {
         const player = this.players.get(controller.GetPlayerSlot());
         if (!player) return false;
 
-        return this._setPlayerReady(player, !player.isReady);
+        return this._setPlayerReady(player, ready);
     }
 
     /**
@@ -469,10 +454,10 @@ export class PlayerManager {
     }
 
     /**
-     * @returns {Player[]}
+     * @returns {Player[]} 返回当前仍在场且未死亡的玩家，不要求当前处于 PLAYING 状态
      */
     getActivePlayers() {
-        return Array.from(this.players.values());
+        return Array.from(this.players.values()).filter((player) => player.state !== PlayerState.DEAD && player.state !== PlayerState.DISCONNECTED);
     }
 
     /**

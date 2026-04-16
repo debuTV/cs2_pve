@@ -66,7 +66,7 @@ export class PounceSkill extends SkillTemplate {
 
         const model = monster.model;
         const target = monster.target;
-        if (!model?.IsValid() || !target) return;
+        if (!model?.IsValid?.() || !target?.IsValid?.()) return;
 
         const start = model.GetAbsOrigin();
         const targetPos = target.GetAbsOrigin();

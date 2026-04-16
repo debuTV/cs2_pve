@@ -79,7 +79,7 @@ export class ThrowStoneSkill extends SkillTemplate {
         const monster = this.monster;
         const target = monster?.target;
         const model = monster?.model;
-        if (!monster || !target || !model?.IsValid?.()) return;
+        if (!monster || !target?.IsValid?.() || !model?.IsValid?.()) return;
 
         const distsq = monster.distanceTosq(target);
         const minDistSq = this.distanceMin * this.distanceMin;

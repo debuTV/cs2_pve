@@ -20,7 +20,12 @@ export const HUD_FACE_ATTACH = {
     // 正值向玩家左侧偏移，负值向右侧偏移。
     lateralOffset: 2,
 };
-
+/**
+ * HUD 总是显示参数。
+ * true: HUD 在所有游戏状态下显示
+ * false: HUD 只在游戏进行中显示
+ */
+export const HUD_ALWAYS_VISIBLE = true;
 /**
  * HUD 渠道定义。
  */
@@ -43,6 +48,7 @@ export const CHANNEL_PRIORITY = {
  * @typedef {object} HudRequest
  * @property {string} text - 待显示文本
  * @property {import("cs_script/point_script").CSPlayerPawn} pawn - 关联的玩家 Pawn
+ * @property {boolean} [alwaysVisible] - 是否总是显示HUD（可选，默认false）
  */
 
 /**
@@ -63,6 +69,7 @@ export const CHANNEL_PRIORITY = {
  * @property {import("cs_script/point_script").CSPlayerPawn} pawn - 关联的玩家 Pawn
  * @property {string} text - HUD 显示内容
  * @property {number} channel - HUD 渠道
+ * @property {boolean} [alwaysVisible] - 是否总是显示HUD（可选，默认false）
  * @property {boolean} result - 请求结果（是否成功提交）
  */
 /**

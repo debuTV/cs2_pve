@@ -4,7 +4,7 @@
 import { Instance, PointTemplate } from "cs_script/point_script";
 import { eventBus } from "../util/event_bus";
 import { event } from "../util/definition";
-import { CHANNAL, CHANNEL_PRIORITY, HUD_ENTITY_PREFIX, HUD_FACE_ATTACH, HUD_TEMPLATE_NAME } from "./hud_const";
+import { CHANNAL, CHANNEL_PRIORITY, HUD_ENTITY_PREFIX, HUD_FACE_ATTACH, HUD_TEMPLATE_NAME, HUD_ALWAYS_VISIBLE } from "./hud_const";
 /**
  * HUD 管理器（单 HUD 仲裁模式）。
  *
@@ -37,18 +37,21 @@ export class HudManager {
     }
 
     destroy() {
-        this.clearAllSessions();
+        this.clearAll();
         for (const unsubscribe of this._unsubscribers) {
             unsubscribe();
         }
         this._unsubscribers.length = 0;
     }
 
-    clearAllSessions() {
+    clearAll() {
         for (const [slot, session] of this._sessions) {
             session.requests.clear();
             this._arbitrate(session);
             if (!session.use) {
+                if (session.entity?.IsValid?.()) {
+                    session.entity.Remove();
+                }
                 this._sessions.delete(slot);
             }
         }
@@ -60,7 +63,7 @@ export class HudManager {
      */
     showHud(showHudRequest) {
         const session = this._getOrCreateSession(showHudRequest.slot);
-        session.requests.set(showHudRequest.channel, { text: showHudRequest.text, pawn: showHudRequest.pawn });
+        session.requests.set(showHudRequest.channel, { text: showHudRequest.text, pawn: showHudRequest.pawn, alwaysVisible: showHudRequest.alwaysVisible ?? false });
         this._arbitrate(session);
         return true;
     }
@@ -98,7 +101,7 @@ export class HudManager {
         const currentWave = Math.max(0, Math.round(waveSummary.currentWave ?? 0));
         const totalWaves = Math.max(0, Math.round(waveSummary.totalWaves ?? 0));
         const waveLabel = totalWaves > 0 ? `${currentWave}/${totalWaves}` : `${currentWave}`;
-
+        
         for (const s of allAlivePlayersSummary) {
             if(!s.pawn)continue;
             const remainingExp = Math.max(0, s.expNeeded - s.exp);
@@ -106,7 +109,7 @@ export class HudManager {
             const buffLabel = this._formatBuffLabel(runtimeSummary?.buffs ?? []);
             const skillLabel = this._formatSkillCooldownLabel(runtimeSummary?.skill ?? null);
             const text = `Lv.${s.level} \nHP:${s.health}/${s.maxHealth} \n护甲:${s.armor}\nMoney:$${s.money} \n升级还需:${remainingExp}EXP\n伤害:${s.lastMonsterDamage} \nBuff:${buffLabel}\n技能CD:${skillLabel}\n剩余怪物:${remainingMonsters} \n波次:${waveLabel}`;
-            this.showHud({ slot: s.slot, pawn: s.pawn, text, channel: CHANNAL.STATUS, result: true });
+            this.showHud({ slot: s.slot, pawn: s.pawn, text, channel: CHANNAL.STATUS, alwaysVisible: HUD_ALWAYS_VISIBLE, result: true });
         }
         for (const [, session] of this._sessions) {
             if (!session.use) continue;
@@ -155,10 +158,19 @@ export class HudManager {
             }
         }
 
+        // 如果无活跃请求，检查是否有 alwaysVisible 请求
+        if (winnerChannel === CHANNAL.NONE) {
+            for (const [ch, request] of session.requests) {
+                if (request.alwaysVisible && (CHANNEL_PRIORITY[ch] ?? 0) > (CHANNEL_PRIORITY[winnerChannel] ?? 0)) {
+                    winnerChannel = ch;
+                }
+            }
+        }
+
         const previousChannel = session.activeChannel;
         const wasVisible = session.use;
 
-        // 无活跃请求 → 隐藏 HUD
+        // 无活跃请求且无 alwaysVisible → 隐藏 HUD
         if (winnerChannel === CHANNAL.NONE) {
             if (session.use) {
                 this._hideEntity(session);
@@ -191,7 +203,7 @@ export class HudManager {
         session.pawn = request.pawn;
 
         this._ensureEntity(session);
-        if (!session.entity) return;
+        if (!session.entity||!session.entity.IsValid()) return;
 
         // 文本更新
         if (textChanged || channelChanged) {
@@ -327,7 +339,7 @@ export class HudManager {
      * @param {import("./hud_const").HudSession} session
      */
     _hideEntity(session) {
-        if (!session.entity || !session.use) return;
+        if (!session.entity?.IsValid?.() || !session.use) return;
 
         Instance.EntFireAtTarget({
             target: session.entity,

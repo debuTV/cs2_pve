@@ -21,6 +21,10 @@ export class MonsterEntityBridge {
     constructor(monster) {
         /** 所属怪物实例。 */
         this.monster = monster;
+        /**@type {number|undefined} */
+        this.breakableconnectid;
+        /**@type {number|undefined} */
+        this.modelconnnectid;
     }
     /**
      * 根据怪物配置生成引擎实体（breakable + model）。
@@ -49,7 +53,7 @@ export class MonsterEntityBridge {
 
         if (this.monster.breakable) {
             this.monster.preBreakableHealth = BREAKABLE_HEALTH_SCALE;
-            Instance.ConnectOutput(this.monster.breakable, "OnHealthChanged", (e) => {
+            this.breakableconnectid=Instance.ConnectOutput(this.monster.breakable, "OnHealthChanged", (e) => {
                 if (typeof e.value !== "number") return;
 
                 const currentBreakableHealth = Math.max(
@@ -78,9 +82,11 @@ export class MonsterEntityBridge {
      * @param {boolean} [removeModelAfterDeathAnimation=true] 是否删除怪物模型
      */
     removeAfterDeath(removeModelAfterDeathAnimation = true) {
+        if(this.breakableconnectid)Instance.DisconnectOutput(this.breakableconnectid);
         if (this.monster.breakable?.IsValid()) {
             this.monster.breakable.Remove();
         }
+        if(this.modelconnnectid)Instance.DisconnectOutput(this.modelconnnectid);
         if (removeModelAfterDeathAnimation && this.monster.model?.IsValid()) {
             this.monster.model.Remove();
         }

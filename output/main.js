@@ -338,7 +338,7 @@ const event = {
     },
     Hud: {
         In: {
-            ShowHudRequest: "Hud_OnShowHudRequest",        // 显示 Hud 请求，payload 包含 {slot: number, pawn: CSPlayerPawn, text: string, channel: number}
+            ShowHudRequest: "Hud_OnShowHudRequest",        // 显示 Hud 请求，payload 包含 {slot: number, pawn: CSPlayerPawn, text: string, channel: number, alwaysVisible?: boolean}
             HideHudRequest: "Hud_OnHideHudRequest",        // 隐藏 Hud 请求，payload 包含 {slot: number, channel?: number}
         },
         Out: {
@@ -586,13 +586,16 @@ class GameManager {
         eventBus.emit(event.Game.Out.OnGameWin);
         return true;
     }
-
+    clearAll()
+    {
+        this.gameState = GameState.WAITING;
+        this._adapter.broadcast("重置游戏...");
+    }
     /**
      * 重置游戏状态，触发 onResetGame 回调通知其他模块。
      */
     resetGame() {
-        this.gameState = GameState.WAITING;
-        this._adapter.broadcast("重置游戏...");
+        this.clearAll();
         eventBus.emit(event.Game.Out.OnResetGame);
     }
     /**
@@ -1197,11 +1200,11 @@ const WaveState = {
 const wavesConfig=[
         { 
             name: "训练波", 
-            totalMonsters: 500, 
+            totalMonsters: 1, 
             reward: 500, 
             spawnInterval: 0.1, 
             preparationTime: 0, //波次开始到第一个怪物出现时间，这段时间可以用来发消息
-            aliveMonster:50, //同时存在的怪物数量
+            aliveMonster:1, //同时存在的怪物数量
             monster_spawn_points_name:["monster_spawnpoint"],//这一波生成点
             monster_breakablemins:{x:-30,y:-30,z:0},//最大怪物的breakable的mins
             monster_breakablemaxs:{x:30,y:30,z:75},//最大怪物的breakable的maxs
@@ -1210,7 +1213,7 @@ const wavesConfig=[
             monsterTypes:[MonsterType.headcrab_classic]
         },{ 
             name: "训练波", 
-            totalMonsters: 5, 
+            totalMonsters: 1, 
             reward: 500, 
             spawnInterval: 0.1, 
             preparationTime: 0, //波次开始到第一个怪物出现时间，这段时间可以用来发消息
@@ -1662,7 +1665,50 @@ function getRuntimeEventsForHost(player, monster) {
 /**
  * @module 玩家系统/玩家/组件/实体桥接
  */
+/** @type {Record<string, number>} */
+const weaponSlots = {
+    // --- 0: RIFLE (主武器：步枪、狙击、冲锋枪、重型武器) ---
+    "weapon_ak47": 0,
+    "weapon_aug":0,
+    "weapon_awp": 0,
+    "weapon_bizon": 0,
+    "weapon_famas": 0,
+    "weapon_g3sg1":0,
+    "weapon_galilar": 0,
+    "weapon_m249": 0,
+    "weapon_m4a1": 0,
+    "weapon_m4a1_silencer": 0,
+    "weapon_mac10": 0,
+    "weapon_mag7": 0,
+    "weapon_mp5sd": 0,
+    "weapon_mp7": 0,
+    "weapon_mp9": 0,
+    "weapon_negev": 0,
+    "weapon_nova": 0,
+    "weapon_p90": 0,
+    "weapon_sawedoff":0,
+    "weapon_scar20":0,
+    "weapon_sg556": 0,
+    "weapon_ssg08": 0,
+    "weapon_ump45": 0,
+    "weapon_xm1014": 0,
 
+    // --- 1: PISTOL (副武器：手枪) ---
+    "weapon_cz75a": 1,
+    "weapon_deagle": 1,
+    "weapon_elite": 1,
+    "weapon_fiveseven": 1,
+    "weapon_glock": 1,
+    "weapon_hkp2000": 1,
+    "weapon_p250": 1,
+    "weapon_revolver": 1,
+    "weapon_tec9": 1,
+    "weapon_usp_silencer": 1,
+
+    // --- 2: KNIFE (刀具) ---
+    "weapon_knife": 2,
+    "weapon_knife_t": 2
+};
 /**
  * Player 脚本层与 Source 2 引擎实体之间的桥接组件。
  *
@@ -1812,8 +1858,12 @@ class PlayerEntityBridge {
      */
     giveItem(itemName, forceCreate = true) {
         if (this.pawn && this.pawn.IsValid()) {
+            const itemslot=weaponSlots[itemName]??-1;
+            const preweapon=this.pawn.FindWeaponBySlot(itemslot);
+            if(preweapon)this.pawn.DestroyWeapon(preweapon);
             this.pawn.GiveNamedItem(itemName, forceCreate);
         }
+        return true;
     }
 
     /**
@@ -1920,18 +1970,18 @@ const PlayerState = {
  */
 
 /** 默认职业。 */
-const DEFAULT_PLAYER_PROFESSION = "engineer";
+const DEFAULT_PLAYER_PROFESSION = "medic";
 
 /** @type {Record<string, PlayerProfessionConfig>} */
 const PLAYER_PROFESSIONS = {
     guardian: {
         id: "guardian",
-        displayName: "守护者",
+        displayName: "燃烧兵",
         skillTypeId: "fire",
         skillParams: {
-            cooldown: 8,
-            zoneRadius: 150,
-            zoneDuration: 5,
+            cooldown: 15,
+            zoneRadius: 300,
+            zoneDuration: 8,
         },
     },
     medic: {
@@ -1940,9 +1990,9 @@ const PLAYER_PROFESSIONS = {
         skillTypeId: "player_mend_field",
         skillParams: {
             inputKey: "InspectWeapon",
-            cooldown: 10,
-            zoneRadius: 150,
-            zoneDuration: 5,
+            cooldown: 30,
+            zoneRadius: 250,
+            zoneDuration: 10,
         },
     },
     vanguard: {
@@ -1951,7 +2001,7 @@ const PLAYER_PROFESSIONS = {
         skillTypeId: "player_vanguard",
         skillParams: {
             inputKey: "InspectWeapon",
-            cooldown: 10,
+            cooldown: 15,
             heal: 20,
             armor: 15,
         },
@@ -1961,7 +2011,7 @@ const PLAYER_PROFESSIONS = {
         displayName: "工程师",
         skillTypeId: "player_turret",
         skillParams: {
-            cooldown: 0,
+            cooldown: 150,
             damage: 200,
             lifetime: 120,
             searchRadius: 640,
@@ -1976,13 +2026,6 @@ const PLAYER_PROFESSIONS = {
 function getPlayerProfessionConfig(professionId) {
     if (!professionId) return null;
     return PLAYER_PROFESSIONS[professionId] ?? null;
-}
-
-/**
- * @returns {string[]}
- */
-function getPlayerProfessionIds() {
-    return Object.keys(PLAYER_PROFESSIONS);
 }
 
 /**
@@ -2912,8 +2955,9 @@ class PlayerLifecycle {
      * 给予基础出生装备。
      */
     _giveStartingEquipment() {
+        this.player.entityBridge.giveItem("item_assaultsuit");
         this.player.entityBridge.giveItem("weapon_knife");
-        this.player.entityBridge.giveItem("weapon_glock");
+        this.player.entityBridge.giveItem("weapon_usp_silencer");
     }
 }
 
@@ -3024,6 +3068,7 @@ class Player {
      * 重置局内状态（每局开始时调用）。
      */
     resetGameStatus() {
+        this.clearBuffs();
         this.lifecycle.resetGameStatus();
     }
 
@@ -3128,7 +3173,7 @@ class Player {
      * @returns {boolean}
      */
     giveWeapon(weaponName) {
-        return this.entityBridge.clientCommand(`give ${weaponName}`);
+        return this.entityBridge.giveItem(weaponName);
     }
 
     // ——— Buff 入口（直接驱动全局 Buff 系统） ———
@@ -3498,7 +3543,7 @@ class Player {
 
 /**
  * @typedef {object} TP_playerRewardPayload - 玩家奖励分发载荷
- * @property {"buff"|"money"|"exp"|"heal"|"armor"|"damage"|"weapon"|"ready"|"respawn"|"resetGameStatus"} type - 奖励类型
+ * @property {"buff"|"money"|"exp"|"heal"|"armor"|"damage"|"weapon"|"ready"|"respawn"|"resetGameStatus"|"profession"} type - 奖励类型
  * @property {string} [buffConfigId] - Buff 配置 ID（仅 type="buff" 时适用）
  * @property {number} [amount] - 数值（仅 type="money"、"exp"、"heal"、"armor"、"damage" 时适用）
  * @property {string} [weaponName] - 武器名称（仅 type="weapon" 时适用）
@@ -3507,6 +3552,7 @@ class Player {
  * @property {number} [health] - 生命值（仅 type="respawn" 时适用）
  * @property {number} [armor] - 护甲值（仅 type="respawn" 时适用）
  * @property {number} [targetState] - 重生后的目标状态（仅 type="respawn" 时适用）
+ * @property {string} [professionId] - 职业ID（仅 type="profession" 时适用）
  */
 /**
  * 负责所有在线玩家实例的集合管理，以及引擎事件到脚本层的桥接。
@@ -3596,6 +3642,10 @@ class PlayerManager {
             resetGameStatus: (player) => {
                 player.resetGameStatus();
                 return true;
+            },
+            profession: (player, payload) => {
+                if (!payload.professionId) return false;
+                return player.setProfession(payload.professionId);
             }
         };
         /** @type {Array<() => boolean>} */
@@ -3605,21 +3655,12 @@ class PlayerManager {
                     ? this.getPlayerSummary(payload.slot)
                     : null;
             }),
-            eventBus.on(event.Player.In.DispatchRewardRequest, (payload = {}) => {
-                const rewards = Array.isArray(payload.rewards)
-                    ? payload.rewards
-                    : payload.reward
-                        ? [payload.reward]
-                        : [];
-                const targetSlot = typeof payload.slot === "number"
-                    ? payload.slot
-                    : payload.slot == null
-                        ? null
-                        : null;
-
+            eventBus.on(event.Player.In.DispatchRewardRequest, (payload) => {
+                const rewards = payload.rewards;
+                const targetSlot = payload.slot;
                 payload.result = this.dispatchRewardRequest(targetSlot, rewards);
             })
-        ];
+        ];/** @type {{rewards: import("./player_manager").TP_playerRewardPayload[], slot: number|null,result:boolean}} */
     }
     /**
      * 所有类初始化完成后调用
@@ -3794,27 +3835,15 @@ class PlayerManager {
             this._setPlayerReady(player, true);
             return;
         }
-
-        if (command === "profession" || command === "!profession" || command === "class" || command === "!class") {
-            const professionId = parts[1];
-            if (!professionId) {
-                this._adapter.sendMessage(player.slot, `可用职业: ${getPlayerProfessionIds().join(", ")}`);
-                return;
-            }
-
-            const config = getPlayerProfessionConfig(professionId);
-            if (!config) {
-                this._adapter.sendMessage(player.slot, `未知职业 ${professionId}，可用职业: ${getPlayerProfessionIds().join(", ")}`);
-                return;
-            }
-
-            const changed = this.setProfession(player.slot, professionId);
-            this._adapter.sendMessage(
-                player.slot,
-                changed
-                    ? `当前职业已切换为 ${config.displayName} (${config.id})`
-                    : `职业切换失败：${config.displayName} (${config.id})`
-            );
+        if (command ==="money"||command === "!money") {
+            //测试用，给予金钱
+            player.addMoney(100000);
+            return;
+        }
+        if (command ==="exp"||command === "!exp") {
+            //测试用，给予经验
+            player.addExp(100000);
+            return;
         }
     }
 
@@ -3844,9 +3873,10 @@ class PlayerManager {
     /**
      * 由 main.js 转发 ready 脚本输入，切换玩家准备状态。
      * @param {CSPlayerPawn|undefined|null} pawn
+     * @param {boolean} ready 
      * @returns {boolean}
      */
-    toggleReadyByPawn(pawn) {
+    toggleReadyByPawn(pawn, ready) {
         if (!(pawn instanceof CSPlayerPawn)) return false;
         const controller = pawn.GetPlayerController();
         if (!controller) return false;
@@ -3854,7 +3884,7 @@ class PlayerManager {
         const player = this.players.get(controller.GetPlayerSlot());
         if (!player) return false;
 
-        return this._setPlayerReady(player, !player.isReady);
+        return this._setPlayerReady(player, ready);
     }
 
     /**
@@ -3958,10 +3988,10 @@ class PlayerManager {
     }
 
     /**
-     * @returns {Player[]}
+     * @returns {Player[]} 返回当前仍在场且未死亡的玩家，不要求当前处于 PLAYING 状态
      */
     getActivePlayers() {
-        return Array.from(this.players.values());
+        return Array.from(this.players.values()).filter((player) => player.state !== PlayerState.DEAD && player.state !== PlayerState.DISCONNECTED);
     }
 
     /**
@@ -4280,7 +4310,13 @@ class InputManager {
         }
         this._unsubscribers.length = 0;
     }
-
+    cleanup(){
+        for (const source of this._sources.values()) {
+            source.use = false;
+            source.pawn = null;
+            source.detector.reset();
+        }
+    }
     /**
      * 每 tick 轮询全部已注册输入源，逐个回调新按键。
      */
@@ -4340,7 +4376,12 @@ const HUD_FACE_ATTACH = {
     // 正值向玩家左侧偏移，负值向右侧偏移。
     lateralOffset: 2,
 };
-
+/**
+ * HUD 总是显示参数。
+ * true: HUD 在所有游戏状态下显示
+ * false: HUD 只在游戏进行中显示
+ */
+const HUD_ALWAYS_VISIBLE = true;
 /**
  * HUD 渠道定义。
  */
@@ -4363,6 +4404,7 @@ const CHANNEL_PRIORITY = {
  * @typedef {object} HudRequest
  * @property {string} text - 待显示文本
  * @property {import("cs_script/point_script").CSPlayerPawn} pawn - 关联的玩家 Pawn
+ * @property {boolean} [alwaysVisible] - 是否总是显示HUD（可选，默认false）
  */
 
 /**
@@ -4383,6 +4425,7 @@ const CHANNEL_PRIORITY = {
  * @property {import("cs_script/point_script").CSPlayerPawn} pawn - 关联的玩家 Pawn
  * @property {string} text - HUD 显示内容
  * @property {number} channel - HUD 渠道
+ * @property {boolean} [alwaysVisible] - 是否总是显示HUD（可选，默认false）
  * @property {boolean} result - 请求结果（是否成功提交）
  */
 /**
@@ -4452,12 +4495,23 @@ const ShopResult = {
 
 /** @type {ShopItemConfig[]} */
 const BASE_SHOP_ITEMS = [
-    { id: "heal_small",  displayName: "小型治疗包", cost: 200,  requiredLevel: 1, payload: { type: "heal",  amount: 30 } },
-    { id: "heal_large",  displayName: "大型治疗包", cost: 500,  requiredLevel: 3, payload: { type: "heal",  amount: 80 } },
-    { id: "armor_small", displayName: "轻型护甲",   cost: 300,  requiredLevel: 1, payload: { type: "armor", amount: 50 } },
-    { id: "armor_full",  displayName: "重型护甲",   cost: 800,  requiredLevel: 5, payload: { type: "armor", amount: 100 } },
-    { id: "buff_attack", displayName: "强攻增益",   cost: 600,  requiredLevel: 2, payload: { type: "buff",  buffConfigId: "attack_up" } },
-    { id: "weapon_ak47", displayName: "AK-47",      cost: 2700, requiredLevel: 4, payload: { type: "weapon", weaponName: "weapon_ak47" } },
+    { id: "heal_small",  displayName: "治疗30",          cost: 200,  requiredLevel: 1, payload: { type: "heal",  amount: 30 } },
+    { id: "heal_large",  displayName: "治疗80",          cost: 500,  requiredLevel: 3, payload: { type: "heal",  amount: 80 } },
+    { id: "armor_small", displayName: "一半护甲",         cost: 300,  requiredLevel: 1, payload: { type: "armor", amount: 50 } },
+    { id: "armor_full",  displayName: "全部护甲",         cost: 800,  requiredLevel: 5, payload: { type: "armor", amount: 100 } },
+    { id: "buff_attack", displayName: "强攻增益",         cost: 600,  requiredLevel: 2, payload: { type: "buff",  buffConfigId: "attack_up" } },
+    { id: "weapon_glock", displayName: "格洛克手枪",      cost: 500,  requiredLevel: 1, payload: { type: "weapon", weaponName: "weapon_glock" } },
+    { id: "weapon_p250", displayName: "P250 手枪",        cost: 700,  requiredLevel: 2, payload: { type: "weapon", weaponName: "weapon_p250" } },
+    { id: "weapon_deagle", displayName: "沙漠之鹰",        cost: 1200, requiredLevel: 3, payload: { type: "weapon", weaponName: "weapon_deagle" } },
+    { id: "weapon_usp_silencer", displayName: "USP 消音版", cost: 900,  requiredLevel: 1, payload: { type: "weapon", weaponName: "weapon_usp_silencer" } },
+    { id: "weapon_ak47", displayName: "AK-47",             cost: 2700, requiredLevel: 4, payload: { type: "weapon", weaponName: "weapon_ak47" } },
+    { id: "weapon_m4a1", displayName: "M4A1 突击步枪",     cost: 2600, requiredLevel: 4, payload: { type: "weapon", weaponName: "weapon_m4a1" } },
+    { id: "weapon_aug", displayName: "AUG 突击步枪",       cost: 3100, requiredLevel: 5, payload: { type: "weapon", weaponName: "weapon_aug" } },
+    { id: "weapon_awp", displayName: "AWP 狙击枪",         cost: 5000, requiredLevel: 7, payload: { type: "weapon", weaponName: "weapon_awp" } },
+    { id: "weapon_p90", displayName: "P90 冲锋枪",         cost: 2200, requiredLevel: 3, payload: { type: "weapon", weaponName: "weapon_p90" } },
+    { id: "weapon_mac10", displayName: "MAC-10 冲锋枪",   cost: 1800, requiredLevel: 2, payload: { type: "weapon", weaponName: "weapon_mac10" } },
+    { id: "weapon_xm1014", displayName: "XM1014 霰弹枪",  cost: 2500, requiredLevel: 4, payload: { type: "weapon", weaponName: "weapon_xm1014" } },
+    { id: "weapon_m249", displayName: "M249 机枪",        cost: 6000, requiredLevel: 8, payload: { type: "weapon", weaponName: "weapon_m249" } },
 ];
 
 /**
@@ -5049,6 +5103,7 @@ class ShopManager {
                 session.close();
             }
         }
+        this._sessions.clear();
     }
 }
 
@@ -5087,18 +5142,21 @@ class HudManager {
     }
 
     destroy() {
-        this.clearAllSessions();
+        this.clearAll();
         for (const unsubscribe of this._unsubscribers) {
             unsubscribe();
         }
         this._unsubscribers.length = 0;
     }
 
-    clearAllSessions() {
+    clearAll() {
         for (const [slot, session] of this._sessions) {
             session.requests.clear();
             this._arbitrate(session);
             if (!session.use) {
+                if (session.entity?.IsValid?.()) {
+                    session.entity.Remove();
+                }
                 this._sessions.delete(slot);
             }
         }
@@ -5110,7 +5168,7 @@ class HudManager {
      */
     showHud(showHudRequest) {
         const session = this._getOrCreateSession(showHudRequest.slot);
-        session.requests.set(showHudRequest.channel, { text: showHudRequest.text, pawn: showHudRequest.pawn });
+        session.requests.set(showHudRequest.channel, { text: showHudRequest.text, pawn: showHudRequest.pawn, alwaysVisible: showHudRequest.alwaysVisible ?? false });
         this._arbitrate(session);
         return true;
     }
@@ -5148,7 +5206,7 @@ class HudManager {
         const currentWave = Math.max(0, Math.round(waveSummary.currentWave ?? 0));
         const totalWaves = Math.max(0, Math.round(waveSummary.totalWaves ?? 0));
         const waveLabel = totalWaves > 0 ? `${currentWave}/${totalWaves}` : `${currentWave}`;
-
+        
         for (const s of allAlivePlayersSummary) {
             if(!s.pawn)continue;
             const remainingExp = Math.max(0, s.expNeeded - s.exp);
@@ -5156,7 +5214,7 @@ class HudManager {
             const buffLabel = this._formatBuffLabel(runtimeSummary?.buffs ?? []);
             const skillLabel = this._formatSkillCooldownLabel(runtimeSummary?.skill ?? null);
             const text = `Lv.${s.level} \nHP:${s.health}/${s.maxHealth} \n护甲:${s.armor}\nMoney:$${s.money} \n升级还需:${remainingExp}EXP\n伤害:${s.lastMonsterDamage} \nBuff:${buffLabel}\n技能CD:${skillLabel}\n剩余怪物:${remainingMonsters} \n波次:${waveLabel}`;
-            this.showHud({ slot: s.slot, pawn: s.pawn, text, channel: CHANNAL.STATUS, result: true });
+            this.showHud({ slot: s.slot, pawn: s.pawn, text, channel: CHANNAL.STATUS, alwaysVisible: HUD_ALWAYS_VISIBLE, result: true });
         }
         for (const [, session] of this._sessions) {
             if (!session.use) continue;
@@ -5205,10 +5263,19 @@ class HudManager {
             }
         }
 
+        // 如果无活跃请求，检查是否有 alwaysVisible 请求
+        if (winnerChannel === CHANNAL.NONE) {
+            for (const [ch, request] of session.requests) {
+                if (request.alwaysVisible && (CHANNEL_PRIORITY[ch] ?? 0) > (CHANNEL_PRIORITY[winnerChannel] ?? 0)) {
+                    winnerChannel = ch;
+                }
+            }
+        }
+
         const previousChannel = session.activeChannel;
         const wasVisible = session.use;
 
-        // 无活跃请求 → 隐藏 HUD
+        // 无活跃请求且无 alwaysVisible → 隐藏 HUD
         if (winnerChannel === CHANNAL.NONE) {
             if (session.use) {
                 this._hideEntity(session);
@@ -5241,7 +5308,7 @@ class HudManager {
         session.pawn = request.pawn;
 
         this._ensureEntity(session);
-        if (!session.entity) return;
+        if (!session.entity||!session.entity.IsValid()) return;
 
         // 文本更新
         if (textChanged || channelChanged) {
@@ -5377,7 +5444,7 @@ class HudManager {
      * @param {import("./hud_const").HudSession} session
      */
     _hideEntity(session) {
-        if (!session.entity || !session.use) return;
+        if (!session.entity?.IsValid?.() || !session.use) return;
 
         Instance.EntFireAtTarget({
             target: session.entity,
@@ -5449,6 +5516,10 @@ class MonsterEntityBridge {
     constructor(monster) {
         /** 所属怪物实例。 */
         this.monster = monster;
+        /**@type {number|undefined} */
+        this.breakableconnectid;
+        /**@type {number|undefined} */
+        this.modelconnnectid;
     }
     /**
      * 根据怪物配置生成引擎实体（breakable + model）。
@@ -5477,7 +5548,7 @@ class MonsterEntityBridge {
 
         if (this.monster.breakable) {
             this.monster.preBreakableHealth = BREAKABLE_HEALTH_SCALE;
-            Instance.ConnectOutput(this.monster.breakable, "OnHealthChanged", (e) => {
+            this.breakableconnectid=Instance.ConnectOutput(this.monster.breakable, "OnHealthChanged", (e) => {
                 if (typeof e.value !== "number") return;
 
                 const currentBreakableHealth = Math.max(
@@ -5506,9 +5577,11 @@ class MonsterEntityBridge {
      * @param {boolean} [removeModelAfterDeathAnimation=true] 是否删除怪物模型
      */
     removeAfterDeath(removeModelAfterDeathAnimation = true) {
+        if(this.breakableconnectid)Instance.DisconnectOutput(this.breakableconnectid);
         if (this.monster.breakable?.IsValid()) {
             this.monster.breakable.Remove();
         }
+        if(this.modelconnnectid)Instance.DisconnectOutput(this.modelconnnectid);
         if (removeModelAfterDeathAnimation && this.monster.model?.IsValid()) {
             this.monster.model.Remove();
         }
@@ -6112,7 +6185,7 @@ class PounceSkill extends SkillTemplate {
 
         const model = monster.model;
         const target = monster.target;
-        if (!model?.IsValid() || !target) return;
+        if (!model?.IsValid?.() || !target?.IsValid?.()) return;
 
         const start = model.GetAbsOrigin();
         const targetPos = target.GetAbsOrigin();
@@ -6488,8 +6561,8 @@ class FireSkill extends SkillTemplate {
 
     trigger() {
         const pos = this.player
-            ? this.player.entityBridge?.pawn?.GetAbsOrigin?.()
-            : this.monster?.model?.GetAbsOrigin?.();
+            ? (this.player.entityBridge?.pawn?.IsValid?.() ? this.player.entityBridge.pawn.GetAbsOrigin() : null)
+            : (this.monster?.model?.IsValid?.() ? this.monster.model.GetAbsOrigin() : null);
         if (!pos) return false;
 
         /**@type {import("../../areaEffects/area_const").AreaEffectCreateRequest} */
@@ -7021,7 +7094,7 @@ class ThrowStoneSkill extends SkillTemplate {
         const monster = this.monster;
         const target = monster?.target;
         const model = monster?.model;
-        if (!monster || !target || !model?.IsValid?.()) return;
+        if (!monster || !target?.IsValid?.() || !model?.IsValid?.()) return;
 
         const distsq = monster.distanceTosq(target);
         const minDistSq = this.distanceMin * this.distanceMin;
@@ -7234,7 +7307,7 @@ class SoundSkill extends SkillTemplate {
 
         this._spawnedEntities = spawned;
         this._soundEntity = spawned.find((entity) => entity?.IsValid?.()) ?? null;
-        if (!this._soundEntity) {
+        if (!this._soundEntity||!this._soundEntity.IsValid()) {
             this._cleanupEntities();
             return false;
         }
@@ -7521,9 +7594,9 @@ function cleanupSpawnedEntities(entities) {
 const SENTRY_DEFAULTS = {
     searchRadius:    640,
     targetLostRange: 768,
-    damage:          200,
+    damage:          50,
     lifetime:        120,
-    attackInterval:  1,
+    attackInterval:  2,
     turnSpeed:       360,
 };
 
@@ -7590,8 +7663,6 @@ class SentryTurret {
         this.ownerKey = options.ownerKey;
         this.laserStart = null;
         this.laserEnd = null;
-        /** @type {((turret: SentryTurret) => void) | null} */
-        this.onDestroyed = null;
 
         /** @type {import("../../../monster/monster/monster").Monster|null} */
         this.target = null;
@@ -7606,9 +7677,9 @@ class SentryTurret {
         this.turnSpeed = typeof options.turnSpeed === "number" && Number.isFinite(options.turnSpeed)
             ? Math.max(0, options.turnSpeed)
             : cfg.turnSpeed;
-        this._basePosition = this._cloneVector(this.base?.GetAbsOrigin?.());
-        this._baseAngles = this._cloneAngles(this.base?.GetAbsAngles?.());
-        this._yawPosition = this._cloneVector(this.yaw?.GetAbsOrigin?.());
+        this._basePosition = this.base?.IsValid?.() ? this._cloneVector(this.base.GetAbsOrigin()) : null;
+        this._baseAngles = this.base?.IsValid?.() ? this._cloneAngles(this.base.GetAbsAngles()) : null;
+        this._yawPosition = this.yaw?.IsValid?.() ? this._cloneVector(this.yaw.GetAbsOrigin()) : null;
         this._currentYaw = this._normalizeYaw(this.yaw?.GetAbsAngles?.()?.yaw ?? this._baseAngles?.yaw ?? 0);
 
         /** @type {() => import("../../../monster/monster/monster").Monster[]} */
@@ -7719,10 +7790,24 @@ class SentryTurret {
         const entities = this.spawnedEntities.length > 0
             ? [...this.spawnedEntities]
             : [this.base, this.yaw];
-        if (this.laserStart) {
+        if (this.laserStart&&this.laserStart?.IsValid?.()) {
+            if(this.laserStart.GetClassName?.()=="info_particle_system")
+            {
+                Instance.EntFireAtTarget({
+                    target: this.laserStart,
+                    input: "destroyimmediately",
+                });
+            }
             entities.push(this.laserStart);
         }
-        if (this.laserEnd) {
+        if (this.laserEnd&&this.laserEnd?.IsValid?.()) {
+            if(this.laserEnd.GetClassName?.()=="info_particle_system")
+            {
+                Instance.EntFireAtTarget({
+                    target: this.laserEnd,
+                    input: "destroyimmediately",
+                });
+            }
             entities.push(this.laserEnd);
         }
         const uniqueEntities = new Set(entities.filter((entity) => entity?.IsValid?.()));
@@ -7732,10 +7817,6 @@ class SentryTurret {
 
         this.laserStart = null;
         this.laserEnd = null;
-
-        if (typeof this.onDestroyed === "function") {
-            this.onDestroyed(this);
-        }
     }
 
     _isTargetValid() {
@@ -7750,11 +7831,11 @@ class SentryTurret {
     }
 
     _getTurretBasePosition() {
-        return this._cloneVector(this._basePosition ?? this.base.GetAbsOrigin());
+        return this._cloneVector(this._basePosition ?? (this.base?.IsValid?.() ? this.base.GetAbsOrigin() : null));
     }
 
     _getLaserStartPosition(yaw = this._currentYaw, turretPos = null) {
-        const basePosition = this._cloneVector(turretPos ?? this._basePosition ?? this.base.GetAbsOrigin());
+        const basePosition = this._cloneVector(turretPos ?? this._basePosition ?? (this.base?.IsValid?.() ? this.base.GetAbsOrigin() : null));
         if (!basePosition || !Number.isFinite(yaw)) return null;
 
         const yawRad = yaw * (Math.PI / 180);
@@ -8078,7 +8159,6 @@ class SentryManager {
      * @param {SentryTurret} turret
      */
     register(turret) {
-        turret.onDestroyed = (/** @type {SentryTurret} */ t) => this._turrets.delete(t);
         turret.getActiveMonsters = () => this.getActiveMonsters();
         this._turrets.add(turret);
     }
@@ -8420,9 +8500,18 @@ class SentrySkill extends SkillTemplate {
         const ownerKey = player.slot;
         if (sentryManager.countByOwner(ownerKey) >= this._maxPerPlayer) return false;
 
-        const placement = pawn.GetAbsOrigin?.();
-        if (!placement) return false;
-        if (!this._canPlaceAt(placement)) return false;
+        const origin = pawn.GetAbsOrigin?.();
+        if (!origin) return false;
+
+        const trace = Instance.TraceBox({
+            mins: SENTRY_PLACEMENT_BOUNDS.mins,
+            maxs: SENTRY_PLACEMENT_BOUNDS.maxs,
+            start: vec$1.Zfly(origin,20),
+            end: { x: origin.x, y: origin.y, z: origin.z - 100 },
+            ignorePlayers: true,
+        });
+        const placement = trace.end;
+        if (!trace.didHit||!this._canPlaceAt(placement)) return false;
 
         const ok = this._spawnTurret(vec$1.Zfly(placement,15), ownerKey);
         if (ok) {
@@ -8448,6 +8537,7 @@ class SentrySkill extends SkillTemplate {
      * @returns {{ position: import("cs_script/point_script").Vector, angles: import("cs_script/point_script").QAngle } | null}
      */
     _getPlacement(pawn) {
+        if (!pawn?.IsValid?.()) return null;
         const origin = pawn.GetAbsOrigin?.();
         const angles = pawn.GetAbsAngles?.();
         if (!origin || !angles) return null;
@@ -8947,7 +9037,7 @@ class MonsterAnimator {
         if (!this.model || this._boundModel === this.model) return;
 
         this._boundModel = this.model;
-        Instance.ConnectOutput(this.model,"OnAnimationDone",()=>{
+        this.monster.entityBridge.modelconnnectid=Instance.ConnectOutput(this.model,"OnAnimationDone",()=>{
             this.locked = false;
             this.onStateFinish?.(this.currentstats);
         });
@@ -9075,7 +9165,7 @@ class MonsterAnimator {
     play(type) {
         this._bindModelOutput();
         const list = this.animConfig[type];
-        if (!this.model || !list || list.length === 0) return null;
+        if (!this.model||!this.model.IsValid() || !list || list.length === 0) return null;
         const anim = list[Math.floor(Math.random() * list.length)];
         if (!anim) return;
         Instance.EntFireAtTarget({target:this.model,input:"SetAnimation",value:anim});
@@ -9729,6 +9819,7 @@ class SkillManager {
         {
             if(skill.monster==null&&skill.player==null)
             {
+                skill.onSkillDelete();
                 this.SkillMap.delete(skillId);
                 continue;
             }
@@ -9833,6 +9924,7 @@ class MonsterManager {
                 payload.result = this.spawnByother(payload.monster, payload.options);
             })
         ];
+        this.glowing=false;
     }
     /**
      * @param {Monster} monsterInstance 死亡怪物实例
@@ -9866,6 +9958,7 @@ class MonsterManager {
      */
     resetAllGameStatus() {
         this.forceCleanup();
+        this.glowing=false;
         this.nextMonsterId = 1;
         this.totalKills = 0;
     }
@@ -9888,6 +9981,7 @@ class MonsterManager {
                 this.monsters.delete(id);
             }
         }
+        this.updateMonsterGlow();
         this.spawntick();
     }
     spawntick()
@@ -9920,6 +10014,22 @@ class MonsterManager {
      */
     getActiveMonsters() {
         return Array.from(this.monsters.values()).filter(monster => monster.state !== MonsterState.DEAD);
+    }
+
+    updateMonsterGlow() {
+        const shouldGlow = this.activeMonsters > 0 && this.activeMonsters <= 20;
+        if(this.glowing==shouldGlow)return;
+        this.glowing=shouldGlow;
+        for (const monster of this.getActiveMonsters()) {
+            const model = monster.model;
+            if (!model || !(model instanceof BaseModelEntity)) continue;
+            if (shouldGlow) {
+                model.Glow({ r: 255, g: 0, b: 0 });
+            }
+            else {
+                model.Unglow();
+            }
+        }
     }
 
     /**
@@ -10026,6 +10136,7 @@ class MonsterManager {
                 return null;
             }
             const spawnPoint = nearbySpawnPoints[Math.floor(Math.random() * nearbySpawnPoints.length)];
+            if (!spawnPoint?.IsValid?.()) return null;
             const pos = spawnPoint.GetAbsOrigin();
             const start = { x: pos.x, y: pos.y, z: pos.z };
             const end = { x: pos.x, y: pos.y, z: pos.z };
@@ -10539,18 +10650,18 @@ const buffconfig={
 		configid:"burn",
 		typeid:"burn",
 		params:{
-			duration:1,
+			duration:5,
 			tickInterval:0.5,
-			dps:8,
+			dps:25,
 		}
 	},
 	regeneration:{
 		configid:"regeneration",
 		typeid:"regeneration",
 		params:{
-			duration:1,
+			duration:3,
 			tickInterval:0.5,
-			healPerTick:5,
+			healPerTick:15,
 		}
 	},
 	attack_up:{
@@ -10569,11 +10680,6 @@ const buffconfig={
 			multiplier:1.8,
 			flatBonus:0,
 		}
-	},
-	aaa:{
-		configid:"aaa",
-		typeid:"bbb",
-		params:{}
 	}
 };
 
@@ -10956,7 +11062,7 @@ class ParticleManager {
     }
 
     /** 停止并清理当前管理器中的全部粒子。 */
-    cleanup() {
+    clearAll() {
         for (const particle of this.activeParticles.values()) {
             if (particle) {
                 particle.stop();
@@ -10967,7 +11073,7 @@ class ParticleManager {
 
     /** 销毁服务并注销事件监听。 */
     destroy() {
-        this.cleanup();
+        this.clearAll();
         for (const unsubscribe of this._unsubscribers) {
             unsubscribe();
         }
@@ -22820,7 +22926,7 @@ class MovementManager {
         if (req.maxSpeed !== undefined) entry.movement.setSpeed(req.maxSpeed);
         if (req.clearPath) entry.movement.clearPath();
 
-        if (req.targetEntity) {
+        if (req.targetEntity?.IsValid?.()) {
             const pos = req.targetEntity.GetAbsOrigin();
             if (pos) entry.movement.setTarget(pos);
         } else if (req.targetPosition) {
@@ -22869,6 +22975,10 @@ class MovementManager {
             const entry = this._entries.get(key);
             if (!entry) continue;
 
+            if (!entry.entity?.IsValid?.()) {
+                this._pathHeap.push(current.node, now);
+                continue;
+            }
             if (!this._canRefreshPath(entry)) {
                 this._pathHeap.push(current.node, now);
                 continue;
@@ -22876,7 +22986,7 @@ class MovementManager {
 
             const start = entry.entity.GetAbsOrigin();
             const target = entry.targetEntity;
-            const end = (target&&target.IsAlive()) ? target.GetAbsOrigin() : entry.targetPosition;
+            const end = (target?.IsValid?.() && target.IsAlive()) ? target.GetAbsOrigin() : entry.targetPosition;
             if (!start || !end) {
                 this._pathHeap.push(current.node, now);
                 continue;
@@ -22934,6 +23044,7 @@ class MovementManager {
         this._modelToBreakable.set(model, breakable);
         this._addBreakableIgnoreEntity(breakable);
 
+        if (!breakable?.IsValid?.()) return true;
         const breakablePos = breakable.GetAbsOrigin();
         if (!breakablePos) return true;
 
@@ -23116,7 +23227,7 @@ class MovementManager {
     /**
      * 释放全部 Movement 实例与路径调度队列。
      */
-    cleanup() {
+    clearAll() {
         for (const [, entry] of this._entries) {
             entry.movement.stop();
         }
@@ -23133,7 +23244,7 @@ class MovementManager {
     }
 
     destroy() {
-        this.cleanup();
+        this.clearAll();
         for (const unsubscribe of this._unsubscribers) {
             unsubscribe();
         }
@@ -23398,7 +23509,8 @@ class AreaEffect {
     _tickPlayers(now, players, r2) {
         for (const player of players) {
             const pawn = player?.entityBridge?.pawn;
-            const pos = pawn?.GetAbsOrigin?.();
+            if (!pawn?.IsValid?.()) continue;
+            const pos = pawn.GetAbsOrigin();
             if (!pos || vec$1.lengthsq(pos, this.position) > r2) continue;
 
             const slot = pawn?.GetPlayerController?.()?.GetPlayerSlot?.() ?? -1;
@@ -23429,7 +23541,9 @@ class AreaEffect {
     _tickMonsters(now, monsters, r2) {
         for (const monster of monsters) {
             const monsterId = monster?.id;
-            const pos = monster?.model?.GetAbsOrigin?.();
+            const model = monster?.model;
+            if (!model?.IsValid?.()) continue;
+            const pos = model.GetAbsOrigin();
             if (!pos || vec$1.lengthsq(pos, this.position) > r2) continue;
 
             const cooldownKey = `m:${monsterId}`;
@@ -23635,7 +23749,7 @@ class AreaEffectManager {
     }
 
     /** 清理所有区域效果 */
-    cleanup() {
+    clearAll() {
         for (const effect of this._effects.values()) {
             effect?.stop();
         }
@@ -23644,7 +23758,7 @@ class AreaEffectManager {
 
     /** 销毁服务并注销事件监听。 */
     destroy() {
-        this.cleanup();
+        this.clearAll();
         for (const unsubscribe of this._unsubscribers) {
             unsubscribe();
         }
@@ -23740,10 +23854,12 @@ class ProjectileRunner {
         const remainingLifetime = this.maxLifetime - this._elapsed;
         const stepDt = Math.min(dt, remainingDuration, remainingLifetime);
         if (stepDt <= 0) {
+            if (!this.entity?.IsValid?.()) return false;
             this._finish(this.entity.GetAbsOrigin(), tickContext);
             return false;
         }
 
+        if (!this.entity?.IsValid?.()) return false;
         const start = this.entity.GetAbsOrigin();
         const end = this._computeStepEnd(start, stepDt);
         const trace = Instance.TraceLine({
@@ -23798,7 +23914,9 @@ class ProjectileRunner {
             return false;
         }
 
-        this.entity.Remove();
+        if (this.entity?.IsValid?.()) {
+            this.entity.Remove();
+        }
         this._entityRemoved = true;
         return true;
     }
@@ -24011,17 +24129,17 @@ class ProjectileManager {
         }
     }
 
-    cleanup() {
+    clearAll() {
         for (const [projectileId, runner] of this._projectiles.entries()) {
-            this._projectiles.delete(projectileId);
             runner.abort();
             const removedEntity = runner.removeEntity();
             this._emitStopped(runner, removedEntity);
         }
+        this._projectiles.clear();
     }
 
     destroy() {
-        this.cleanup();
+        this.clearAll();
         for (const unsubscribe of this._unsubscribers) {
             unsubscribe();
         }
@@ -24120,7 +24238,8 @@ Instance.ServerCommand("mp_roundtime 60");
 Instance.ServerCommand("mp_freezetime 1");
 Instance.ServerCommand("mp_ignore_round_win_conditions 1");
 Instance.ServerCommand("weapon_accuracy_nospread 1");
-
+Instance.ServerCommand("sv_infinite_ammo 2");
+//Instance.ServerCommand("sv_cheats false");
 // ═══════════════════════════════════════════════
 // 2. 实例化各模块（平级，互不持有）
 // ═══════════════════════════════════════════════
@@ -24174,19 +24293,22 @@ const projectileManager = new ProjectileManager();
 sentryManager.setMonsterProvider(() => monsterManager.getActiveMonsters());
 function cleanupFinishedMatch() {
     shopManager.closeAll();
-    hudManager.clearAllSessions();
+    hudManager.clearAll();
     waveManager.resetGame();
     sentryManager.destroyAll();
     monsterManager.stopWave();
-    for (const player of playerManager.getActivePlayers()) {
-        player.stopInputTracking();
-    }
+    inputManager.cleanup();
     monsterManager.forceCleanup();
-    movementManager.cleanup();
-    projectileManager.cleanup();
-    areaEffectManager.cleanup();
-    particleManager.cleanup();
+    movementManager.clearAll();
+    projectileManager.clearAll();
+    areaEffectManager.clearAll();
+    particleManager.clearAll();
     buffManager.clearAll();
+    skillManager.clearAll();
+    playerManager.resetAllGameStatus();
+    gameManager.clearAll();
+
+    gameManager.onPlayerRespawn();
 }
 
 // ═══════════════════════════════════════════════
@@ -24232,6 +24354,12 @@ eventBus.on(event.Game.Out.OnEnterPreparePhase, (payload) => {
 
 eventBus.on(event.Game.Out.OnStartGame, (payload) => {
     playerManager.enterGameStart();
+    const fp=Instance.FindEntityByName("game_start")?.GetAbsOrigin();
+    playerManager.getActivePlayers().forEach(player => {
+        player.entityBridge.pawn?.Teleport({
+            position:fp
+        });
+    });
     /** @type {import("./wave/wave_const").WaveStartRequest} */
     const waveStartPayload = { waveIndex: 1, result: false };
     eventBus.emit(event.Wave.In.WaveStartRequest, waveStartPayload);
@@ -24242,22 +24370,21 @@ eventBus.on(event.Game.Out.OnGameLost, (payload) => {
 });
 
 eventBus.on(event.Game.Out.OnGameWin, (payload) => {
+    //传送到终点房
+    playerManager.dispatchReward(null,{
+        type:"respawn"
+    });
+    const fp=Instance.FindEntityByName("game_complete")?.GetAbsOrigin();
+    playerManager.getActivePlayers().forEach(player => {
+        player.entityBridge.pawn?.Teleport({
+            position:fp
+        });
+    });
     cleanupFinishedMatch();
 });
 
 eventBus.on(event.Game.Out.OnResetGame, (payload) => {
-    shopManager.closeAll();
-    hudManager.clearAllSessions();
-    waveManager.resetGame();
-    skillManager.clearAll();
-    sentryManager.destroyAll();
-    monsterManager.resetAllGameStatus();
-    movementManager.cleanup();
-    projectileManager.cleanup();
-    areaEffectManager.cleanup();
-    particleManager.cleanup();
-    buffManager.clearAll();
-    playerManager.resetAllGameStatus();
+    cleanupFinishedMatch();
     Instance.ServerCommand("mp_restartgame 5");
 });
 
@@ -24425,13 +24552,17 @@ Instance.OnScriptInput("startWave", (scriptEvent) => {
 
 Instance.OnScriptInput("ready", (scriptEvent) => {
     const pawn = /** @type {import("cs_script/point_script").CSPlayerPawn|undefined} */ (scriptEvent.activator);
-    playerManager.toggleReadyByPawn(pawn);
+    playerManager.toggleReadyByPawn(pawn,true);
+});
+Instance.OnScriptInput("unready", (scriptEvent) => {
+    const pawn = /** @type {import("cs_script/point_script").CSPlayerPawn|undefined} */ (scriptEvent.activator);
+    playerManager.toggleReadyByPawn(pawn,false);
 });
 
 Instance.OnScriptInput("openshop", (scriptEvent) => {
-    const controller = /** @type {import("cs_script/point_script").CSPlayerController|undefined} */ (scriptEvent.activator);
-    const slot = controller?.GetPlayerSlot?.();
-    const pawn = controller?.GetPlayerPawn?.();
+    const pawn = /** @type {import("cs_script/point_script").CSPlayerPawn|undefined} */ (scriptEvent.activator);
+    const slot = pawn?.GetPlayerController()?.GetPlayerSlot?.();
+
     if (typeof slot !== "number" || !pawn) return;
 
     /** @type {import("./shop/shop_const").ShopOpenRequest} */
@@ -24440,15 +24571,26 @@ Instance.OnScriptInput("openshop", (scriptEvent) => {
 });
 
 Instance.OnScriptInput("closeshop", (scriptEvent) => {
-    const controller = /** @type {import("cs_script/point_script").CSPlayerController|undefined} */ (scriptEvent.activator);
-    const slot = controller?.GetPlayerSlot?.();
+    const pawn = /** @type {import("cs_script/point_script").CSPlayerPawn|undefined} */ (scriptEvent.activator);
+    const slot = pawn?.GetPlayerController()?.GetPlayerSlot?.();
     if (typeof slot !== "number") return;
 
     /** @type {import("./shop/shop_const").ShopCloseRequest} */
     const payload = { slot, result: false };
     eventBus.emit(event.Shop.In.ShopCloseRequest, payload);
 });
+Instance.OnScriptInput("profession", (scriptEvent) => {
+    const profession = scriptEvent.caller?.GetEntityName?.();
+    const pawn = /** @type {import("cs_script/point_script").CSPlayerPawn|undefined} */ (scriptEvent.activator);
+    const slot = pawn?.GetPlayerController()?.GetPlayerSlot?.();
+    if (!slot || !profession) return;
 
+    // 通过reward系统触发职业切换
+    playerManager.dispatchReward(slot, {
+        type: "profession",
+        professionId: profession
+    });
+});
 Instance.OnPlayerConnect((event) => {
     playerManager.handlePlayerConnect(event.player);
 });
@@ -24496,11 +24638,15 @@ Instance.OnPlayerChat((chatEvent) => {
         }
     }
 });
-
+Instance.OnRoundStart(()=>{
+    cleanupFinishedMatch();
+    playerManager.dispatchReward(null,{
+        type:"respawn"
+    });
+});
 // ═══════════════════════════════════════════════
 // 5. 主循环（统一 think）
 // ═══════════════════════════════════════════════
-
 /** 上一帧时间戳，用于计算 dt */
 let _lastTime = Instance.GetGameTime();
 Instance.SetThink(() => {
@@ -24508,7 +24654,7 @@ Instance.SetThink(() => {
     const dt = Math.max(0, now - _lastTime);
     _lastTime = now;
     const isGamePlaying = gameManager.checkGameState();
-    const alivePlayers = playerManager.getAlivePlayers();
+    const alivePlayers = playerManager.getAlivePlayers();//游戏中的存活玩家
     const alivePawns = alivePlayers
         .map((player) => player.entityBridge.pawn)
         .filter((pawn) => pawn != null);
@@ -24550,10 +24696,18 @@ Instance.SetThink(() => {
 
     // ── 5.2 其他模块 tick ──
     shopManager.tick();
-    if (gameManager.gameState === GameState.PLAYING) {
+    {
+        const activePlayers = playerManager.getActivePlayers();//活着的所有人
+        let waveSummary = {};
+        let playerRuntimeSummary = new Map();
         const waveProgress = waveManager.getProgress();
-        const playerRuntimeSummary = new Map(
-            alivePlayers.map((player) => [
+        waveSummary = {
+            remainingMonsters: monsterManager.getRemainingMonsters(waveProgress.wave?.totalMonsters),
+            currentWave: waveProgress.current,
+            totalWaves: waveProgress.total,
+        };
+        playerRuntimeSummary = new Map(
+            activePlayers.map((player) => [
                 player.slot,
                 {
                     buffs: buffManager.getActiveBuffSummaries(player),
@@ -24563,13 +24717,7 @@ Instance.SetThink(() => {
                 },
             ])
         );
-        hudManager.tick(alivePlayers.map(p => p.getSummary()), {
-            remainingMonsters: monsterManager.getRemainingMonsters(waveProgress.wave?.totalMonsters),
-            currentWave: waveProgress.current,
-            totalWaves: waveProgress.total,
-        }, playerRuntimeSummary);
-    } else if (gameManager.gameState === GameState.WON || gameManager.gameState === GameState.LOST) {
-        hudManager.clearAllSessions();
+        hudManager.tick(activePlayers.map(p => p.getSummary()), waveSummary, playerRuntimeSummary);
     }
 
     // ── 5.3 玩家状态 HUD 同步 ──
@@ -24580,7 +24728,3 @@ Instance.SetNextThink(Instance.GetGameTime() + ticks);
 Instance.Msg("=== PvE Release 已启动 ===");
 
 playerManager.refresh();
-/**
- * 200怪
- * 除去movement,其他模块1.6ms
- */

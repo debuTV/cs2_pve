@@ -47,7 +47,6 @@ export class SentryManager {
      * @param {SentryTurret} turret
      */
     register(turret) {
-        turret.onDestroyed = (/** @type {SentryTurret} */ t) => this._turrets.delete(t);
         turret.getActiveMonsters = () => this.getActiveMonsters();
         this._turrets.add(turret);
     }

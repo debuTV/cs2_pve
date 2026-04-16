@@ -74,8 +74,8 @@ export class FireSkill extends SkillTemplate {
 
     trigger() {
         const pos = this.player
-            ? this.player.entityBridge?.pawn?.GetAbsOrigin?.()
-            : this.monster?.model?.GetAbsOrigin?.();
+            ? (this.player.entityBridge?.pawn?.IsValid?.() ? this.player.entityBridge.pawn.GetAbsOrigin() : null)
+            : (this.monster?.model?.IsValid?.() ? this.monster.model.GetAbsOrigin() : null);
         if (!pos) return false;
 
         /**@type {import("../../areaEffects/area_const").AreaEffectCreateRequest} */

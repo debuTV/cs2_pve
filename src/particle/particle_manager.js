@@ -68,7 +68,7 @@ export class ParticleManager {
     }
 
     /** 停止并清理当前管理器中的全部粒子。 */
-    cleanup() {
+    clearAll() {
         for (const particle of this.activeParticles.values()) {
             if (particle) {
                 particle.stop();
@@ -79,7 +79,7 @@ export class ParticleManager {
 
     /** 销毁服务并注销事件监听。 */
     destroy() {
-        this.cleanup();
+        this.clearAll();
         for (const unsubscribe of this._unsubscribers) {
             unsubscribe();
         }

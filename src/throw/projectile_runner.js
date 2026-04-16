@@ -90,10 +90,12 @@ export class ProjectileRunner {
         const remainingLifetime = this.maxLifetime - this._elapsed;
         const stepDt = Math.min(dt, remainingDuration, remainingLifetime);
         if (stepDt <= 0) {
+            if (!this.entity?.IsValid?.()) return false;
             this._finish(this.entity.GetAbsOrigin(), tickContext);
             return false;
         }
 
+        if (!this.entity?.IsValid?.()) return false;
         const start = this.entity.GetAbsOrigin();
         const end = this._computeStepEnd(start, stepDt);
         const trace = Instance.TraceLine({
@@ -148,7 +150,9 @@ export class ProjectileRunner {
             return false;
         }
 
-        this.entity.Remove();
+        if (this.entity?.IsValid?.()) {
+            this.entity.Remove();
+        }
         this._entityRemoved = true;
         return true;
     }

@@ -145,7 +145,7 @@ export const event = {
     },
     Hud: {
         In: {
-            ShowHudRequest: "Hud_OnShowHudRequest",        // 显示 Hud 请求，payload 包含 {slot: number, pawn: CSPlayerPawn, text: string, channel: number}
+            ShowHudRequest: "Hud_OnShowHudRequest",        // 显示 Hud 请求，payload 包含 {slot: number, pawn: CSPlayerPawn, text: string, channel: number, alwaysVisible?: boolean}
             HideHudRequest: "Hud_OnHideHudRequest",        // 隐藏 Hud 请求，payload 包含 {slot: number, channel?: number}
         },
         Out: {

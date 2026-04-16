@@ -294,7 +294,7 @@ export class MovementManager {
         if (req.maxSpeed !== undefined) entry.movement.setSpeed(req.maxSpeed);
         if (req.clearPath) entry.movement.clearPath();
 
-        if (req.targetEntity) {
+        if (req.targetEntity?.IsValid?.()) {
             const pos = req.targetEntity.GetAbsOrigin();
             if (pos) entry.movement.setTarget(pos);
         } else if (req.targetPosition) {
@@ -343,6 +343,10 @@ export class MovementManager {
             const entry = this._entries.get(key);
             if (!entry) continue;
 
+            if (!entry.entity?.IsValid?.()) {
+                this._pathHeap.push(current.node, now);
+                continue;
+            }
             if (!this._canRefreshPath(entry)) {
                 this._pathHeap.push(current.node, now);
                 continue;
@@ -350,7 +354,7 @@ export class MovementManager {
 
             const start = entry.entity.GetAbsOrigin();
             const target = entry.targetEntity;
-            const end = (target&&target.IsAlive()) ? target.GetAbsOrigin() : entry.targetPosition;
+            const end = (target?.IsValid?.() && target.IsAlive()) ? target.GetAbsOrigin() : entry.targetPosition;
             if (!start || !end) {
                 this._pathHeap.push(current.node, now);
                 continue;
@@ -408,6 +412,7 @@ export class MovementManager {
         this._modelToBreakable.set(model, breakable);
         this._addBreakableIgnoreEntity(breakable);
 
+        if (!breakable?.IsValid?.()) return true;
         const breakablePos = breakable.GetAbsOrigin();
         if (!breakablePos) return true;
 
@@ -590,7 +595,7 @@ export class MovementManager {
     /**
      * 释放全部 Movement 实例与路径调度队列。
      */
-    cleanup() {
+    clearAll() {
         for (const [, entry] of this._entries) {
             entry.movement.stop();
         }
@@ -607,7 +612,7 @@ export class MovementManager {
     }
 
     destroy() {
-        this.cleanup();
+        this.clearAll();
         for (const unsubscribe of this._unsubscribers) {
             unsubscribe();
         }

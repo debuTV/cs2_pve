@@ -33,6 +33,7 @@ import { PlayerState } from "./player/player_const";
 import { InputManager } from "./input/input_manager";
 import { ShopManager } from "./shop/shop_manager";
 import { HudManager } from "./hud/hud_manager";
+import { HUD_ALWAYS_VISIBLE } from "./hud/hud_const";
 import { SkillManager } from "./skill/skill_manager";
 import { sentryManager } from "./skill/skills/sentry/sentry_manager";
 import { MonsterManager } from "./monster/monster_manager";
@@ -53,7 +54,8 @@ Instance.ServerCommand("mp_roundtime 60");
 Instance.ServerCommand("mp_freezetime 1");
 Instance.ServerCommand("mp_ignore_round_win_conditions 1");
 Instance.ServerCommand("weapon_accuracy_nospread 1");
-
+Instance.ServerCommand("sv_infinite_ammo 2");
+//Instance.ServerCommand("sv_cheats false");
 // ═══════════════════════════════════════════════
 // 2. 实例化各模块（平级，互不持有）
 // ═══════════════════════════════════════════════
@@ -107,19 +109,22 @@ const projectileManager = new ProjectileManager();
 sentryManager.setMonsterProvider(() => monsterManager.getActiveMonsters());
 function cleanupFinishedMatch() {
     shopManager.closeAll();
-    hudManager.clearAllSessions();
+    hudManager.clearAll();
     waveManager.resetGame();
     sentryManager.destroyAll();
     monsterManager.stopWave();
-    for (const player of playerManager.getActivePlayers()) {
-        player.stopInputTracking();
-    }
+    inputManager.cleanup();
     monsterManager.forceCleanup();
-    movementManager.cleanup();
-    projectileManager.cleanup();
-    areaEffectManager.cleanup();
-    particleManager.cleanup();
+    movementManager.clearAll();
+    projectileManager.clearAll();
+    areaEffectManager.clearAll();
+    particleManager.clearAll();
     buffManager.clearAll();
+    skillManager.clearAll();
+    playerManager.resetAllGameStatus();
+    gameManager.clearAll();
+
+    gameManager.onPlayerRespawn();
 }
 
 // ═══════════════════════════════════════════════
@@ -167,35 +172,37 @@ eventBus.on(event.Game.Out.OnEnterPreparePhase, (payload) => {
 eventBus.on(event.Game.Out.OnStartGame, (payload) => {
     void payload;
     playerManager.enterGameStart();
+    const fp=Instance.FindEntityByName("game_start")?.GetAbsOrigin();
+    playerManager.getActivePlayers().forEach(player => {
+        player.entityBridge.pawn?.Teleport({
+            position:fp
+        });
+    });
     /** @type {import("./wave/wave_const").WaveStartRequest} */
     const waveStartPayload = { waveIndex: 1, result: false };
     eventBus.emit(event.Wave.In.WaveStartRequest, waveStartPayload);
 });
 
 eventBus.on(event.Game.Out.OnGameLost, (payload) => {
-    void payload;
     cleanupFinishedMatch();
 });
 
 eventBus.on(event.Game.Out.OnGameWin, (payload) => {
-    void payload;
+    //传送到终点房
+    playerManager.dispatchReward(null,{
+        type:"respawn"
+    });
+    const fp=Instance.FindEntityByName("game_complete")?.GetAbsOrigin();
+    playerManager.getActivePlayers().forEach(player => {
+        player.entityBridge.pawn?.Teleport({
+            position:fp
+        });
+    });
     cleanupFinishedMatch();
 });
 
 eventBus.on(event.Game.Out.OnResetGame, (payload) => {
-    void payload;
-    shopManager.closeAll();
-    hudManager.clearAllSessions();
-    waveManager.resetGame();
-    skillManager.clearAll();
-    sentryManager.destroyAll();
-    monsterManager.resetAllGameStatus();
-    movementManager.cleanup();
-    projectileManager.cleanup();
-    areaEffectManager.cleanup();
-    particleManager.cleanup();
-    buffManager.clearAll();
-    playerManager.resetAllGameStatus();
+    cleanupFinishedMatch();
     Instance.ServerCommand("mp_restartgame 5");
 });
 
@@ -365,13 +372,17 @@ Instance.OnScriptInput("startWave", (scriptEvent) => {
 
 Instance.OnScriptInput("ready", (scriptEvent) => {
     const pawn = /** @type {import("cs_script/point_script").CSPlayerPawn|undefined} */ (scriptEvent.activator);
-    playerManager.toggleReadyByPawn(pawn);
+    playerManager.toggleReadyByPawn(pawn,true);
+});
+Instance.OnScriptInput("unready", (scriptEvent) => {
+    const pawn = /** @type {import("cs_script/point_script").CSPlayerPawn|undefined} */ (scriptEvent.activator);
+    playerManager.toggleReadyByPawn(pawn,false);
 });
 
 Instance.OnScriptInput("openshop", (scriptEvent) => {
-    const controller = /** @type {import("cs_script/point_script").CSPlayerController|undefined} */ (scriptEvent.activator);
-    const slot = controller?.GetPlayerSlot?.();
-    const pawn = controller?.GetPlayerPawn?.();
+    const pawn = /** @type {import("cs_script/point_script").CSPlayerPawn|undefined} */ (scriptEvent.activator);
+    const slot = pawn?.GetPlayerController()?.GetPlayerSlot?.();
+
     if (typeof slot !== "number" || !pawn) return;
 
     /** @type {import("./shop/shop_const").ShopOpenRequest} */
@@ -380,15 +391,26 @@ Instance.OnScriptInput("openshop", (scriptEvent) => {
 });
 
 Instance.OnScriptInput("closeshop", (scriptEvent) => {
-    const controller = /** @type {import("cs_script/point_script").CSPlayerController|undefined} */ (scriptEvent.activator);
-    const slot = controller?.GetPlayerSlot?.();
+    const pawn = /** @type {import("cs_script/point_script").CSPlayerPawn|undefined} */ (scriptEvent.activator);
+    const slot = pawn?.GetPlayerController()?.GetPlayerSlot?.();
     if (typeof slot !== "number") return;
 
     /** @type {import("./shop/shop_const").ShopCloseRequest} */
     const payload = { slot, result: false };
     eventBus.emit(event.Shop.In.ShopCloseRequest, payload);
 });
+Instance.OnScriptInput("profession", (scriptEvent) => {
+    const profession = scriptEvent.caller?.GetEntityName?.();
+    const pawn = /** @type {import("cs_script/point_script").CSPlayerPawn|undefined} */ (scriptEvent.activator);
+    const slot = pawn?.GetPlayerController()?.GetPlayerSlot?.();
+    if (!slot || !profession) return;
 
+    // 通过reward系统触发职业切换
+    const success = playerManager.dispatchReward(slot, {
+        type: "profession",
+        professionId: profession
+    });
+});
 Instance.OnPlayerConnect((event) => {
     playerManager.handlePlayerConnect(event.player);
 });
@@ -439,11 +461,15 @@ Instance.OnPlayerChat((chatEvent) => {
 
     }
 });
-
+Instance.OnRoundStart(()=>{
+    cleanupFinishedMatch();
+    playerManager.dispatchReward(null,{
+        type:"respawn"
+    });
+});
 // ═══════════════════════════════════════════════
 // 5. 主循环（统一 think）
 // ═══════════════════════════════════════════════
-
 /** 上一帧时间戳，用于计算 dt */
 let _lastTime = Instance.GetGameTime();
 Instance.SetThink(() => {
@@ -451,7 +477,7 @@ Instance.SetThink(() => {
     const dt = Math.max(0, now - _lastTime);
     _lastTime = now;
     const isGamePlaying = gameManager.checkGameState();
-    const alivePlayers = playerManager.getAlivePlayers();
+    const alivePlayers = playerManager.getAlivePlayers();//游戏中的存活玩家
     const alivePawns = alivePlayers
         .map((player) => player.entityBridge.pawn)
         .filter((pawn) => pawn != null);
@@ -496,10 +522,19 @@ Instance.SetThink(() => {
 
     // ── 5.2 其他模块 tick ──
     shopManager.tick();
-    if (gameManager.gameState === GameState.PLAYING) {
+    const isHudTickNeeded = HUD_ALWAYS_VISIBLE || gameManager.gameState === GameState.PLAYING;
+    if (isHudTickNeeded) {
+        const activePlayers = playerManager.getActivePlayers();//活着的所有人
+        let waveSummary = {};
+        let playerRuntimeSummary = new Map();
         const waveProgress = waveManager.getProgress();
-        const playerRuntimeSummary = new Map(
-            alivePlayers.map((player) => [
+        waveSummary = {
+            remainingMonsters: monsterManager.getRemainingMonsters(waveProgress.wave?.totalMonsters),
+            currentWave: waveProgress.current,
+            totalWaves: waveProgress.total,
+        };
+        playerRuntimeSummary = new Map(
+            activePlayers.map((player) => [
                 player.slot,
                 {
                     buffs: buffManager.getActiveBuffSummaries(player),
@@ -509,13 +544,9 @@ Instance.SetThink(() => {
                 },
             ])
         );
-        hudManager.tick(alivePlayers.map(p => p.getSummary()), {
-            remainingMonsters: monsterManager.getRemainingMonsters(waveProgress.wave?.totalMonsters),
-            currentWave: waveProgress.current,
-            totalWaves: waveProgress.total,
-        }, playerRuntimeSummary);
+        hudManager.tick(activePlayers.map(p => p.getSummary()), waveSummary, playerRuntimeSummary);
     } else if (gameManager.gameState === GameState.WON || gameManager.gameState === GameState.LOST) {
-        hudManager.clearAllSessions();
+        hudManager.clearAll();
     }
 
     // ── 5.3 玩家状态 HUD 同步 ──
@@ -526,7 +557,3 @@ Instance.SetNextThink(Instance.GetGameTime() + ticks);
 Instance.Msg("=== PvE Release 已启动 ===");
 
 playerManager.refresh();
-/**
- * 200怪
- * 除去movement,其他模块1.6ms
- */

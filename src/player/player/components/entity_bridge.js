@@ -2,7 +2,50 @@
  * @module 玩家系统/玩家/组件/实体桥接
  */
 import { CSPlayerController, CSPlayerPawn, Instance } from "cs_script/point_script";
+/** @type {Record<string, number>} */
+const weaponSlots = {
+    // --- 0: RIFLE (主武器：步枪、狙击、冲锋枪、重型武器) ---
+    "weapon_ak47": 0,
+    "weapon_aug":0,
+    "weapon_awp": 0,
+    "weapon_bizon": 0,
+    "weapon_famas": 0,
+    "weapon_g3sg1":0,
+    "weapon_galilar": 0,
+    "weapon_m249": 0,
+    "weapon_m4a1": 0,
+    "weapon_m4a1_silencer": 0,
+    "weapon_mac10": 0,
+    "weapon_mag7": 0,
+    "weapon_mp5sd": 0,
+    "weapon_mp7": 0,
+    "weapon_mp9": 0,
+    "weapon_negev": 0,
+    "weapon_nova": 0,
+    "weapon_p90": 0,
+    "weapon_sawedoff":0,
+    "weapon_scar20":0,
+    "weapon_sg556": 0,
+    "weapon_ssg08": 0,
+    "weapon_ump45": 0,
+    "weapon_xm1014": 0,
 
+    // --- 1: PISTOL (副武器：手枪) ---
+    "weapon_cz75a": 1,
+    "weapon_deagle": 1,
+    "weapon_elite": 1,
+    "weapon_fiveseven": 1,
+    "weapon_glock": 1,
+    "weapon_hkp2000": 1,
+    "weapon_p250": 1,
+    "weapon_revolver": 1,
+    "weapon_tec9": 1,
+    "weapon_usp_silencer": 1,
+
+    // --- 2: KNIFE (刀具) ---
+    "weapon_knife": 2,
+    "weapon_knife_t": 2
+};
 /**
  * Player 脚本层与 Source 2 引擎实体之间的桥接组件。
  *
@@ -152,8 +195,12 @@ export class PlayerEntityBridge {
      */
     giveItem(itemName, forceCreate = true) {
         if (this.pawn && this.pawn.IsValid()) {
+            const itemslot=weaponSlots[itemName]??-1;
+            const preweapon=this.pawn.FindWeaponBySlot(itemslot);
+            if(preweapon)this.pawn.DestroyWeapon(preweapon);
             this.pawn.GiveNamedItem(itemName, forceCreate);
         }
+        return true;
     }
 
     /**

@@ -2,7 +2,7 @@
  * @module 玩家系统/玩家/玩家实体
  */
 import { eventBus } from "../../util/event_bus";
-import { event as eventDefs } from "../../util/definition";
+import { event } from "../../util/definition";
 import { PlayerRuntimeEvents } from "../../util/runtime_events.js";
 import { PlayerEntityBridge } from "./components/entity_bridge";
 import { PlayerStats } from "./components/player_stats";
@@ -59,7 +59,7 @@ export class Player {
         this.buffMap = new Map();
         /** @type {Array<() => boolean>} */
         this._buffUnsubscribers = [
-            eventBus.on(eventDefs.Buff.Out.OnBuffRemoved, (/** @type {import("../../buff/buff_const").OnBuffRemoved} */ payload) => {
+            eventBus.on(event.Buff.Out.OnBuffRemoved, (/** @type {import("../../buff/buff_const").OnBuffRemoved} */ payload) => {
                 this._removeRuntimeByBuffId(payload.buffId);
             }),
         ];
@@ -114,6 +114,7 @@ export class Player {
      * 重置局内状态（每局开始时调用）。
      */
     resetGameStatus() {
+        this.clearBuffs();
         this.lifecycle.resetGameStatus();
     }
 
@@ -218,7 +219,7 @@ export class Player {
      * @returns {boolean}
      */
     giveWeapon(weaponName) {
-        return this.entityBridge.clientCommand(`give ${weaponName}`);
+        return this.entityBridge.giveItem(weaponName);
     }
 
     // ——— Buff 入口（直接驱动全局 Buff 系统） ———
@@ -237,7 +238,7 @@ export class Player {
             targetType: "player",
             result: -1,
         };
-        eventBus.emit(eventDefs.Buff.In.BuffAddRequest, addRequest);
+        eventBus.emit(event.Buff.In.BuffAddRequest, addRequest);
         if (addRequest.result <= 0) return false;
         this.buffMap.set(typeId, addRequest.result);
         this.recomputeDerivedStats();
@@ -257,7 +258,7 @@ export class Player {
             buffId: id,
             result: false,
         };
-        eventBus.emit(eventDefs.Buff.In.BuffRemoveRequest, removeRequest);
+        eventBus.emit(event.Buff.In.BuffRemoveRequest, removeRequest);
         return removeRequest.result;
     }
 
@@ -274,7 +275,7 @@ export class Player {
             buffId: id,
             result: false,
         };
-        eventBus.emit(eventDefs.Buff.In.BuffRefreshRequest, refreshRequest);
+        eventBus.emit(event.Buff.In.BuffRefreshRequest, refreshRequest);
         if (!refreshRequest.result) return false;
         this.recomputeDerivedStats();
         return true;
@@ -323,7 +324,7 @@ export class Player {
                 params,
                 result: { result: false },
             };
-            eventBus.emit(eventDefs.Buff.In.BuffEmitRequest, emitRequest);
+            eventBus.emit(event.Buff.In.BuffEmitRequest, emitRequest);
             const emitResult = /** @type {{ result?: boolean }} */ (emitRequest.result);
             handled = emitResult.result === true || handled;
         }
@@ -355,7 +356,7 @@ export class Player {
             target: this,
             result: false,
         };
-        eventBus.emit(eventDefs.Skill.In.SkillEmitRequest, emitRequest);
+        eventBus.emit(event.Skill.In.SkillEmitRequest, emitRequest);
         return emitRequest.result;
     }
 
@@ -384,7 +385,7 @@ export class Player {
             pawn,
             result: false,
         };
-        eventBus.emit(eventDefs.Input.In.StartRequest, startRequest);
+        eventBus.emit(event.Input.In.StartRequest, startRequest);
         return startRequest.result;
     }
 
@@ -397,7 +398,7 @@ export class Player {
             slot: this.slot,
             result: false,
         };
-        eventBus.emit(eventDefs.Input.In.StopRequest, stopRequest);
+        eventBus.emit(event.Input.In.StopRequest, stopRequest);
         return stopRequest.result;
     }
 
@@ -495,7 +496,7 @@ export class Player {
             },
             result: null,
         };
-        eventBus.emit(eventDefs.Skill.In.SkillAddRequest, addRequest);
+        eventBus.emit(event.Skill.In.SkillAddRequest, addRequest);
         return addRequest.result;
     }
 
@@ -510,7 +511,7 @@ export class Player {
             target: this,
             result: false,
         };
-        eventBus.emit(eventDefs.Skill.In.SkillRemoveRequest, removeRequest);
+        eventBus.emit(event.Skill.In.SkillRemoveRequest, removeRequest);
         return removeRequest.result;
     }
 

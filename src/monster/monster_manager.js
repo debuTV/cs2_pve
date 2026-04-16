@@ -1,7 +1,7 @@
 /**
  * @module 怪物系统/怪物管理器
  */
-import { CSPlayerPawn, Entity, Instance} from "cs_script/point_script";
+import { BaseModelEntity, CSPlayerPawn, Entity, Instance} from "cs_script/point_script";
 import { eventBus } from "../util/event_bus";
 import { event } from "../util/definition";
 import { Monster } from "./monster/monster";
@@ -49,6 +49,7 @@ export class MonsterManager {
                 payload.result = this.spawnByother(payload.monster, payload.options);
             })
         ];
+        this.glowing=false;
     }
     /**
      * @param {Monster} monsterInstance 死亡怪物实例
@@ -83,6 +84,7 @@ export class MonsterManager {
      */
     resetAllGameStatus() {
         this.forceCleanup();
+        this.glowing=false;
         this.nextMonsterId = 1;
         this.totalKills = 0;
     }
@@ -105,6 +107,7 @@ export class MonsterManager {
                 this.monsters.delete(id);
             }
         }
+        this.updateMonsterGlow();
         this.spawntick();
     }
     spawntick()
@@ -137,6 +140,22 @@ export class MonsterManager {
      */
     getActiveMonsters() {
         return Array.from(this.monsters.values()).filter(monster => monster.state !== MonsterState.DEAD);
+    }
+
+    updateMonsterGlow() {
+        const shouldGlow = this.activeMonsters > 0 && this.activeMonsters <= 20;
+        if(this.glowing==shouldGlow)return;
+        this.glowing=shouldGlow;
+        for (const monster of this.getActiveMonsters()) {
+            const model = monster.model;
+            if (!model || !(model instanceof BaseModelEntity)) continue;
+            if (shouldGlow) {
+                model.Glow({ r: 255, g: 0, b: 0 });
+            }
+            else{
+                model.Unglow();
+            }
+        }
     }
 
     /**
@@ -241,8 +260,10 @@ export class MonsterManager {
                 const players = Instance.FindEntitiesByClass("player");
                 const maxDistSq = spawnPointsDistance * spawnPointsDistance;
                 nearbySpawnPoints = this.spawnPoints.filter(sp => {
+                    if (!sp?.IsValid?.()) return false;
                     const spPos = sp.GetAbsOrigin();
                     for (const p of players) {
+                        if (!p?.IsValid?.()) continue;
                         if (vec.lengthsq(spPos, p.GetAbsOrigin()) <= maxDistSq) return true;
                     }
                     return false;
@@ -253,6 +274,7 @@ export class MonsterManager {
                 return null;
             }
             const spawnPoint = nearbySpawnPoints[Math.floor(Math.random() * nearbySpawnPoints.length)];
+            if (!spawnPoint?.IsValid?.()) return null;
             const pos = spawnPoint.GetAbsOrigin();
             const start = { x: pos.x, y: pos.y, z: pos.z };
             const end = { x: pos.x, y: pos.y, z: pos.z };

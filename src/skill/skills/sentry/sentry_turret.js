@@ -30,8 +30,6 @@ export class SentryTurret {
         this.ownerKey = options.ownerKey;
         this.laserStart = null;
         this.laserEnd = null;
-        /** @type {((turret: SentryTurret) => void) | null} */
-        this.onDestroyed = null;
 
         /** @type {import("../../../monster/monster/monster").Monster|null} */
         this.target = null;
@@ -46,9 +44,9 @@ export class SentryTurret {
         this.turnSpeed = typeof options.turnSpeed === "number" && Number.isFinite(options.turnSpeed)
             ? Math.max(0, options.turnSpeed)
             : cfg.turnSpeed;
-        this._basePosition = this._cloneVector(this.base?.GetAbsOrigin?.());
-        this._baseAngles = this._cloneAngles(this.base?.GetAbsAngles?.());
-        this._yawPosition = this._cloneVector(this.yaw?.GetAbsOrigin?.());
+        this._basePosition = this.base?.IsValid?.() ? this._cloneVector(this.base.GetAbsOrigin()) : null;
+        this._baseAngles = this.base?.IsValid?.() ? this._cloneAngles(this.base.GetAbsAngles()) : null;
+        this._yawPosition = this.yaw?.IsValid?.() ? this._cloneVector(this.yaw.GetAbsOrigin()) : null;
         this._currentYaw = this._normalizeYaw(this.yaw?.GetAbsAngles?.()?.yaw ?? this._baseAngles?.yaw ?? 0);
 
         /** @type {() => import("../../../monster/monster/monster").Monster[]} */
@@ -159,10 +157,24 @@ export class SentryTurret {
         const entities = this.spawnedEntities.length > 0
             ? [...this.spawnedEntities]
             : [this.base, this.yaw];
-        if (this.laserStart) {
+        if (this.laserStart&&this.laserStart?.IsValid?.()) {
+            if(this.laserStart.GetClassName?.()=="info_particle_system")
+            {
+                Instance.EntFireAtTarget({
+                    target: this.laserStart,
+                    input: "destroyimmediately",
+                });
+            }
             entities.push(this.laserStart);
         }
-        if (this.laserEnd) {
+        if (this.laserEnd&&this.laserEnd?.IsValid?.()) {
+            if(this.laserEnd.GetClassName?.()=="info_particle_system")
+            {
+                Instance.EntFireAtTarget({
+                    target: this.laserEnd,
+                    input: "destroyimmediately",
+                });
+            }
             entities.push(this.laserEnd);
         }
         const uniqueEntities = new Set(entities.filter((entity) => entity?.IsValid?.()));
@@ -172,10 +184,6 @@ export class SentryTurret {
 
         this.laserStart = null;
         this.laserEnd = null;
-
-        if (typeof this.onDestroyed === "function") {
-            this.onDestroyed(this);
-        }
     }
 
     _isTargetValid() {
@@ -190,11 +198,11 @@ export class SentryTurret {
     }
 
     _getTurretBasePosition() {
-        return this._cloneVector(this._basePosition ?? this.base.GetAbsOrigin());
+        return this._cloneVector(this._basePosition ?? (this.base?.IsValid?.() ? this.base.GetAbsOrigin() : null));
     }
 
     _getLaserStartPosition(yaw = this._currentYaw, turretPos = null) {
-        const basePosition = this._cloneVector(turretPos ?? this._basePosition ?? this.base.GetAbsOrigin());
+        const basePosition = this._cloneVector(turretPos ?? this._basePosition ?? (this.base?.IsValid?.() ? this.base.GetAbsOrigin() : null));
         if (!basePosition || !Number.isFinite(yaw)) return null;
 
         const yawRad = yaw * (Math.PI / 180);

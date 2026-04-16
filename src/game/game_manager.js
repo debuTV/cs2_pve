@@ -121,13 +121,16 @@ export class GameManager {
         eventBus.emit(event.Game.Out.OnGameWin);
         return true;
     }
-
+    clearAll()
+    {
+        this.gameState = GameState.WAITING;
+        this._adapter.broadcast("重置游戏...");
+    }
     /**
      * 重置游戏状态，触发 onResetGame 回调通知其他模块。
      */
     resetGame() {
-        this.gameState = GameState.WAITING;
-        this._adapter.broadcast("重置游戏...");
+        this.clearAll();
         eventBus.emit(event.Game.Out.OnResetGame);
     }
     /**

@@ -106,6 +106,7 @@ export class SkillManager {
         {
             if(skill.monster==null&&skill.player==null)
             {
+                skill.onSkillDelete();
                 this.SkillMap.delete(skillId);
                 continue;
             }

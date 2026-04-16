@@ -64,18 +64,18 @@ export const buffconfig={
 		configid:"burn",
 		typeid:"burn",
 		params:{
-			duration:1,
+			duration:5,
 			tickInterval:0.5,
-			dps:8,
+			dps:25,
 		}
 	},
 	regeneration:{
 		configid:"regeneration",
 		typeid:"regeneration",
 		params:{
-			duration:1,
+			duration:3,
 			tickInterval:0.5,
-			healPerTick:5,
+			healPerTick:15,
 		}
 	},
 	attack_up:{
@@ -94,10 +94,5 @@ export const buffconfig={
 			multiplier:1.8,
 			flatBonus:0,
 		}
-	},
-	aaa:{
-		configid:"aaa",
-		typeid:"bbb",
-		params:{}
 	}
 }

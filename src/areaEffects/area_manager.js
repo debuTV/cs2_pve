@@ -82,7 +82,7 @@ export class AreaEffectManager {
     }
 
     /** 清理所有区域效果 */
-    cleanup() {
+    clearAll() {
         for (const effect of this._effects.values()) {
             effect?.stop();
         }
@@ -91,7 +91,7 @@ export class AreaEffectManager {
 
     /** 销毁服务并注销事件监听。 */
     destroy() {
-        this.cleanup();
+        this.clearAll();
         for (const unsubscribe of this._unsubscribers) {
             unsubscribe();
         }

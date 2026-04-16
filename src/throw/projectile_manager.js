@@ -92,17 +92,17 @@ export class ProjectileManager {
         }
     }
 
-    cleanup() {
+    clearAll() {
         for (const [projectileId, runner] of this._projectiles.entries()) {
-            this._projectiles.delete(projectileId);
             runner.abort();
             const removedEntity = runner.removeEntity();
             this._emitStopped(runner, removedEntity);
         }
+        this._projectiles.clear();
     }
 
     destroy() {
-        this.cleanup();
+        this.clearAll();
         for (const unsubscribe of this._unsubscribers) {
             unsubscribe();
         }

@@ -124,7 +124,7 @@ export class SoundSkill extends SkillTemplate {
 
         this._spawnedEntities = spawned;
         this._soundEntity = spawned.find((entity) => entity?.IsValid?.()) ?? null;
-        if (!this._soundEntity) {
+        if (!this._soundEntity||!this._soundEntity.IsValid()) {
             this._cleanupEntities();
             return false;
         }

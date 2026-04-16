@@ -87,9 +87,18 @@ export class SentrySkill extends SkillTemplate {
         const ownerKey = player.slot;
         if (sentryManager.countByOwner(ownerKey) >= this._maxPerPlayer) return false;
 
-        const placement = pawn.GetAbsOrigin?.();
-        if (!placement) return false;
-        if (!this._canPlaceAt(placement)) return false;
+        const origin = pawn.GetAbsOrigin?.();
+        if (!origin) return false;
+
+        const trace = Instance.TraceBox({
+            mins: SENTRY_PLACEMENT_BOUNDS.mins,
+            maxs: SENTRY_PLACEMENT_BOUNDS.maxs,
+            start: vec.Zfly(origin,20),
+            end: { x: origin.x, y: origin.y, z: origin.z - 100 },
+            ignorePlayers: true,
+        });
+        const placement = trace.end;
+        if (!trace.didHit||!this._canPlaceAt(placement)) return false;
 
         const ok = this._spawnTurret(vec.Zfly(placement,15), ownerKey);
         if (ok) {
@@ -115,6 +124,7 @@ export class SentrySkill extends SkillTemplate {
      * @returns {{ position: import("cs_script/point_script").Vector, angles: import("cs_script/point_script").QAngle } | null}
      */
     _getPlacement(pawn) {
+        if (!pawn?.IsValid?.()) return null;
         const origin = pawn.GetAbsOrigin?.();
         const angles = pawn.GetAbsAngles?.();
         if (!origin || !angles) return null;

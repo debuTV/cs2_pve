@@ -20,9 +20,9 @@
 export const SENTRY_DEFAULTS = {
     searchRadius:    640,
     targetLostRange: 768,
-    damage:          200,
+    damage:          50,
     lifetime:        120,
-    attackInterval:  1,
+    attackInterval:  2,
     turnSpeed:       360,
 };
 

@@ -48,7 +48,7 @@ export class MonsterAnimator {
         if (!this.model || this._boundModel === this.model) return;
 
         this._boundModel = this.model;
-        Instance.ConnectOutput(this.model,"OnAnimationDone",()=>{
+        this.monster.entityBridge.modelconnnectid=Instance.ConnectOutput(this.model,"OnAnimationDone",()=>{
             this.locked = false;
             this.onStateFinish?.(this.currentstats);
         });
@@ -176,7 +176,7 @@ export class MonsterAnimator {
     play(type) {
         this._bindModelOutput();
         const list = this.animConfig[type];
-        if (!this.model || !list || list.length === 0) return null;
+        if (!this.model||!this.model.IsValid() || !list || list.length === 0) return null;
         const anim = list[Math.floor(Math.random() * list.length)];
         if (!anim) return;
         Instance.EntFireAtTarget({target:this.model,input:"SetAnimation",value:anim});
