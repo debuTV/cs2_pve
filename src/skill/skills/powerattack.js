@@ -5,6 +5,7 @@ import { eventBus } from "../../util/event_bus";
 import { event } from "../../util/definition";
 import { MonsterRuntimeEvents } from "../../util/runtime_events.js";
 import { SkillTemplate } from "../skill_template";
+import { Player } from "../../player/player/player";
 
 export class PowerAttackSkill extends SkillTemplate {
     /**
@@ -52,21 +53,22 @@ export class PowerAttackSkill extends SkillTemplate {
         const monster = this.monster;
         const target = monster?.target;
         if (!monster || !target) return;
-        if (monster.distanceTosq(target) > monster.attackdist * monster.attackdist) return;
+        if (monster.distanceTosq(target.pos) > monster.attackdist * monster.attackdist) return;
 
         this._markTriggered();
         this._applyTargetBuff(target);
-        monster.emitAttackEvent(Math.max(1, Math.round(monster.damage * 2)), target);
+        const pawn=target.entityBridge?.pawn;
+        if(pawn)monster.emitAttackEvent(Math.max(1, Math.round(monster.damage * 2)), pawn);
     }
 
     /**
-     * @param {import("cs_script/point_script").CSPlayerPawn} target
+     * @param {Player} target
      * @returns {boolean}
      */
     _applyTargetBuff(target) {
         if (!this.buffConfigId) return false;
 
-        const slot = target?.GetPlayerController?.()?.GetPlayerSlot?.();
+        const slot = target.slot;
         if (typeof slot !== "number" || slot < 0) return false;
 
         const rewardRequest = {

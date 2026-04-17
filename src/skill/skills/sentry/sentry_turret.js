@@ -44,9 +44,9 @@ export class SentryTurret {
         this.turnSpeed = typeof options.turnSpeed === "number" && Number.isFinite(options.turnSpeed)
             ? Math.max(0, options.turnSpeed)
             : cfg.turnSpeed;
-        this._basePosition = this.base?.IsValid?.() ? this._cloneVector(this.base.GetAbsOrigin()) : null;
-        this._baseAngles = this.base?.IsValid?.() ? this._cloneAngles(this.base.GetAbsAngles()) : null;
-        this._yawPosition = this.yaw?.IsValid?.() ? this._cloneVector(this.yaw.GetAbsOrigin()) : null;
+        this._basePosition = this.base.GetAbsOrigin();
+        this._baseAngles = this.base.GetAbsAngles();
+        this._yawPosition = this.yaw.GetAbsOrigin();
         this._currentYaw = this._normalizeYaw(this.yaw?.GetAbsAngles?.()?.yaw ?? this._baseAngles?.yaw ?? 0);
 
         /** @type {() => import("../../../monster/monster/monster").Monster[]} */

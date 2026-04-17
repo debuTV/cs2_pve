@@ -60,6 +60,7 @@
  * @property {(playerSlot: number, msg: string) => void} sendMessage - 发送消息给指定玩家
  * @property {() => number} getGameTime - 获取当前游戏时间（秒）
  */
+
 /**
  * 移动请求类型常量。
  *

@@ -17,7 +17,7 @@ export class PathFollower {
 
     /** @param {{ pos: import("cs_script/point_script").Vector; mode: number }[]} path */
     setPath(path) {
-        this.path = path.map(n => ({ pos: vec.clone(n.pos), mode: n.mode }));
+        this.path = path;
         this.cursor = 0;
     }
 

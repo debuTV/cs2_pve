@@ -59,7 +59,7 @@ export class FireSkill extends SkillTemplate {
             if (!monster.target) return false;
             if (monster.isOccupied()) return false;
             const triggerDistanceSq = this.triggerDistance * this.triggerDistance;
-            if (triggerDistanceSq > 0 && monster.distanceTosq(monster.target) > triggerDistanceSq) {
+            if (triggerDistanceSq > 0 && monster.distanceTosq(monster.target.pos) > triggerDistanceSq) {
                 return false;
             }
         }
@@ -74,8 +74,8 @@ export class FireSkill extends SkillTemplate {
 
     trigger() {
         const pos = this.player
-            ? (this.player.entityBridge?.pawn?.IsValid?.() ? this.player.entityBridge.pawn.GetAbsOrigin() : null)
-            : (this.monster?.model?.IsValid?.() ? this.monster.model.GetAbsOrigin() : null);
+            ? this.player.pos
+            : this.monster?.pos;
         if (!pos) return false;
 
         /**@type {import("../../areaEffects/area_const").AreaEffectCreateRequest} */

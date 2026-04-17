@@ -92,7 +92,7 @@ export class HudManager {
 
     /**
      * 每 tick 刷新全部可见 HUD 的贴脸位置。
-     * @param {{ id: number; name: string; slot: number; level: number; money: number; health: number; maxHealth: number; armor: number; attack: number; critChance: number; critMultiplier: number; kills: number; score: number; lastMonsterDamage: number; exp: number; expNeeded: number; pawn: import("cs_script/point_script").CSPlayerPawn | null; }[]} [allAlivePlayersSummary=[]]
+     * @param {{ id: number; name: string; slot: number; level: number; professionId: string; professionDisplayName: string; money: number; health: number; maxHealth: number; armor: number; attack: number; critChance: number; critMultiplier: number; kills: number; score: number; lastMonsterDamage: number; exp: number; expNeeded: number; pawn: import("cs_script/point_script").CSPlayerPawn | null; }[]} [allAlivePlayersSummary=[]]
      * @param {{ remainingMonsters?: number; currentWave?: number; totalWaves?: number; }} [waveSummary={}]
      * @param {Map<number, { buffs?: { id: number; typeId: string; remaining: number; }[]; skill?: { id: number; typeId: string; cooldown: number; remainingCooldown: number; isReady: boolean; isConsumed: boolean; } | null; }>} [runtimeSummaryBySlot=new Map()]
      */
@@ -108,7 +108,8 @@ export class HudManager {
             const runtimeSummary = runtimeSummaryBySlot.get(s.slot);
             const buffLabel = this._formatBuffLabel(runtimeSummary?.buffs ?? []);
             const skillLabel = this._formatSkillCooldownLabel(runtimeSummary?.skill ?? null);
-            const text = `Lv.${s.level} \nHP:${s.health}/${s.maxHealth} \n护甲:${s.armor}\nMoney:$${s.money} \n升级还需:${remainingExp}EXP\n伤害:${s.lastMonsterDamage} \nBuff:${buffLabel}\n技能CD:${skillLabel}\n剩余怪物:${remainingMonsters} \n波次:${waveLabel}`;
+            const professionLabel = s.professionDisplayName ? `职业:${s.professionDisplayName}` : `职业:${s.professionId ?? "未知"}`;
+            const text = `Lv.${s.level} ${professionLabel}\nHP:${s.health}/${s.maxHealth} \n护甲:${s.armor}\nMoney:$${s.money} \n升级还需:${remainingExp}EXP\n伤害:${s.lastMonsterDamage} \nBuff:${buffLabel}\n技能CD:${skillLabel}\n剩余怪物:${remainingMonsters} \n波次:${waveLabel}`;
             this.showHud({ slot: s.slot, pawn: s.pawn, text, channel: CHANNAL.STATUS, alwaysVisible: HUD_ALWAYS_VISIBLE, result: true });
         }
         for (const [, session] of this._sessions) {
@@ -325,13 +326,32 @@ export class HudManager {
      * @returns {string}
      */
     _getEffectDisplayName(typeId) {
-        switch (typeId) {
-            case "fire":
-            case "burn":
-                return "燃烧";
-            default:
-                return typeId ?? "未知";
-        }
+        /** @type {Record<string, string>} */
+        const names = {
+            fire: "火焰",
+            burn: "灼烧",
+            regeneration: "再生",
+            attack_up: "强攻",
+            speed_up: "加速",
+            corestats: "核心属性",
+            pounce: "突袭",
+            initanim: "准备",
+            doubleattack: "双重攻击",
+            powerattack: "破甲",
+            shield: "护盾",
+            speedboost: "疾跑",
+            throwstone: "掷石",
+            sound: "音波",
+            spawn: "召唤",
+            player_guard: "防御脉冲",
+            player_mend: "治疗脉冲",
+            player_mend_field: "医疗场",
+            player_vanguard: "恢复自身",
+            player_turret: "炮台",
+        };
+        if (!typeId) return "未知";
+        const displayName = names[typeId];
+        return displayName ?? typeId;
     }
 
     /**

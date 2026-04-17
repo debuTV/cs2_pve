@@ -109,7 +109,7 @@ export class MonsterMovementPathAdapter {
     /** 内部：提交一次 Chase Move 请求。 */
     _submitChase() {
         const entity = this._getMovementEntity();
-        const target = this.monster.target;
+        const target = this.monster.target?.entityBridge.pawn;
         if (!entity || !target) return;
 
         this.monster.submitMovementEvent({

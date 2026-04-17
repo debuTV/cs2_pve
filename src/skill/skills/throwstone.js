@@ -53,7 +53,7 @@ export class ThrowStoneSkill extends SkillTemplate {
             if (this.running) return false;
             if (monster.isOccupied()) return false;
 
-            const distsq = monster.distanceTosq(monster.target);
+            const distsq = monster.distanceTosq(monster.target.pos);
             const minDistSq = this.distanceMin * this.distanceMin;
             const maxDistSq = this.distanceMax * this.distanceMax;
             if (distsq < minDistSq || distsq > maxDistSq) return false;
@@ -79,15 +79,15 @@ export class ThrowStoneSkill extends SkillTemplate {
         const monster = this.monster;
         const target = monster?.target;
         const model = monster?.model;
-        if (!monster || !target?.IsValid?.() || !model?.IsValid?.()) return;
+        if (!monster || !target || !model?.IsValid?.()) return;
 
-        const distsq = monster.distanceTosq(target);
+        const distsq = monster.distanceTosq(target.pos);
         const minDistSq = this.distanceMin * this.distanceMin;
         const maxDistSq = this.distanceMax * this.distanceMax;
         if (distsq < minDistSq || distsq > maxDistSq) return;
 
         const startPos = model.GetEyePosition?.() ?? model.GetAbsOrigin?.();
-        const endPos = target.GetAbsOrigin?.();
+        const endPos = target.pos;
         if (!startPos || !endPos) return;
 
         const projectileEntity = this._spawnProjectileEntity(startPos);

@@ -123,7 +123,7 @@ export class MonsterHealthCombat {
             Instance.EntFireAtTarget({
                 target: breakable,
                 input: "fireuser1",
-                activator: killer ?? this.monster.target ?? undefined,
+                activator: killer ?? this.monster.target?.entityBridge.pawn ?? undefined,
             });
         }
 
@@ -150,16 +150,17 @@ export class MonsterHealthCombat {
         this.monster.movementPath.onOccupationChanged();
         this.monster.attackCooldown = this.monster.atc;
 
-        const origin = model.GetAbsOrigin();
-        const targetPos = target.GetAbsOrigin();
-        const distsq = this.monster.distanceTosq(target);
+        const origin = this.monster.pos;
+        const targetPos = target.pos;
+        const distsq = this.monster.distanceTosq(targetPos);
         if (distsq > this.monster.attackdist * this.monster.attackdist) {
             this.monster.emitRuntimeEvent(MonsterRuntimeEvents.AttackFalse, { target });
             return;
         }
 
         this.monster.emitRuntimeEvent(MonsterRuntimeEvents.AttackTrue, { target, damage: this.monster.damage });
-        this.monster.emitAttackEvent(this.monster.damage, target);
+        const targetpawn=target?.entityBridge.pawn;
+        if(targetpawn)this.monster.emitAttackEvent(this.monster.damage, targetpawn);
 
         const l = 300 / Math.hypot(targetPos.x - origin.x, targetPos.y - origin.y);
         void l;

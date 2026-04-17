@@ -72,6 +72,7 @@ export class ProjectileRunner {
             position: startPos,
             velocity: vec.clone(this.velocity),
         });
+        this.pos=startPos;
     }
 
     /**
@@ -91,12 +92,12 @@ export class ProjectileRunner {
         const stepDt = Math.min(dt, remainingDuration, remainingLifetime);
         if (stepDt <= 0) {
             if (!this.entity?.IsValid?.()) return false;
-            this._finish(this.entity.GetAbsOrigin(), tickContext);
+            this._finish(this.pos, tickContext);
             return false;
         }
 
         if (!this.entity?.IsValid?.()) return false;
-        const start = this.entity.GetAbsOrigin();
+        const start = this.pos;
         const end = this._computeStepEnd(start, stepDt);
         const trace = Instance.TraceLine({
             start,
@@ -113,6 +114,7 @@ export class ProjectileRunner {
                 position: hitPos,
                 velocity: vec.clone(this.velocity),
             });
+            this.pos=hitPos;
             this._finish(hitPos, tickContext);
             return false;
         }
@@ -121,7 +123,7 @@ export class ProjectileRunner {
             position: end,
             velocity: vec.clone(this.velocity),
         });
-
+        this.pos=end;
         if (this._elapsed >= this._duration || this._elapsed >= this.maxLifetime) {
             this._finish(end, tickContext);
             return false;
@@ -217,10 +219,8 @@ export class ProjectileRunner {
 
         if (this.targetType === ThrowTarget.Player) {
             for (const player of tickContext?.players ?? []) {
-                const pawn = player?.entityBridge?.pawn;
-                if (!pawn?.IsValid?.()) continue;
 
-                const distance = vec.length(pawn.GetAbsOrigin(), center);
+                const distance = vec.length(player.pos, center);
                 if (distance > this.radius) continue;
 
                 results.push({
@@ -234,10 +234,8 @@ export class ProjectileRunner {
 
         if (this.targetType === ThrowTarget.Monster) {
             for (const monster of tickContext?.monsters ?? []) {
-                const model = monster?.model;
-                if (!model?.IsValid?.()) continue;
 
-                const distance = vec.length(model.GetAbsOrigin(), center);
+                const distance = vec.length(monster.pos, center);
                 if (distance > this.radius) continue;
 
                 results.push({

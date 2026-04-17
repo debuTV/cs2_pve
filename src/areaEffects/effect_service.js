@@ -151,12 +151,10 @@ export class AreaEffect {
      */
     _tickPlayers(now, players, r2) {
         for (const player of players) {
-            const pawn = player?.entityBridge?.pawn;
-            if (!pawn?.IsValid?.()) continue;
-            const pos = pawn.GetAbsOrigin();
+            const pos = player?.pos;
             if (!pos || vec.lengthsq(pos, this.position) > r2) continue;
 
-            const slot = pawn?.GetPlayerController?.()?.GetPlayerSlot?.() ?? -1;
+            const slot = player?.slot ?? -1;
             if (slot < 0) continue;
 
             const cooldownKey = `p:${slot}`;
@@ -184,9 +182,7 @@ export class AreaEffect {
     _tickMonsters(now, monsters, r2) {
         for (const monster of monsters) {
             const monsterId = monster?.id;
-            const model = monster?.model;
-            if (!model?.IsValid?.()) continue;
-            const pos = model.GetAbsOrigin();
+            const pos = monster.pos;
             if (!pos || vec.lengthsq(pos, this.position) > r2) continue;
 
             const cooldownKey = `m:${monsterId}`;

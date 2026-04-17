@@ -60,7 +60,8 @@ export class Movement {
      */
     constructor(config) {
         this.entity = config.entity;
-
+        /**@type {Vector} */
+        this.pos=this.entity.GetAbsOrigin();
         // ── 默认配置 ──
         this._defaultSpeed = config.speed ?? 120;
         this._defaultMode = config.mode ?? "walk";
@@ -94,7 +95,7 @@ export class Movement {
             wishDir: vec.get(0, 0, 0),
             wishSpeed: 0,
             maxSpeed: this._defaultSpeed,
-            getPos: () => vec.clone(this.entity.GetAbsOrigin()),
+            getPos: () => this.pos,
             requestModeSwitch: () => {} // 由 controller 绑定
         };
 
@@ -145,10 +146,10 @@ export class Movement {
       */
     update(dt, sepCtx) {
         if (this._isStopped) return;
-
+        this.pos=this.entity.GetAbsOrigin();
         // PORTAL 特殊处理（在常规 controller 之前）
         if (this._handlePortal()) {
-            return this.entity.GetAbsOrigin();
+            return this.pos;
         }
 
         // 更新 maxSpeed（支持运行时改速度后生效）
@@ -166,6 +167,7 @@ export class Movement {
                 position: newPos,
                 angles: { pitch: 0, yaw: this._currentYaw, roll: 0 }
             });
+            this.pos=newPos;
             return newPos;
         }
     }
@@ -178,7 +180,7 @@ export class Movement {
     refreshPath() {
         if (!this._requestPath || !this._target) return false;
         if (this._motor.isStuck()) return false; // 卡死时不刷新（可选策略）
-        const start = this.entity.GetAbsOrigin();
+        const start = this.pos;
         const path = this._requestPath(start, this._target);
         if (!path) return false;
         // 确保终点在路径末尾
@@ -198,7 +200,7 @@ export class Movement {
     /** 获取当前路径快照（返回拷贝，外部修改后需重新 setPath） */
     getPath() {
         return this._pathFollower.path.map(node => ({
-            pos: vec.clone(node.pos),
+            pos: node.pos,
             mode: node.mode
         }));
     }
@@ -208,7 +210,7 @@ export class Movement {
      * @param {Vector} target
      */
     setTarget(target) {
-        this._target = vec.clone(target);
+        this._target = target;
     }
 
     /**
@@ -224,7 +226,7 @@ export class Movement {
      * @param {Vector} velocity
      */
     setVelocity(velocity) {
-        this._motor.velocity = vec.clone(velocity);
+        this._motor.velocity = velocity;
     }
 
     /** 获取当前速度快照 */
@@ -270,7 +272,7 @@ export class Movement {
 
     /** 获取当前状态快照 */
     getState() {
-        return this._controller.currentName;
+        return {mode:this._controller.currentName,pos:this.pos};
     }
 
     /** 路径是否走完 */
@@ -306,6 +308,7 @@ export class Movement {
         this._lastPortalAt = now;
 
         this.entity.Teleport({ position: goal.pos, velocity: { x: 0, y: 0, z: 0 } });
+        this.pos=goal.pos;
         this._motor.velocity = vec.get(0, 0, 0);
         this._pathFollower.advancePortal();
         return true;

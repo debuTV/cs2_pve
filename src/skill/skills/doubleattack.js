@@ -43,9 +43,10 @@ export class DoubleAttackSkill extends SkillTemplate {
         const monster = this.monster;
         const target = monster?.target;
         if (!monster || !target) return;
-        if (monster.distanceTosq(target) > monster.attackdist * monster.attackdist) return;
+        if (monster.distanceTosq(target.pos) > monster.attackdist * monster.attackdist) return;
 
         this._markTriggered();
-        monster.emitAttackEvent(monster.damage, target);
+        const pawn=target.entityBridge?.pawn;
+        if(pawn)monster.emitAttackEvent(monster.damage, pawn);
     }
 }

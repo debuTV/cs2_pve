@@ -30,7 +30,7 @@ export class PounceSkill extends SkillTemplate {
             if (!monster.target) return false;
             if (monster.isOccupied()) return false;
 
-            const distsq = monster.distanceTosq(monster.target);
+            const distsq = monster.distanceTosq(monster.target.pos);
             const attackDistSq = monster.attackdist * monster.attackdist;
             const triggerDistSq = this.distance * this.distance;
             if (!(distsq > attackDistSq && distsq < triggerDistSq)) return false;
@@ -66,10 +66,10 @@ export class PounceSkill extends SkillTemplate {
 
         const model = monster.model;
         const target = monster.target;
-        if (!model?.IsValid?.() || !target?.IsValid?.()) return;
+        if (!model?.IsValid?.() || !target) return;
 
-        const start = model.GetAbsOrigin();
-        const targetPos = target.GetAbsOrigin();
+        const start = monster.pos;
+        const targetPos = target.pos;
 
         const duration = this._duration > 0 ? this._duration : 1;
         const velocity = {

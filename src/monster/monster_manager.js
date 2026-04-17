@@ -5,8 +5,9 @@ import { BaseModelEntity, CSPlayerPawn, Entity, Instance} from "cs_script/point_
 import { eventBus } from "../util/event_bus";
 import { event } from "../util/definition";
 import { Monster } from "./monster/monster";
-import { MonsterState, spawnPointsDistance,targetTeam,MonsterType } from "./monster_const";
+import { MonsterState,targetTeam,MonsterType } from "./monster_const";
 import { vec } from "../util/vector";
+import { Player } from "../player/player/player";
 export class MonsterManager {
     constructor() {
         /**
@@ -26,7 +27,7 @@ export class MonsterManager {
         /**
          * 当前波次可用的生成点实体列表。由 `spawnWave` 按配置名称查找并填充，
          * 每次新波次开始时清空重建。
-         * @type {Entity[]}
+         * @type {import("cs_script/point_script").Vector[]}
          */
         this.spawnPoints = [];
         /** 上一次成功生成怪物的游戏时间。初始值 -1 表示本波尚未生成过。由 `tick` 更新。 */
@@ -93,16 +94,16 @@ export class MonsterManager {
      * 移动的实际推进由 main 在 tick 后统一执行。
      *
      * 返回的 tickContext 是内部复用对象，调用方只读。
-     * @param {CSPlayerPawn[]} allppos
+     * @param {Player[]} allplayers
      */
-    tick(allppos)
+    tick(allplayers)
     {
         for (const [id, monster] of this.monsters) {
             if (monster.state === MonsterState.DEAD && !monster.model && !monster.breakable) {
                 this.monsters.delete(id);
                 continue;
             }
-            monster.tick(allppos);
+            monster.tick(allplayers);
             if (monster.state === MonsterState.DEAD && !monster.model && !monster.breakable) {
                 this.monsters.delete(id);
             }
@@ -159,7 +160,7 @@ export class MonsterManager {
     }
 
     /**
-     * @param {Map<Entity, string>} movementStates
+     * @param {Map<Entity, {mode:string,pos:import("cs_script/point_script").Vector}>} movementStates
      */
     syncMovementStates(movementStates) {
         for (const monster of this.monsters.values()) {
@@ -168,7 +169,7 @@ export class MonsterManager {
             if (!model) continue;
             const snapshot = movementStates.get(model);
             if (!snapshot) continue;
-            monster.updateMovementMovemode(snapshot);
+            monster.updateMovementMovemode(snapshot.mode, snapshot.pos);
         }
     }
 
@@ -215,11 +216,7 @@ export class MonsterManager {
         this.spawn = true;
         this.spawnconfig = waveConfig;
         this.spawnPoints = [];
-        const spawnPointNames = waveConfig.monster_spawn_points_name;
-        spawnPointNames.forEach((/** @type {string} */ name) => {
-            const found = Instance.FindEntitiesByName(name);
-            this.spawnPoints.push(...found);
-        });
+        this.getspawnPoints(waveConfig);
     }
 
     /**
@@ -228,6 +225,19 @@ export class MonsterManager {
      */
     stopWave() {
         this.spawn = false;
+    }
+    /**
+     * @param {import("../util/definition").waveConfig} waveConfig 当前波次配置
+     */
+    getspawnPoints(waveConfig)
+    {
+        if (this.spawnPoints.length === 0) {
+            const spawnPointNames = waveConfig.monster_spawn_points_name;
+            spawnPointNames.forEach((/** @type {string} */ name) => {
+                const found = Instance.FindEntitiesByName(name);
+                this.spawnPoints.push(...found.map(entity => entity.GetAbsOrigin()));
+            });
+        }
     }
     /**
      * 在随机生成点创建一只怪物。
@@ -243,39 +253,13 @@ export class MonsterManager {
      */
     spawnMonster(waveConfig) {
         try {
-            if (this.spawnPoints.length === 0) {
-                const spawnPointNames = waveConfig.monster_spawn_points_name;
-                spawnPointNames.forEach((/** @type {string} */ name) => {
-                    const found = Instance.FindEntitiesByName(name);
-                    this.spawnPoints.push(...found);
-                });
-                if (this.spawnPoints.length === 0)
-                {   
-                    Instance.Msg("错误: 未找到怪物生成点");
-                    return null;
-                }
-            }
-            let nearbySpawnPoints = this.spawnPoints;
-            if (spawnPointsDistance > 0) {
-                const players = Instance.FindEntitiesByClass("player");
-                const maxDistSq = spawnPointsDistance * spawnPointsDistance;
-                nearbySpawnPoints = this.spawnPoints.filter(sp => {
-                    if (!sp?.IsValid?.()) return false;
-                    const spPos = sp.GetAbsOrigin();
-                    for (const p of players) {
-                        if (!p?.IsValid?.()) continue;
-                        if (vec.lengthsq(spPos, p.GetAbsOrigin()) <= maxDistSq) return true;
-                    }
-                    return false;
-                });
-            }
-            if (nearbySpawnPoints.length === 0) {
+            this.getspawnPoints(waveConfig);
+            if (this.spawnPoints.length === 0)
+            {   
                 Instance.Msg("错误: 未找到怪物生成点");
                 return null;
             }
-            const spawnPoint = nearbySpawnPoints[Math.floor(Math.random() * nearbySpawnPoints.length)];
-            if (!spawnPoint?.IsValid?.()) return null;
-            const pos = spawnPoint.GetAbsOrigin();
+            const pos = this.spawnPoints[Math.floor(Math.random() * this.spawnPoints.length)];
             const start = { x: pos.x, y: pos.y, z: pos.z };
             const end = { x: pos.x, y: pos.y, z: pos.z };
             if (Instance.TraceSphere({ radius:30, start, end, ignorePlayers: true }).hitEntity) {
@@ -311,9 +295,7 @@ export class MonsterManager {
             Instance.Msg(`技能产卵失败: 未找到怪物类型 ${typeName}`);
             return false;
         }
-        if (!caster.model || !caster.model.IsValid()) return false;
-
-        const center = caster.model.GetAbsOrigin();
+        const center = caster.pos;
         const radiusMin = Math.max(0, options.radiusMin ?? 24);
         const radiusMax = Math.max(radiusMin, options.radiusMax ?? 96);
         const tries = Math.max(1, options.tries ?? 6);

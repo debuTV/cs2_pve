@@ -50,12 +50,11 @@ export class MoveProbe {
      * @param {Entity[]} ignoreEntities
      */
     traceGround(pos, ignoreEntities) {
-        const start = vec.clone(pos);
         const end = vec.Zfly(pos, -groundCheckDist);
         const tr = Instance.TraceBox({
             mins: this.mins,
             maxs: this.maxs,
-            start,
+            start:pos,
             end,
             ignorePlayers: true,
             ignoreEntity: ignoreEntities

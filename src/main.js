@@ -403,8 +403,7 @@ Instance.OnScriptInput("profession", (scriptEvent) => {
     const profession = scriptEvent.caller?.GetEntityName?.();
     const pawn = /** @type {import("cs_script/point_script").CSPlayerPawn|undefined} */ (scriptEvent.activator);
     const slot = pawn?.GetPlayerController()?.GetPlayerSlot?.();
-    if (!slot || !profession) return;
-
+    if (typeof slot !== "number" || !profession) return;
     // 通过reward系统触发职业切换
     const success = playerManager.dispatchReward(slot, {
         type: "profession",
@@ -478,9 +477,6 @@ Instance.SetThink(() => {
     _lastTime = now;
     const isGamePlaying = gameManager.checkGameState();
     const alivePlayers = playerManager.getAlivePlayers();//游戏中的存活玩家
-    const alivePawns = alivePlayers
-        .map((player) => player.entityBridge.pawn)
-        .filter((pawn) => pawn != null);
 
     // ── 5.1 输入 / 玩家 / 波次 / Buff ──
     inputManager.tick();
@@ -489,23 +485,14 @@ Instance.SetThink(() => {
         waveManager.tick();
     }
     if (isGamePlaying) {
-        monsterManager.tick(alivePawns);
+        monsterManager.tick(alivePlayers);
     }
     if (isGamePlaying) {
         skillManager.tick();
         sentryManager.tick();
-
+        
         const activeMonsters = monsterManager.getActiveMonsters();
-        /** @type {import("cs_script/point_script").Entity[]} */
-        const activeMonsterBreakables = [];
-        for (const monster of activeMonsters) {
-            const breakable = monster.breakable;
-            if (!breakable?.IsValid?.()) continue;
-            activeMonsterBreakables.push(breakable);
-        }
-
         movementManager.tick(now, dt);
-
         monsterManager.syncMovementStates(movementManager.getAllStates());
 
         projectileManager.tick(now, dt, {

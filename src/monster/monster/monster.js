@@ -13,6 +13,7 @@ import { vec } from "../../util/vector";
 import { event, MovementRequestType } from "../../util/definition";
 import { MonsterState } from "../monster_const";
 import { MonsterRuntimeEvents } from "../../util/runtime_events.js";
+import { Player } from "../../player/player/player";
 
 /** @typedef {import("../../skill/skill_template").SkillTemplate} MonsterSkill */
 /** @typedef {import("../../util/definition").MovementRequest} MovementRequest */
@@ -34,6 +35,8 @@ export class Monster {
         this.id = id;
         /** @type {Entity | null} */
         this.model = null;
+        /**@type {import("cs_script/point_script").Vector} */
+        this.pos = position;
         /** @type {Entity | null} */
         this.breakable = null;
         /** @type {MonsterSkill[]} */
@@ -84,7 +87,7 @@ export class Monster {
         this.animation = new MonsterAnimator(this, this.model, typeConfig.animations);
 
         this.state = MonsterState.IDLE;
-        /** @type {CSPlayerPawn | null} */
+        /** @type {Player | null} */
         this.target = null;
         this.lastTargetUpdate = 0;
         this.attackCooldown = 0;
@@ -390,9 +393,9 @@ export class Monster {
     }
 
     /**
-     * @param {CSPlayerPawn[]} allppos
+     * @param {Player[]} allplayers
      */
-    tick(allppos) {
+    tick(allplayers) {
         if (!this.model || !this.breakable?.IsValid()) return;
         if (this.state === MonsterState.DEAD) return;
 
@@ -410,7 +413,7 @@ export class Monster {
         this.skillsManager.tickRunningSkills();
 
         if (now - this.lastTargetUpdate > 3.0 || !this.target) {
-            this.updateTarget(allppos);
+            this.updateTarget(allplayers);
             this.lastTargetUpdate = now;
         }
         if (!this.target) return;
@@ -422,11 +425,11 @@ export class Monster {
     }
 
     /**
-     * @param {CSPlayerPawn[]} allppos
+     * @param {Player[]} allplayers
      */
-    updateTarget(allppos) {
+    updateTarget(allplayers) {
         const prevTarget = this.target;
-        this.brainState.updateTarget(allppos);
+        this.brainState.updateTarget(allplayers);
         if (this.target !== prevTarget) {
             this.movementPath.onTargetChanged();
         }
@@ -501,14 +504,11 @@ export class Monster {
     }
 
     /**
-     * @param {Entity} ent
+     * @param {import("cs_script/point_script").Vector} ent
      * @returns {number}
      */
     distanceTosq(ent) {
-        if(!this.model)return Infinity;
-        const a = this.model.GetAbsOrigin();
-        const b = ent.GetAbsOrigin();
-        return vec.lengthsq(a, b);
+        return vec.lengthsq(this.pos, ent);
     }
 
     /**
@@ -548,8 +548,10 @@ export class Monster {
 
     /**
      * @param {string} movemode
+     * @param {import("cs_script/point_script").Vector} pos
      */
-    updateMovementMovemode(movemode) {
+    updateMovementMovemode(movemode,pos) {
         this.movementStateMovemode = movemode;
+        this.pos=pos;
     }
 }

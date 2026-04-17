@@ -254,6 +254,7 @@ const eventBus=new EventBus();
  * @property {(playerSlot: number, msg: string) => void} sendMessage - 发送消息给指定玩家
  * @property {() => number} getGameTime - 获取当前游戏时间（秒）
  */
+
 /**
  * 移动请求类型常量。
  *
@@ -614,8 +615,8 @@ class GameManager {
 //export const playerDamage=true;
 /** 是否在新回合开始或结束时重置脚本。观赏模式（ZE 模式）推荐开启。 */
 //export const clearbyRound=true;
-/** 怪物生成点到最近玩家的距离阈值，大于此值则关闭该生成点。`-1` 表示不检测。 */
-const spawnPointsDistance=-1;
+///** 怪物生成点到最近玩家的距离阈值，大于此值则关闭该生成点。`-1` 表示不检测。 */
+//export const spawnPointsDistance=-1;
 /**
  * 怪物死亡后，是否在死亡动画播放完成时删除模型。
  * - `true`：动画结束后删除模型。
@@ -1200,11 +1201,11 @@ const WaveState = {
 const wavesConfig=[
         { 
             name: "训练波", 
-            totalMonsters: 1, 
+            totalMonsters: 200, 
             reward: 500, 
-            spawnInterval: 0.1, 
+            spawnInterval: 0.01, 
             preparationTime: 0, //波次开始到第一个怪物出现时间，这段时间可以用来发消息
-            aliveMonster:1, //同时存在的怪物数量
+            aliveMonster:150, //同时存在的怪物数量
             monster_spawn_points_name:["monster_spawnpoint"],//这一波生成点
             monster_breakablemins:{x:-30,y:-30,z:0},//最大怪物的breakable的mins
             monster_breakablemaxs:{x:30,y:30,z:75},//最大怪物的breakable的maxs
@@ -2992,7 +2993,8 @@ class Player {
     constructor(slot) {
         /** @type {number} 引擎 PlayerSlot */
         this.slot = slot;
-
+        /**@type {import("cs_script/point_script").Vector} */
+        this.pos={x:0,y:0,z:0};
         /** @type {number} 玩家当前状态，取值见 {@link PlayerState} */
         this.state = PlayerState.DISCONNECTED;
 
@@ -3516,13 +3518,18 @@ class Player {
         this.emitRuntimeEvent(PlayerRuntimeEvents.StateChange, { oldState, nextState });
         return true;
     }
+
     // ——— Tick ———
     /**
      * 每帧调度入口。
      */
     tick() {
-        if (this.state !== PlayerState.ALIVE) return;
+        const pawn = this.entityBridge.pawn;
+        if (pawn?.IsValid()) {
+            this.pos = pawn.GetAbsOrigin?.();
+        }
 
+        if (this.state !== PlayerState.ALIVE) return;
         this.emitRuntimeEvent(PlayerRuntimeEvents.Tick, {});
     }
 
@@ -3533,7 +3540,13 @@ class Player {
      * @returns {any}
      */
     getSummary() {
-        return { ...this.stats.getSummary(), pawn: this.entityBridge.pawn };
+        const professionConfig = getPlayerProfessionConfig(this.professionId);
+        return {
+            ...this.stats.getSummary(),
+            pawn: this.entityBridge.pawn,
+            professionId: this.professionId,
+            professionDisplayName: professionConfig?.displayName ?? this.professionId,
+        };
     }
 }
 
@@ -5197,7 +5210,7 @@ class HudManager {
 
     /**
      * 每 tick 刷新全部可见 HUD 的贴脸位置。
-     * @param {{ id: number; name: string; slot: number; level: number; money: number; health: number; maxHealth: number; armor: number; attack: number; critChance: number; critMultiplier: number; kills: number; score: number; lastMonsterDamage: number; exp: number; expNeeded: number; pawn: import("cs_script/point_script").CSPlayerPawn | null; }[]} [allAlivePlayersSummary=[]]
+     * @param {{ id: number; name: string; slot: number; level: number; professionId: string; professionDisplayName: string; money: number; health: number; maxHealth: number; armor: number; attack: number; critChance: number; critMultiplier: number; kills: number; score: number; lastMonsterDamage: number; exp: number; expNeeded: number; pawn: import("cs_script/point_script").CSPlayerPawn | null; }[]} [allAlivePlayersSummary=[]]
      * @param {{ remainingMonsters?: number; currentWave?: number; totalWaves?: number; }} [waveSummary={}]
      * @param {Map<number, { buffs?: { id: number; typeId: string; remaining: number; }[]; skill?: { id: number; typeId: string; cooldown: number; remainingCooldown: number; isReady: boolean; isConsumed: boolean; } | null; }>} [runtimeSummaryBySlot=new Map()]
      */
@@ -5213,7 +5226,8 @@ class HudManager {
             const runtimeSummary = runtimeSummaryBySlot.get(s.slot);
             const buffLabel = this._formatBuffLabel(runtimeSummary?.buffs ?? []);
             const skillLabel = this._formatSkillCooldownLabel(runtimeSummary?.skill ?? null);
-            const text = `Lv.${s.level} \nHP:${s.health}/${s.maxHealth} \n护甲:${s.armor}\nMoney:$${s.money} \n升级还需:${remainingExp}EXP\n伤害:${s.lastMonsterDamage} \nBuff:${buffLabel}\n技能CD:${skillLabel}\n剩余怪物:${remainingMonsters} \n波次:${waveLabel}`;
+            const professionLabel = s.professionDisplayName ? `职业:${s.professionDisplayName}` : `职业:${s.professionId ?? "未知"}`;
+            const text = `Lv.${s.level} ${professionLabel}\nHP:${s.health}/${s.maxHealth} \n护甲:${s.armor}\nMoney:$${s.money} \n升级还需:${remainingExp}EXP\n伤害:${s.lastMonsterDamage} \nBuff:${buffLabel}\n技能CD:${skillLabel}\n剩余怪物:${remainingMonsters} \n波次:${waveLabel}`;
             this.showHud({ slot: s.slot, pawn: s.pawn, text, channel: CHANNAL.STATUS, alwaysVisible: HUD_ALWAYS_VISIBLE, result: true });
         }
         for (const [, session] of this._sessions) {
@@ -5430,13 +5444,32 @@ class HudManager {
      * @returns {string}
      */
     _getEffectDisplayName(typeId) {
-        switch (typeId) {
-            case "fire":
-            case "burn":
-                return "燃烧";
-            default:
-                return typeId ?? "未知";
-        }
+        /** @type {Record<string, string>} */
+        const names = {
+            fire: "火焰",
+            burn: "灼烧",
+            regeneration: "再生",
+            attack_up: "强攻",
+            speed_up: "加速",
+            corestats: "核心属性",
+            pounce: "突袭",
+            initanim: "准备",
+            doubleattack: "双重攻击",
+            powerattack: "破甲",
+            shield: "护盾",
+            speedboost: "疾跑",
+            throwstone: "掷石",
+            sound: "音波",
+            spawn: "召唤",
+            player_guard: "防御脉冲",
+            player_mend: "治疗脉冲",
+            player_mend_field: "医疗场",
+            player_vanguard: "恢复自身",
+            player_turret: "炮台",
+        };
+        if (!typeId) return "未知";
+        const displayName = names[typeId];
+        return displayName ?? typeId;
     }
 
     /**
@@ -5708,7 +5741,7 @@ class MonsterHealthCombat {
             Instance.EntFireAtTarget({
                 target: breakable,
                 input: "fireuser1",
-                activator: killer ?? this.monster.target ?? undefined,
+                activator: killer ?? this.monster.target?.entityBridge.pawn ?? undefined,
             });
         }
 
@@ -5735,16 +5768,17 @@ class MonsterHealthCombat {
         this.monster.movementPath.onOccupationChanged();
         this.monster.attackCooldown = this.monster.atc;
 
-        const origin = model.GetAbsOrigin();
-        const targetPos = target.GetAbsOrigin();
-        const distsq = this.monster.distanceTosq(target);
+        const origin = this.monster.pos;
+        const targetPos = target.pos;
+        const distsq = this.monster.distanceTosq(targetPos);
         if (distsq > this.monster.attackdist * this.monster.attackdist) {
             this.monster.emitRuntimeEvent(MonsterRuntimeEvents.AttackFalse, { target });
             return;
         }
 
         this.monster.emitRuntimeEvent(MonsterRuntimeEvents.AttackTrue, { target, damage: this.monster.damage });
-        this.monster.emitAttackEvent(this.monster.damage, target);
+        const targetpawn=target?.entityBridge.pawn;
+        if(targetpawn)this.monster.emitAttackEvent(this.monster.damage, targetpawn);
 
         300 / Math.hypot(targetPos.x - origin.x, targetPos.y - origin.y);
     }
@@ -5777,14 +5811,14 @@ class MonsterBrainState {
 
     /**
      * 更新追击目标：选择最近的存活玩家。同时发布 `TargetUpdate` 事件。
-     * @param {import("cs_script/point_script").CSPlayerPawn[]} allppos 所有存活玩家
+     * @param {Player[]} allplayers 
      */
-    updateTarget(allppos) {
+    updateTarget(allplayers) {
         const previousTarget = this.monster.target;
         let best = null;
         let bestDistsq = Infinity;
-        for (const player of allppos) {
-            const dist = this.monster.distanceTosq(player);
+        for (const player of allplayers) {
+            const dist = this.monster.distanceTosq(player.pos);
             if (dist < bestDistsq) {
                 best = player;
                 bestDistsq = dist;
@@ -5805,7 +5839,7 @@ class MonsterBrainState {
      */
     evaluateIntent() {
         if (!this.monster.target) return MonsterState.IDLE;
-        const distsq = this.monster.distanceTosq(this.monster.target);
+        const distsq = this.monster.distanceTosq(this.monster.target.pos);
         if (this.monster.movementStateMovemode === "ladder") return MonsterState.CHASE;
         if (this.monster.skillsManager.hasRequestedSkill()) return MonsterState.SKILL;
         if (distsq <= this.monster.attackdist*this.monster.attackdist && this.monster.attackCooldown <= 0) return MonsterState.ATTACK;
@@ -6149,7 +6183,7 @@ class PounceSkill extends SkillTemplate {
             if (!monster.target) return false;
             if (monster.isOccupied()) return false;
 
-            const distsq = monster.distanceTosq(monster.target);
+            const distsq = monster.distanceTosq(monster.target.pos);
             const attackDistSq = monster.attackdist * monster.attackdist;
             const triggerDistSq = this.distance * this.distance;
             if (!(distsq > attackDistSq && distsq < triggerDistSq)) return false;
@@ -6185,10 +6219,10 @@ class PounceSkill extends SkillTemplate {
 
         const model = monster.model;
         const target = monster.target;
-        if (!model?.IsValid?.() || !target?.IsValid?.()) return;
+        if (!model?.IsValid?.() || !target) return;
 
-        const start = model.GetAbsOrigin();
-        const targetPos = target.GetAbsOrigin();
+        const start = monster.pos;
+        const targetPos = target.pos;
 
         const duration = this._duration > 0 ? this._duration : 1;
         const velocity = {
@@ -6312,10 +6346,11 @@ class DoubleAttackSkill extends SkillTemplate {
         const monster = this.monster;
         const target = monster?.target;
         if (!monster || !target) return;
-        if (monster.distanceTosq(target) > monster.attackdist * monster.attackdist) return;
+        if (monster.distanceTosq(target.pos) > monster.attackdist * monster.attackdist) return;
 
         this._markTriggered();
-        monster.emitAttackEvent(monster.damage, target);
+        const pawn=target.entityBridge?.pawn;
+        if(pawn)monster.emitAttackEvent(monster.damage, pawn);
     }
 }
 
@@ -6369,21 +6404,22 @@ class PowerAttackSkill extends SkillTemplate {
         const monster = this.monster;
         const target = monster?.target;
         if (!monster || !target) return;
-        if (monster.distanceTosq(target) > monster.attackdist * monster.attackdist) return;
+        if (monster.distanceTosq(target.pos) > monster.attackdist * monster.attackdist) return;
 
         this._markTriggered();
         this._applyTargetBuff(target);
-        monster.emitAttackEvent(Math.max(1, Math.round(monster.damage * 2)), target);
+        const pawn=target.entityBridge?.pawn;
+        if(pawn)monster.emitAttackEvent(Math.max(1, Math.round(monster.damage * 2)), pawn);
     }
 
     /**
-     * @param {import("cs_script/point_script").CSPlayerPawn} target
+     * @param {Player} target
      * @returns {boolean}
      */
     _applyTargetBuff(target) {
         if (!this.buffConfigId) return false;
 
-        const slot = target?.GetPlayerController?.()?.GetPlayerSlot?.();
+        const slot = target.slot;
         if (typeof slot !== "number" || slot < 0) return false;
 
         const rewardRequest = {
@@ -6546,7 +6582,7 @@ class FireSkill extends SkillTemplate {
             if (!monster.target) return false;
             if (monster.isOccupied()) return false;
             const triggerDistanceSq = this.triggerDistance * this.triggerDistance;
-            if (triggerDistanceSq > 0 && monster.distanceTosq(monster.target) > triggerDistanceSq) {
+            if (triggerDistanceSq > 0 && monster.distanceTosq(monster.target.pos) > triggerDistanceSq) {
                 return false;
             }
         }
@@ -6561,8 +6597,8 @@ class FireSkill extends SkillTemplate {
 
     trigger() {
         const pos = this.player
-            ? (this.player.entityBridge?.pawn?.IsValid?.() ? this.player.entityBridge.pawn.GetAbsOrigin() : null)
-            : (this.monster?.model?.IsValid?.() ? this.monster.model.GetAbsOrigin() : null);
+            ? this.player.pos
+            : this.monster?.pos;
         if (!pos) return false;
 
         /**@type {import("../../areaEffects/area_const").AreaEffectCreateRequest} */
@@ -7068,7 +7104,7 @@ class ThrowStoneSkill extends SkillTemplate {
             if (this.running) return false;
             if (monster.isOccupied()) return false;
 
-            const distsq = monster.distanceTosq(monster.target);
+            const distsq = monster.distanceTosq(monster.target.pos);
             const minDistSq = this.distanceMin * this.distanceMin;
             const maxDistSq = this.distanceMax * this.distanceMax;
             if (distsq < minDistSq || distsq > maxDistSq) return false;
@@ -7094,15 +7130,15 @@ class ThrowStoneSkill extends SkillTemplate {
         const monster = this.monster;
         const target = monster?.target;
         const model = monster?.model;
-        if (!monster || !target?.IsValid?.() || !model?.IsValid?.()) return;
+        if (!monster || !target || !model?.IsValid?.()) return;
 
-        const distsq = monster.distanceTosq(target);
+        const distsq = monster.distanceTosq(target.pos);
         const minDistSq = this.distanceMin * this.distanceMin;
         const maxDistSq = this.distanceMax * this.distanceMax;
         if (distsq < minDistSq || distsq > maxDistSq) return;
 
         const startPos = model.GetEyePosition?.() ?? model.GetAbsOrigin?.();
-        const endPos = target.GetAbsOrigin?.();
+        const endPos = target.pos;
         if (!startPos || !endPos) return;
 
         const projectileEntity = this._spawnProjectileEntity(startPos);
@@ -7677,9 +7713,9 @@ class SentryTurret {
         this.turnSpeed = typeof options.turnSpeed === "number" && Number.isFinite(options.turnSpeed)
             ? Math.max(0, options.turnSpeed)
             : cfg.turnSpeed;
-        this._basePosition = this.base?.IsValid?.() ? this._cloneVector(this.base.GetAbsOrigin()) : null;
-        this._baseAngles = this.base?.IsValid?.() ? this._cloneAngles(this.base.GetAbsAngles()) : null;
-        this._yawPosition = this.yaw?.IsValid?.() ? this._cloneVector(this.yaw.GetAbsOrigin()) : null;
+        this._basePosition = this.base.GetAbsOrigin();
+        this._baseAngles = this.base.GetAbsAngles();
+        this._yawPosition = this.yaw.GetAbsOrigin();
         this._currentYaw = this._normalizeYaw(this.yaw?.GetAbsAngles?.()?.yaw ?? this._baseAngles?.yaw ?? 0);
 
         /** @type {() => import("../../../monster/monster/monster").Monster[]} */
@@ -8961,7 +8997,7 @@ class MonsterMovementPathAdapter {
     /** 内部：提交一次 Chase Move 请求。 */
     _submitChase() {
         const entity = this._getMovementEntity();
-        const target = this.monster.target;
+        const target = this.monster.target?.entityBridge.pawn;
         if (!entity || !target) return;
 
         this.monster.submitMovementEvent({
@@ -9198,6 +9234,8 @@ class Monster {
         this.id = id;
         /** @type {Entity | null} */
         this.model = null;
+        /**@type {import("cs_script/point_script").Vector} */
+        this.pos = position;
         /** @type {Entity | null} */
         this.breakable = null;
         /** @type {MonsterSkill[]} */
@@ -9248,7 +9286,7 @@ class Monster {
         this.animation = new MonsterAnimator(this, this.model, typeConfig.animations);
 
         this.state = MonsterState.IDLE;
-        /** @type {CSPlayerPawn | null} */
+        /** @type {Player | null} */
         this.target = null;
         this.lastTargetUpdate = 0;
         this.attackCooldown = 0;
@@ -9554,9 +9592,9 @@ class Monster {
     }
 
     /**
-     * @param {CSPlayerPawn[]} allppos
+     * @param {Player[]} allplayers
      */
-    tick(allppos) {
+    tick(allplayers) {
         if (!this.model || !this.breakable?.IsValid()) return;
         if (this.state === MonsterState.DEAD) return;
 
@@ -9574,7 +9612,7 @@ class Monster {
         this.skillsManager.tickRunningSkills();
 
         if (now - this.lastTargetUpdate > 3.0 || !this.target) {
-            this.updateTarget(allppos);
+            this.updateTarget(allplayers);
             this.lastTargetUpdate = now;
         }
         if (!this.target) return;
@@ -9586,11 +9624,11 @@ class Monster {
     }
 
     /**
-     * @param {CSPlayerPawn[]} allppos
+     * @param {Player[]} allplayers
      */
-    updateTarget(allppos) {
+    updateTarget(allplayers) {
         const prevTarget = this.target;
-        this.brainState.updateTarget(allppos);
+        this.brainState.updateTarget(allplayers);
         if (this.target !== prevTarget) {
             this.movementPath.onTargetChanged();
         }
@@ -9665,14 +9703,11 @@ class Monster {
     }
 
     /**
-     * @param {Entity} ent
+     * @param {import("cs_script/point_script").Vector} ent
      * @returns {number}
      */
     distanceTosq(ent) {
-        if(!this.model)return Infinity;
-        const a = this.model.GetAbsOrigin();
-        const b = ent.GetAbsOrigin();
-        return vec$1.lengthsq(a, b);
+        return vec$1.lengthsq(this.pos, ent);
     }
 
     /**
@@ -9712,9 +9747,11 @@ class Monster {
 
     /**
      * @param {string} movemode
+     * @param {import("cs_script/point_script").Vector} pos
      */
-    updateMovementMovemode(movemode) {
+    updateMovementMovemode(movemode,pos) {
         this.movementStateMovemode = movemode;
+        this.pos=pos;
     }
 }
 
@@ -9901,7 +9938,7 @@ class MonsterManager {
         /**
          * 当前波次可用的生成点实体列表。由 `spawnWave` 按配置名称查找并填充，
          * 每次新波次开始时清空重建。
-         * @type {Entity[]}
+         * @type {import("cs_script/point_script").Vector[]}
          */
         this.spawnPoints = [];
         /** 上一次成功生成怪物的游戏时间。初始值 -1 表示本波尚未生成过。由 `tick` 更新。 */
@@ -9967,16 +10004,16 @@ class MonsterManager {
      * 移动的实际推进由 main 在 tick 后统一执行。
      *
      * 返回的 tickContext 是内部复用对象，调用方只读。
-     * @param {CSPlayerPawn[]} allppos
+     * @param {Player[]} allplayers
      */
-    tick(allppos)
+    tick(allplayers)
     {
         for (const [id, monster] of this.monsters) {
             if (monster.state === MonsterState.DEAD && !monster.model && !monster.breakable) {
                 this.monsters.delete(id);
                 continue;
             }
-            monster.tick(allppos);
+            monster.tick(allplayers);
             if (monster.state === MonsterState.DEAD && !monster.model && !monster.breakable) {
                 this.monsters.delete(id);
             }
@@ -10033,7 +10070,7 @@ class MonsterManager {
     }
 
     /**
-     * @param {Map<Entity, string>} movementStates
+     * @param {Map<Entity, {mode:string,pos:import("cs_script/point_script").Vector}>} movementStates
      */
     syncMovementStates(movementStates) {
         for (const monster of this.monsters.values()) {
@@ -10042,7 +10079,7 @@ class MonsterManager {
             if (!model) continue;
             const snapshot = movementStates.get(model);
             if (!snapshot) continue;
-            monster.updateMovementMovemode(snapshot);
+            monster.updateMovementMovemode(snapshot.mode, snapshot.pos);
         }
     }
 
@@ -10089,11 +10126,7 @@ class MonsterManager {
         this.spawn = true;
         this.spawnconfig = waveConfig;
         this.spawnPoints = [];
-        const spawnPointNames = waveConfig.monster_spawn_points_name;
-        spawnPointNames.forEach((/** @type {string} */ name) => {
-            const found = Instance.FindEntitiesByName(name);
-            this.spawnPoints.push(...found);
-        });
+        this.getspawnPoints(waveConfig);
     }
 
     /**
@@ -10102,6 +10135,19 @@ class MonsterManager {
      */
     stopWave() {
         this.spawn = false;
+    }
+    /**
+     * @param {import("../util/definition").waveConfig} waveConfig 当前波次配置
+     */
+    getspawnPoints(waveConfig)
+    {
+        if (this.spawnPoints.length === 0) {
+            const spawnPointNames = waveConfig.monster_spawn_points_name;
+            spawnPointNames.forEach((/** @type {string} */ name) => {
+                const found = Instance.FindEntitiesByName(name);
+                this.spawnPoints.push(...found.map(entity => entity.GetAbsOrigin()));
+            });
+        }
     }
     /**
      * 在随机生成点创建一只怪物。
@@ -10117,27 +10163,13 @@ class MonsterManager {
      */
     spawnMonster(waveConfig) {
         try {
-            if (this.spawnPoints.length === 0) {
-                const spawnPointNames = waveConfig.monster_spawn_points_name;
-                spawnPointNames.forEach((/** @type {string} */ name) => {
-                    const found = Instance.FindEntitiesByName(name);
-                    this.spawnPoints.push(...found);
-                });
-                if (this.spawnPoints.length === 0)
-                {   
-                    Instance.Msg("错误: 未找到怪物生成点");
-                    return null;
-                }
-            }
-            let nearbySpawnPoints = this.spawnPoints;
-            if (spawnPointsDistance > 0) ;
-            if (nearbySpawnPoints.length === 0) {
+            this.getspawnPoints(waveConfig);
+            if (this.spawnPoints.length === 0)
+            {   
                 Instance.Msg("错误: 未找到怪物生成点");
                 return null;
             }
-            const spawnPoint = nearbySpawnPoints[Math.floor(Math.random() * nearbySpawnPoints.length)];
-            if (!spawnPoint?.IsValid?.()) return null;
-            const pos = spawnPoint.GetAbsOrigin();
+            const pos = this.spawnPoints[Math.floor(Math.random() * this.spawnPoints.length)];
             const start = { x: pos.x, y: pos.y, z: pos.z };
             const end = { x: pos.x, y: pos.y, z: pos.z };
             if (Instance.TraceSphere({ radius:30, start, end, ignorePlayers: true }).hitEntity) {
@@ -10173,9 +10205,7 @@ class MonsterManager {
             Instance.Msg(`技能产卵失败: 未找到怪物类型 ${typeName}`);
             return false;
         }
-        if (!caster.model || !caster.model.IsValid()) return false;
-
-        const center = caster.model.GetAbsOrigin();
+        const center = caster.pos;
         const radiusMin = Math.max(0, options.radiusMin ?? 24);
         const radiusMax = Math.max(radiusMin, options.radiusMax ?? 96);
         const tries = Math.max(1, options.tries ?? 6);
@@ -20972,7 +21002,7 @@ const arriveDistance = 1;
 /** 转向速度 (度/s) */
 const turnSpeed = 360;
 /** movement.update 最多拆成多少个轮转分片。 */
-const movementUpdateShardCount = 2;
+const movementUpdateShardCount = 1;
 /** 异常长帧时单个实体单次最多消费多少累计 dt (s)。 */
 const movementMaxAccumulatedDt = 0.25;
 /** 真实地面检测最小间隔 (s)，沿用原 64Hz 下每 8 tick 的语义。 */
@@ -21060,12 +21090,11 @@ class MoveProbe {
      * @param {Entity[]} ignoreEntities
      */
     traceGround(pos, ignoreEntities) {
-        const start = vec$1.clone(pos);
         const end = vec$1.Zfly(pos, -8);
         const tr = Instance.TraceBox({
             mins: this.mins,
             maxs: this.maxs,
-            start,
+            start:pos,
             end,
             ignorePlayers: true,
             ignoreEntity: ignoreEntities
@@ -21220,7 +21249,7 @@ class Motor {
 
         const move = vec$1.scale(this.velocity, dt);
         const result = this._airSlideMove(pos, move, sepCtx.entities);
-        let newPos = result.pos;
+        const newPos = result.pos;
         if (result.clipNormals.length) {
             for (const n of result.clipNormals) {
                 this.velocity = this._clipVelocity(this.velocity, n);
@@ -21246,7 +21275,7 @@ class Motor {
 
         const move = vec$1.scale(this.velocity, dt);
         const result = this._airSlideMove(pos, move, sepCtx.entities);
-        let newPos = result.pos;
+        const newPos = result.pos;
         if (result.clipNormals.length) {
             for (const n of result.clipNormals) {
                 this.velocity = this._clipVelocity(this.velocity, n);
@@ -21287,7 +21316,7 @@ class Motor {
 
         const move = vec$1.scale(this.velocity, dt);
         const result = this._airSlideMove(pos, move, sepCtx.entities);
-        let newPos = result.pos;
+        const newPos = result.pos;
         if (result.clipNormals.length) {
             for (const n of result.clipNormals) {
                 this.velocity = this._clipVelocity(this.velocity, n);
@@ -21304,7 +21333,7 @@ class Motor {
         this._groundUpdateCooldown = 0;
     }
     isOnGround() { return this.onGround; }
-    getVelocity() { return vec$1.clone(this.velocity); }
+    getVelocity() { return this.velocity; }
 
     /**
      * 计算朝向（yaw 角度）
@@ -21422,7 +21451,7 @@ class Motor {
         if (step.success) return { pos: step.endPos };
 
         const MAX_CLIPS = 2;
-        let remaining = vec$1.clone(move);
+        let remaining = move;
         const clipNormals = [];
         let pos = start;
         for (let i = 0; i < MAX_CLIPS; i++) {
@@ -21431,7 +21460,7 @@ class Motor {
             const tr = this.probe.traceMove(pos, endPos, allm);
             if (!tr.hit) return { pos: tr.endPos };
             pos = tr.hitPos;
-            clipNormals.push(vec$1.clone(tr.normal));
+            clipNormals.push(tr.normal);
             remaining = vec$1.scale(remaining, 1 - tr.fraction);
             remaining = this._clipMoveByNormals(remaining, clipNormals);
         }
@@ -21446,7 +21475,7 @@ class Motor {
      */
     _airSlideMove(start, move, allm) {
         const MAX_CLIPS = 2;
-        let remaining = vec$1.clone(move);
+        let remaining = move;
         /** @type {Vector[]} */
         const clipNormals = [];
         let pos = start;
@@ -21457,7 +21486,7 @@ class Motor {
             const tr = this.probe.traceMove(pos, endPos, allm);
             if (!tr.hit) return { pos: tr.endPos, clipNormals };
             pos = tr.hitPos;
-            clipNormals.push(vec$1.clone(tr.normal));
+            clipNormals.push(tr.normal);
             remaining = vec$1.scale(remaining, 1 - tr.fraction);
             remaining = this._clipMoveByNormals(remaining, clipNormals);
         }
@@ -21469,7 +21498,7 @@ class Motor {
      * @param {Vector[]} normals
      */
     _clipMoveByNormals(move, normals) {
-        let out = vec$1.clone(move);
+        let out = move;
         for (const n of normals) {
             const dot = vec$1.dot2D(out, n);
             if (dot < 0) out = vec$1.sub(out, vec$1.scale(n, dot));
@@ -21485,7 +21514,7 @@ class Motor {
      */
     _clipVelocity(vel, normal, overbounce = 1.01) {
         const backoff = vec$1.dot(vel, normal);
-        if (backoff >= 0) return vec$1.clone(vel);
+        if (backoff >= 0) return vel;
         const change = vec$1.scale(normal, backoff * overbounce);
         const out = vec$1.sub(vel, change);
         if (Math.abs(out.x) < 0.0001) out.x = 0;
@@ -21529,8 +21558,8 @@ class Motor {
         }
         this.onGround = true;
         this.ground.hit = true;
-        this.ground.normal = vec$1.clone(tr.normal);
-        this.ground.point = vec$1.clone(tr.hitPos);
+        this.ground.normal = tr.normal;
+        this.ground.point = tr.hitPos;
         return true;
     }
 
@@ -21542,7 +21571,7 @@ class Motor {
     _updateStuck(pos, dt) {
         const moved = vec$1.lengthsq(vec$1.sub(pos, this._stuckLastPos));
         if (moved < moveEpsilon*moveEpsilon) { this._stuckTime += dt; } else { this._stuckTime = 0; }
-        this._stuckLastPos = vec$1.clone(pos);
+        this._stuckLastPos = pos;
         // 不做自动解卡，由外层处理
     }
 }
@@ -21564,7 +21593,7 @@ class PathFollower {
 
     /** @param {{ pos: import("cs_script/point_script").Vector; mode: number }[]} path */
     setPath(path) {
-        this.path = path.map(n => ({ pos: vec$1.clone(n.pos), mode: n.mode }));
+        this.path = path;
         this.cursor = 0;
     }
 
@@ -21957,7 +21986,8 @@ class Movement {
      */
     constructor(config) {
         this.entity = config.entity;
-
+        /**@type {Vector} */
+        this.pos=this.entity.GetAbsOrigin();
         // ── 默认配置 ──
         this._defaultSpeed = config.speed ?? 120;
         this._defaultMode = config.mode ?? "walk";
@@ -21991,7 +22021,7 @@ class Movement {
             wishDir: vec$1.get(0, 0, 0),
             wishSpeed: 0,
             maxSpeed: this._defaultSpeed,
-            getPos: () => vec$1.clone(this.entity.GetAbsOrigin()),
+            getPos: () => this.pos,
             requestModeSwitch: () => {} // 由 controller 绑定
         };
 
@@ -22042,10 +22072,10 @@ class Movement {
       */
     update(dt, sepCtx) {
         if (this._isStopped) return;
-
+        this.pos=this.entity.GetAbsOrigin();
         // PORTAL 特殊处理（在常规 controller 之前）
         if (this._handlePortal()) {
-            return this.entity.GetAbsOrigin();
+            return this.pos;
         }
 
         // 更新 maxSpeed（支持运行时改速度后生效）
@@ -22063,6 +22093,7 @@ class Movement {
                 position: newPos,
                 angles: { pitch: 0, yaw: this._currentYaw, roll: 0 }
             });
+            this.pos=newPos;
             return newPos;
         }
     }
@@ -22075,7 +22106,7 @@ class Movement {
     refreshPath() {
         if (!this._requestPath || !this._target) return false;
         if (this._motor.isStuck()) return false; // 卡死时不刷新（可选策略）
-        const start = this.entity.GetAbsOrigin();
+        const start = this.pos;
         const path = this._requestPath(start, this._target);
         if (!path) return false;
         // 确保终点在路径末尾
@@ -22095,7 +22126,7 @@ class Movement {
     /** 获取当前路径快照（返回拷贝，外部修改后需重新 setPath） */
     getPath() {
         return this._pathFollower.path.map(node => ({
-            pos: vec$1.clone(node.pos),
+            pos: node.pos,
             mode: node.mode
         }));
     }
@@ -22105,7 +22136,7 @@ class Movement {
      * @param {Vector} target
      */
     setTarget(target) {
-        this._target = vec$1.clone(target);
+        this._target = target;
     }
 
     /**
@@ -22121,7 +22152,7 @@ class Movement {
      * @param {Vector} velocity
      */
     setVelocity(velocity) {
-        this._motor.velocity = vec$1.clone(velocity);
+        this._motor.velocity = velocity;
     }
 
     /** 获取当前速度快照 */
@@ -22167,7 +22198,7 @@ class Movement {
 
     /** 获取当前状态快照 */
     getState() {
-        return this._controller.currentName;
+        return {mode:this._controller.currentName,pos:this.pos};
     }
 
     /** 路径是否走完 */
@@ -22203,6 +22234,7 @@ class Movement {
         this._lastPortalAt = now;
 
         this.entity.Teleport({ position: goal.pos, velocity: { x: 0, y: 0, z: 0 } });
+        this.pos=goal.pos;
         this._motor.velocity = vec$1.get(0, 0, 0);
         this._pathFollower.advancePortal();
         return true;
@@ -22817,7 +22849,7 @@ class MovementManager {
     /**
      * 获取所有实体的移动状态摘要。
      * 用于将 movement 层状态回写给 monster 侧。
-     * @returns {Map<Entity, string>}
+     * @returns {Map<Entity, {mode:string,pos:Vector}>}
      */
     getAllStates() {
         const result = new Map();
@@ -23508,12 +23540,10 @@ class AreaEffect {
      */
     _tickPlayers(now, players, r2) {
         for (const player of players) {
-            const pawn = player?.entityBridge?.pawn;
-            if (!pawn?.IsValid?.()) continue;
-            const pos = pawn.GetAbsOrigin();
+            const pos = player?.pos;
             if (!pos || vec$1.lengthsq(pos, this.position) > r2) continue;
 
-            const slot = pawn?.GetPlayerController?.()?.GetPlayerSlot?.() ?? -1;
+            const slot = player?.slot ?? -1;
             if (slot < 0) continue;
 
             const cooldownKey = `p:${slot}`;
@@ -23541,9 +23571,7 @@ class AreaEffect {
     _tickMonsters(now, monsters, r2) {
         for (const monster of monsters) {
             const monsterId = monster?.id;
-            const model = monster?.model;
-            if (!model?.IsValid?.()) continue;
-            const pos = model.GetAbsOrigin();
+            const pos = monster.pos;
             if (!pos || vec$1.lengthsq(pos, this.position) > r2) continue;
 
             const cooldownKey = `m:${monsterId}`;
@@ -23836,6 +23864,7 @@ class ProjectileRunner {
             position: startPos,
             velocity: vec$1.clone(this.velocity),
         });
+        this.pos=startPos;
     }
 
     /**
@@ -23855,12 +23884,12 @@ class ProjectileRunner {
         const stepDt = Math.min(dt, remainingDuration, remainingLifetime);
         if (stepDt <= 0) {
             if (!this.entity?.IsValid?.()) return false;
-            this._finish(this.entity.GetAbsOrigin(), tickContext);
+            this._finish(this.pos, tickContext);
             return false;
         }
 
         if (!this.entity?.IsValid?.()) return false;
-        const start = this.entity.GetAbsOrigin();
+        const start = this.pos;
         const end = this._computeStepEnd(start, stepDt);
         const trace = Instance.TraceLine({
             start,
@@ -23877,6 +23906,7 @@ class ProjectileRunner {
                 position: hitPos,
                 velocity: vec$1.clone(this.velocity),
             });
+            this.pos=hitPos;
             this._finish(hitPos, tickContext);
             return false;
         }
@@ -23885,7 +23915,7 @@ class ProjectileRunner {
             position: end,
             velocity: vec$1.clone(this.velocity),
         });
-
+        this.pos=end;
         if (this._elapsed >= this._duration || this._elapsed >= this.maxLifetime) {
             this._finish(end, tickContext);
             return false;
@@ -23981,10 +24011,8 @@ class ProjectileRunner {
 
         if (this.targetType === ThrowTarget.Player) {
             for (const player of tickContext?.players ?? []) {
-                const pawn = player?.entityBridge?.pawn;
-                if (!pawn?.IsValid?.()) continue;
 
-                const distance = vec$1.length(pawn.GetAbsOrigin(), center);
+                const distance = vec$1.length(player.pos, center);
                 if (distance > this.radius) continue;
 
                 results.push({
@@ -23998,10 +24026,8 @@ class ProjectileRunner {
 
         if (this.targetType === ThrowTarget.Monster) {
             for (const monster of tickContext?.monsters ?? []) {
-                const model = monster?.model;
-                if (!model?.IsValid?.()) continue;
 
-                const distance = vec$1.length(model.GetAbsOrigin(), center);
+                const distance = vec$1.length(monster.pos, center);
                 if (distance > this.radius) continue;
 
                 results.push({
@@ -24583,8 +24609,7 @@ Instance.OnScriptInput("profession", (scriptEvent) => {
     const profession = scriptEvent.caller?.GetEntityName?.();
     const pawn = /** @type {import("cs_script/point_script").CSPlayerPawn|undefined} */ (scriptEvent.activator);
     const slot = pawn?.GetPlayerController()?.GetPlayerSlot?.();
-    if (!slot || !profession) return;
-
+    if (typeof slot !== "number" || !profession) return;
     // 通过reward系统触发职业切换
     playerManager.dispatchReward(slot, {
         type: "profession",
@@ -24655,9 +24680,6 @@ Instance.SetThink(() => {
     _lastTime = now;
     const isGamePlaying = gameManager.checkGameState();
     const alivePlayers = playerManager.getAlivePlayers();//游戏中的存活玩家
-    const alivePawns = alivePlayers
-        .map((player) => player.entityBridge.pawn)
-        .filter((pawn) => pawn != null);
 
     // ── 5.1 输入 / 玩家 / 波次 / Buff ──
     inputManager.tick();
@@ -24666,7 +24688,7 @@ Instance.SetThink(() => {
         waveManager.tick();
     }
     if (isGamePlaying) {
-        monsterManager.tick(alivePawns);
+        monsterManager.tick(alivePlayers);
     }
     if (isGamePlaying) {
         skillManager.tick();

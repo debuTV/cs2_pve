@@ -184,7 +184,7 @@ export class MovementManager {
     /**
      * 获取所有实体的移动状态摘要。
      * 用于将 movement 层状态回写给 monster 侧。
-     * @returns {Map<Entity, string>}
+     * @returns {Map<Entity, {mode:string,pos:Vector}>}
      */
     getAllStates() {
         const result = new Map();

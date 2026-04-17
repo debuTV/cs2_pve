@@ -123,7 +123,7 @@ export class Motor {
 
         const move = vec.scale(this.velocity, dt);
         const result = this._airSlideMove(pos, move, sepCtx.entities);
-        let newPos = result.pos;
+        const newPos = result.pos;
         if (result.clipNormals.length) {
             for (const n of result.clipNormals) {
                 this.velocity = this._clipVelocity(this.velocity, n);
@@ -149,7 +149,7 @@ export class Motor {
 
         const move = vec.scale(this.velocity, dt);
         const result = this._airSlideMove(pos, move, sepCtx.entities);
-        let newPos = result.pos;
+        const newPos = result.pos;
         if (result.clipNormals.length) {
             for (const n of result.clipNormals) {
                 this.velocity = this._clipVelocity(this.velocity, n);
@@ -190,7 +190,7 @@ export class Motor {
 
         const move = vec.scale(this.velocity, dt);
         const result = this._airSlideMove(pos, move, sepCtx.entities);
-        let newPos = result.pos;
+        const newPos = result.pos;
         if (result.clipNormals.length) {
             for (const n of result.clipNormals) {
                 this.velocity = this._clipVelocity(this.velocity, n);
@@ -207,7 +207,7 @@ export class Motor {
         this._groundUpdateCooldown = 0;
     }
     isOnGround() { return this.onGround; }
-    getVelocity() { return vec.clone(this.velocity); }
+    getVelocity() { return this.velocity; }
 
     /**
      * 计算朝向（yaw 角度）
@@ -325,7 +325,7 @@ export class Motor {
         if (step.success) return { pos: step.endPos };
 
         const MAX_CLIPS = 2;
-        let remaining = vec.clone(move);
+        let remaining = move;
         const clipNormals = [];
         let pos = start;
         for (let i = 0; i < MAX_CLIPS; i++) {
@@ -334,7 +334,7 @@ export class Motor {
             const tr = this.probe.traceMove(pos, endPos, allm);
             if (!tr.hit) return { pos: tr.endPos };
             pos = tr.hitPos;
-            clipNormals.push(vec.clone(tr.normal));
+            clipNormals.push(tr.normal);
             remaining = vec.scale(remaining, 1 - tr.fraction);
             remaining = this._clipMoveByNormals(remaining, clipNormals);
         }
@@ -349,7 +349,7 @@ export class Motor {
      */
     _airSlideMove(start, move, allm) {
         const MAX_CLIPS = 2;
-        let remaining = vec.clone(move);
+        let remaining = move;
         /** @type {Vector[]} */
         const clipNormals = [];
         let pos = start;
@@ -360,7 +360,7 @@ export class Motor {
             const tr = this.probe.traceMove(pos, endPos, allm);
             if (!tr.hit) return { pos: tr.endPos, clipNormals };
             pos = tr.hitPos;
-            clipNormals.push(vec.clone(tr.normal));
+            clipNormals.push(tr.normal);
             remaining = vec.scale(remaining, 1 - tr.fraction);
             remaining = this._clipMoveByNormals(remaining, clipNormals);
         }
@@ -372,7 +372,7 @@ export class Motor {
      * @param {Vector[]} normals
      */
     _clipMoveByNormals(move, normals) {
-        let out = vec.clone(move);
+        let out = move;
         for (const n of normals) {
             const dot = vec.dot2D(out, n);
             if (dot < 0) out = vec.sub(out, vec.scale(n, dot));
@@ -388,7 +388,7 @@ export class Motor {
      */
     _clipVelocity(vel, normal, overbounce = 1.01) {
         const backoff = vec.dot(vel, normal);
-        if (backoff >= 0) return vec.clone(vel);
+        if (backoff >= 0) return vel;
         const change = vec.scale(normal, backoff * overbounce);
         const out = vec.sub(vel, change);
         if (Math.abs(out.x) < 0.0001) out.x = 0;
@@ -432,8 +432,8 @@ export class Motor {
         }
         this.onGround = true;
         this.ground.hit = true;
-        this.ground.normal = vec.clone(tr.normal);
-        this.ground.point = vec.clone(tr.hitPos);
+        this.ground.normal = tr.normal;
+        this.ground.point = tr.hitPos;
         return true;
     }
 
@@ -445,7 +445,7 @@ export class Motor {
     _updateStuck(pos, dt) {
         const moved = vec.lengthsq(vec.sub(pos, this._stuckLastPos));
         if (moved < moveEpsilon*moveEpsilon) { this._stuckTime += dt; } else { this._stuckTime = 0; }
-        this._stuckLastPos = vec.clone(pos);
+        this._stuckLastPos = pos;
         // 不做自动解卡，由外层处理
     }
 }

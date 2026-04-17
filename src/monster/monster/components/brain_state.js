@@ -4,6 +4,7 @@
 
 import { MonsterState } from "../../monster_const";
 import { MonsterRuntimeEvents } from "../../../util/runtime_events.js";
+import { Player } from "../../../player/player/player";
 
 /**
  * 怪物 AI 决策组件。
@@ -27,14 +28,14 @@ export class MonsterBrainState {
 
     /**
      * 更新追击目标：选择最近的存活玩家。同时发布 `TargetUpdate` 事件。
-     * @param {import("cs_script/point_script").CSPlayerPawn[]} allppos 所有存活玩家
+     * @param {Player[]} allplayers 
      */
-    updateTarget(allppos) {
+    updateTarget(allplayers) {
         const previousTarget = this.monster.target;
         let best = null;
         let bestDistsq = Infinity;
-        for (const player of allppos) {
-            const dist = this.monster.distanceTosq(player);
+        for (const player of allplayers) {
+            const dist = this.monster.distanceTosq(player.pos);
             if (dist < bestDistsq) {
                 best = player;
                 bestDistsq = dist;
@@ -55,7 +56,7 @@ export class MonsterBrainState {
      */
     evaluateIntent() {
         if (!this.monster.target) return MonsterState.IDLE;
-        const distsq = this.monster.distanceTosq(this.monster.target);
+        const distsq = this.monster.distanceTosq(this.monster.target.pos);
         if (this.monster.movementStateMovemode === "ladder") return MonsterState.CHASE;
         if (this.monster.skillsManager.hasRequestedSkill()) return MonsterState.SKILL;
         if (distsq <= this.monster.attackdist*this.monster.attackdist && this.monster.attackCooldown <= 0) return MonsterState.ATTACK;

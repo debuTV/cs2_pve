@@ -38,7 +38,8 @@ export class Player {
     constructor(slot) {
         /** @type {number} 引擎 PlayerSlot */
         this.slot = slot;
-
+        /**@type {import("cs_script/point_script").Vector} */
+        this.pos={x:0,y:0,z:0};
         /** @type {number} 玩家当前状态，取值见 {@link PlayerState} */
         this.state = PlayerState.DISCONNECTED;
 
@@ -562,13 +563,18 @@ export class Player {
         this.emitRuntimeEvent(PlayerRuntimeEvents.StateChange, { oldState, nextState });
         return true;
     }
+
     // ——— Tick ———
     /**
      * 每帧调度入口。
      */
     tick() {
-        if (this.state !== PlayerState.ALIVE) return;
+        const pawn = this.entityBridge.pawn;
+        if (pawn?.IsValid()) {
+            this.pos = pawn.GetAbsOrigin?.();
+        }
 
+        if (this.state !== PlayerState.ALIVE) return;
         this.emitRuntimeEvent(PlayerRuntimeEvents.Tick, {});
     }
 
@@ -579,6 +585,12 @@ export class Player {
      * @returns {any}
      */
     getSummary() {
-        return { ...this.stats.getSummary(), pawn: this.entityBridge.pawn };
+        const professionConfig = getPlayerProfessionConfig(this.professionId);
+        return {
+            ...this.stats.getSummary(),
+            pawn: this.entityBridge.pawn,
+            professionId: this.professionId,
+            professionDisplayName: professionConfig?.displayName ?? this.professionId,
+        };
     }
 }
