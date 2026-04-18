@@ -63,8 +63,14 @@ export class CoreStats extends SkillTemplate {
             if (this.params.damage_mult) this.monster.baseDamage *= this.params.damage_mult;
             if (this.params.speed_value ) this.monster.baseSpeed += this.params.speed_value;
             if (this.params.speed_mult ) this.monster.baseSpeed *= this.params.speed_mult;
-            if (this.params.reward_value ) this.monster.baseReward += this.params.reward_value;
-            if (this.params.reward_mult ) this.monster.baseReward *= this.params.reward_mult;
+            if (this.params.reward_value ) {
+                this.monster.baseMoneyReward += this.params.reward_value;
+                this.monster.baseExpReward += this.params.reward_value;
+            }
+            if (this.params.reward_mult ) {
+                this.monster.baseMoneyReward *= this.params.reward_mult;
+                this.monster.baseExpReward *= this.params.reward_mult;
+            }
             this.monster.recomputeDerivedStats();
         }
     }

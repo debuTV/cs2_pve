@@ -1,4 +1,5 @@
 import { BurnBuff } from "./buffs/burn_buff";
+import { PoisonBuff } from "./buffs/poison_buff";
 import { RegenerationBuff } from "./buffs/regeneration_buff";
 import { AttackUpBuff } from "./buffs/attack_up_buff";
 import { SpeedUpBuff } from "./buffs/speed_up_buff";
@@ -17,6 +18,8 @@ export const BuffFactory = {
         switch (typeid) {
             case "burn":
                 return new BurnBuff(id, target, targetType, params);
+            case "poison":
+                return new PoisonBuff(id, target, targetType, params);
             case "regeneration":
                 return targetType === "player"
                     ? new RegenerationBuff(id, /** @type {import("../player/player/player").Player} */ (target), targetType, params)

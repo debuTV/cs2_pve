@@ -33,7 +33,20 @@ export class HudManager {
             eventBus.on(event.Hud.In.HideHudRequest, (/** @type {import("./hud_const").HideHudRequest} */ payload) => {
                 payload.result=this.hideHud(payload);
             })
+            ,
+            eventBus.on(event.Hud.In.StatusUpdateRequest, (/** @type {{slot:number} & import("./hud_const").HudPlayerSummary} */ payload) => {
+                this.handlePlayerStatusUpdateRequest(payload);
+            })
         ];
+        /** 全局波次摘要，供文本合并显示 */
+        /**@type {import("./hud_const").HudWaveSummary} */
+        this._waveSummary={
+            currentWave: 0,
+            totalWaves: 0,
+            monstersRemaining: 0,
+            prepareTime:0
+        };
+        this._wavetime=0;
     }
 
     destroy() {
@@ -89,35 +102,62 @@ export class HudManager {
 
         return true;
     }
+    /**
+     * @param {import("./hud_const").HudWaveSummary} waveSummary
+     */
+    setwaveSummary(waveSummary){
+        if (waveSummary.currentWave !== undefined) this._waveSummary.currentWave = waveSummary.currentWave;
+        if (waveSummary.totalWaves !== undefined) this._waveSummary.totalWaves = waveSummary.totalWaves;
+        if (waveSummary.monstersRemaining !== undefined) this._waveSummary.monstersRemaining = waveSummary.monstersRemaining;
+        if (waveSummary.prepareTime !== undefined)
+        {
+            this._waveSummary.prepareTime=waveSummary.prepareTime;
+            this._wavetime=0;
+        }
+        for (const [, session] of this._sessions) {
+            // 只要会话中有 playerInfo（或此前缓存过 pendingText），都要尝试刷新文本
+            if (!session.playerInfo) continue;
+            this._refreshSessionText(session);
+        }
+    }
+    /**
+     * 处理结构化的 HUD 状态更新请求（可合并）。
+     * payload 示例： { updates: [{ slot, pawn, health, maxHealth, money, lastDamage, level, exp, expNeeded }], waveSummary: { remainingMonsters, currentWave, totalWaves }, flags: { shouldMerge, immediate } }
+     * @param {{slot:number} & import("./hud_const").HudPlayerSummary} payload
+     */
+    handlePlayerStatusUpdateRequest(payload) {
+        const slot = payload.slot;
+        const session = this._getOrCreateSession(slot);
+        session.playerInfo = this._mergePlayerInfo(session.playerInfo, payload);
+        this._refreshSessionText(session);
+    }
 
     /**
      * 每 tick 刷新全部可见 HUD 的贴脸位置。
-     * @param {{ id: number; name: string; slot: number; level: number; professionId: string; professionDisplayName: string; money: number; health: number; maxHealth: number; armor: number; attack: number; critChance: number; critMultiplier: number; kills: number; score: number; lastMonsterDamage: number; exp: number; expNeeded: number; pawn: import("cs_script/point_script").CSPlayerPawn | null; }[]} [allAlivePlayersSummary=[]]
-     * @param {{ remainingMonsters?: number; currentWave?: number; totalWaves?: number; }} [waveSummary={}]
-     * @param {Map<number, { buffs?: { id: number; typeId: string; remaining: number; }[]; skill?: { id: number; typeId: string; cooldown: number; remainingCooldown: number; isReady: boolean; isConsumed: boolean; } | null; }>} [runtimeSummaryBySlot=new Map()]
+     * @param {number} dt 
      */
-    tick(allAlivePlayersSummary=[], waveSummary={}, runtimeSummaryBySlot=new Map()) {
-        const remainingMonsters = Math.max(0, Math.round(waveSummary.remainingMonsters ?? 0));
-        const currentWave = Math.max(0, Math.round(waveSummary.currentWave ?? 0));
-        const totalWaves = Math.max(0, Math.round(waveSummary.totalWaves ?? 0));
-        const waveLabel = totalWaves > 0 ? `${currentWave}/${totalWaves}` : `${currentWave}`;
-        
-        for (const s of allAlivePlayersSummary) {
-            if(!s.pawn)continue;
-            const remainingExp = Math.max(0, s.expNeeded - s.exp);
-            const runtimeSummary = runtimeSummaryBySlot.get(s.slot);
-            const buffLabel = this._formatBuffLabel(runtimeSummary?.buffs ?? []);
-            const skillLabel = this._formatSkillCooldownLabel(runtimeSummary?.skill ?? null);
-            const professionLabel = s.professionDisplayName ? `职业:${s.professionDisplayName}` : `职业:${s.professionId ?? "未知"}`;
-            const text = `Lv.${s.level} ${professionLabel}\nHP:${s.health}/${s.maxHealth} \n护甲:${s.armor}\nMoney:$${s.money} \n升级还需:${remainingExp}EXP\n伤害:${s.lastMonsterDamage} \nBuff:${buffLabel}\n技能CD:${skillLabel}\n剩余怪物:${remainingMonsters} \n波次:${waveLabel}`;
-            this.showHud({ slot: s.slot, pawn: s.pawn, text, channel: CHANNAL.STATUS, alwaysVisible: HUD_ALWAYS_VISIBLE, result: true });
+    tick(dt) {
+        let shouldRefreshWaveText = false;
+        const prepareTime = this._waveSummary.prepareTime ?? 0;
+        if (prepareTime > 0 && this._wavetime < prepareTime) {
+            const nextWaveTime = Math.min(prepareTime, this._wavetime + dt);
+            shouldRefreshWaveText = nextWaveTime !== this._wavetime;
+            this._wavetime = nextWaveTime;
         }
+
         for (const [, session] of this._sessions) {
             if (!session.use) continue;
             const refreshed = this._refreshHudPosition(session);
             if (!refreshed) {
                 this._hideEntity(session);
             }
+        }
+
+        for (const [, session] of this._sessions) {
+            if (!session.playerInfo) continue;
+            const countdownChanged = this._tickCountdownState(session.playerInfo, dt);
+            if (!countdownChanged && !shouldRefreshWaveText) continue;
+            this._refreshSessionText(session);
         }
     }
 
@@ -138,12 +178,50 @@ export class HudManager {
                 activeChannel: CHANNAL.NONE,
                 pawn: null,
                 use: false,
-                lastText: "",
                 requests: new Map(),
+                renderedText: "",
             };
             this._sessions.set(slot, session);
         }
         return session;
+    }
+
+    /**
+     * @param {import("./hud_const").HudPlayerSummary | undefined} current
+     * @param {import("./hud_const").HudPlayerSummary} update
+     * @returns {import("./hud_const").HudPlayerSummary}
+     */
+    _mergePlayerInfo(current, update) {
+        return {
+            ...(current ?? { slot: update.slot }),
+            ...update,
+        };
+    }
+
+    /**
+     * 统一刷新单个会话的显示文本：使用会话的 playerInfo 与 manager 的 waveSummary 拼接文本并在需要时显示。
+     * - 若存在 pawn 则立即调用 showHud 刷新
+     * - 若不存在 pawn 则缓存到 session.pendingText
+     * @param {import("./hud_const").HudSession} session
+     */
+    _refreshSessionText(session) {
+        const status = session.playerInfo ?? null;
+        if(!status)return;
+        const text = this._buildTextFromStatusAndWave(status, this._waveSummary);
+
+        const pawn = status?.pawn ?? session.pawn ?? null;
+
+        if (!text) {
+            // 无文本则清除 pending 并隐藏（若已显示）
+            if (session.use) this._hideEntity(session);
+            return;
+        }
+
+        if (pawn) {
+            // 有 pawn 时立即显示
+            this.showHud({ slot: session.slot, pawn, text, channel: CHANNAL.STATUS, alwaysVisible: HUD_ALWAYS_VISIBLE, result: true });
+            return;
+        }
     }
 
     /**
@@ -194,11 +272,11 @@ export class HudManager {
             return;
         }
         const channelChanged = previousChannel !== winnerChannel;
-        const textChanged = session.lastText !== request.text;
         const pawnChanged = session.pawn !== request.pawn;
+        const textChanged = session.renderedText !== request.text;
 
         // 无变化且已显示 → 跳过
-        if (!channelChanged && !textChanged && !pawnChanged && session.use) return;
+        if (!channelChanged && !pawnChanged && !textChanged && session.use) return;
 
         session.activeChannel = winnerChannel;
         session.pawn = request.pawn;
@@ -206,15 +284,12 @@ export class HudManager {
         this._ensureEntity(session);
         if (!session.entity||!session.entity.IsValid()) return;
 
-        // 文本更新
-        if (textChanged || channelChanged) {
-            session.lastText = request.text;
-            Instance.EntFireAtTarget({
-                target: session.entity,
-                input: "SetMessage",
-                value: request.text,
-            });
-        }
+        Instance.EntFireAtTarget({
+            target: session.entity,
+            input: "SetMessage",
+            value: request.text,
+        });
+        session.renderedText = request.text;
 
         // 首次启用或 Pawn 变更 → 重新绑定
         if (!session.use) {
@@ -245,15 +320,6 @@ export class HudManager {
                 text: request.text,
             };
             eventBus.emit(event.Hud.Out.OnHudShown, payload);
-        } else if ((channelChanged || textChanged || pawnChanged) && session.use) {
-            /** @type {import("./hud_const").OnHudUpdated} */
-            const payload = {
-                slot: session.slot,
-                channel: winnerChannel,
-                text: request.text,
-                previousChannel,
-            };
-            eventBus.emit(event.Hud.Out.OnHudUpdated, payload);
         }
     }
 
@@ -284,7 +350,7 @@ export class HudManager {
 
 
     /**
-     * @param {{ id: number; typeId: string; remaining: number; }[]} buffSummaries
+     * @param {import("./hud_const").HudBuffSummary[]} buffSummaries
      * @returns {string}
      */
     _formatBuffLabel(buffSummaries) {
@@ -298,7 +364,7 @@ export class HudManager {
     }
 
     /**
-     * @param {{ id: number; typeId: string; remaining: number; }} buffSummary
+     * @param {import("./hud_const").HudBuffSummary} buffSummary
      * @returns {string}
      */
     _formatSingleBuffLabel(buffSummary) {
@@ -310,7 +376,7 @@ export class HudManager {
     }
 
     /**
-     * @param {{ id: number; typeId: string; cooldown: number; remainingCooldown: number; isReady: boolean; isConsumed: boolean; } | null} skillSummary
+     * @param {import("./hud_const").HudSkillSummary | null} skillSummary
      * @returns {string}
      */
     _formatSkillCooldownLabel(skillSummary) {
@@ -318,7 +384,108 @@ export class HudManager {
         const displayName = this._getEffectDisplayName(skillSummary.typeId);
         if (skillSummary.isConsumed) return `${displayName}(已使用)`;
         if (!skillSummary.isReady) return `${displayName}(${skillSummary.remainingCooldown.toFixed(1)}s)`;
-        return `${displayName}(就绪)`;
+        return `${displayName}("F"触发)`;
+    }
+
+    /**
+     * @param {import("./hud_const").HudPlayerSummary} playerInfo
+     * @param {number} dt
+     * @returns {boolean}
+     */
+    _tickCountdownState(playerInfo, dt) {
+        let changed = false;
+
+        if (Array.isArray(playerInfo.buffs)) {
+            const nextBuffs = [];
+            let removedExpiredBuff = false;
+
+            for (const buff of playerInfo.buffs) {
+                if (buff.remaining < 0) {
+                    nextBuffs.push(buff);
+                    continue;
+                }
+                const nextRemaining = Math.max(0, buff.remaining - dt);
+                if (nextRemaining <= 0) {
+                    removedExpiredBuff = true;
+                    continue;
+                }
+                if (nextRemaining === buff.remaining) {
+                    nextBuffs.push(buff);
+                    continue;
+                }
+                buff.remaining = nextRemaining;
+                nextBuffs.push(buff);
+                changed = true;
+            }
+
+            if (removedExpiredBuff) {
+                playerInfo.buffs = nextBuffs;
+                changed = true;
+            }
+        }
+
+        if (playerInfo.skill && playerInfo.skill.cooldown > 0 && !playerInfo.skill.isConsumed) {
+            const nextRemaining = Math.max(0, playerInfo.skill.remainingCooldown - dt);
+            if (nextRemaining !== playerInfo.skill.remainingCooldown) {
+                playerInfo.skill.remainingCooldown = nextRemaining;
+                playerInfo.skill.isReady = nextRemaining <= 0;
+                changed = true;
+            }
+        }
+
+        return changed;
+    }
+
+    /**
+     * @param {number | undefined} value
+     * @returns {boolean}
+     */
+    _hasNumber(value) {
+        return typeof value === "number";
+    }
+
+    /**
+     * 根据单个玩家的状态与当前波次摘要构建显示文本（多行）。
+     * @param {import("./hud_const").HudPlayerSummary} status
+     * @param {import("./hud_const").HudWaveSummary} waveSummary
+     */
+    _buildTextFromStatusAndWave(status, waveSummary) {
+        const parts = [];
+
+        if (this._hasNumber(status.level)) {
+            const prof = status.professionDisplayName? status.professionDisplayName : (status.professionId ?? "未知");
+            parts.push(`Lv.${status.level} ${prof}`);
+        }
+
+        if (this._hasNumber(status.health) && this._hasNumber(status.maxHealth)) parts.push(`HP:${status.health}/${status.maxHealth}`);
+        else if (this._hasNumber(status.health)) parts.push(`HP:${status.health}`);
+        if (this._hasNumber(status.armor)) parts.push(`护甲:${status.armor}`);
+
+        if (this._hasNumber(status.money)) parts.push(`Money:$${status.money}`);
+        if (typeof status.exp === "number" && typeof status.expNeeded === "number") {
+            const currentExp = status.exp;
+            const expNeeded = status.expNeeded;
+            parts.push(`升级还需:${Math.max(0, expNeeded - currentExp)}EXP`);
+        }
+
+        if (this._hasNumber(status.lastMonsterDamage)) parts.push(`伤害:${status.lastMonsterDamage}`);
+
+        const buffLabel = Array.isArray(status.buffs) ? this._formatBuffLabel(status.buffs) : null;
+        const skillLabel = status.skill !== undefined ? this._formatSkillCooldownLabel(status.skill ?? null) : null;
+        if (buffLabel) parts.push(`Buff:${buffLabel}`);
+        if (skillLabel) parts.push(`技能:${skillLabel}`);
+        parts.push(`波次:${waveSummary.currentWave}/${waveSummary.totalWaves}`);
+        const nexttime=Math.max(0,waveSummary.prepareTime? (waveSummary.prepareTime - this._wavetime):0);
+        if (nexttime>0) 
+        {
+            parts.push(`准备时间:${nexttime}s`);
+        }
+        else
+        {
+            parts.push(`剩余怪物:${Math.max(0, waveSummary.monstersRemaining??0)}`);
+        }
+
+        return parts.join(" \n");
     }
 
     /**
@@ -367,7 +534,7 @@ export class HudManager {
         });
 
         session.use = false;
-        session.lastText = "";
+        session.renderedText = "";
     }
 
     /**

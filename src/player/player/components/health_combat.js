@@ -4,6 +4,8 @@
 import { Instance } from "cs_script/point_script";
 import { PlayerState } from "../../player_const";
 import { PlayerRuntimeEvents } from "../../../util/runtime_events.js";
+import { eventBus } from "../../../util/event_bus";
+import { event } from "../../../util/definition";
 
 /**
  * 玩家战斗组件 — 受伤、治疗与死亡判定。
@@ -194,5 +196,18 @@ export class PlayerHealthCombat {
         if (!bridge.isPawnValid()) return;
         this.player.stats.health = bridge.readHealth();
         this.player.stats.armor  = bridge.readArmor();
+
+        /**@type {import("../../player_const").OnPlayerStatusChanged} */
+        const payload = {
+            player: this.player,
+            pawn: this.player.entityBridge.pawn,
+            slot: this.player.slot,
+            summary: {
+                health: this.player.stats.health,
+                maxHealth: this.player.stats.maxHealth,
+                armor: this.player.stats.armor,
+            },
+        };
+        eventBus.emit(event.Player.Out.OnPlayerStatusChanged, payload);
     }
 }

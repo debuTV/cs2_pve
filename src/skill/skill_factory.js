@@ -51,11 +51,11 @@ initanim    初始动画（默认 OnSpawn 一次性）
 doubleattack  双倍攻击（默认 AttackTrue 触发）
   { cooldown?, events?, animation? }
 
-powerattack   重击（默认 AttackTrue 触发，可选给目标追加预配置 Buff）
-  { cooldown?, events?, animation?, buffConfigId? }
+powerattack   重击（默认 AttackTrue 触发，可选给目标追加预配置 Buff，可选补一段额外伤害）
+  { cooldown?, events?, animation?, buffConfigId?, bonusDamageMultiplier? }
 
-fire          燃烧区域（怪物默认 Die 触发；玩家默认 InspectWeapon 触发）
-  { cooldown?, events?, animation?, inputKey?, zoneDuration?, zoneRadius?, triggerDistance?/distance?, targetTypes? }
+fire          持续区域效果（怪物默认 Die 触发；玩家默认 InspectWeapon 触发）
+  { areaEffectStaticKey?, cooldown?, events?, animation?, inputKey?, zoneDuration?, zoneRadius?, triggerDistance?/distance?, targetTypes? }
 
 shield      能量护盾（默认 [OnSpawn, OnTick]，Spawn 始终保留以初始化修饰器）
   { runtime: number, value: number, cooldown?, events?, animation? }

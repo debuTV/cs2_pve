@@ -26,6 +26,12 @@ export const particleConfigs = {
         spawnTemplateName: "fire_particle_template",
         middleEntityName: "fire_particle",
     },
+    poison_cloud: {
+        id: "poison_cloud",
+        // 第一版复用现有火焰模板占位，后续可替换成专用毒雾 PointTemplate。
+        spawnTemplateName: "fire_particle_template",
+        middleEntityName: "fire_particle",
+    },
     healing_field: {
         id: "healing_field",
         spawnTemplateName: "healing_field_particle_template",

@@ -60,6 +60,12 @@ export class PlayerManager {
          */
         this.readyCount = 0;
         /**
+         * 当前存活玩家实例数组。
+         * 玩家进入 ALIVE 时加入，离开 ALIVE 时移除，避免每次查询都遍历全表。
+         * @type {Player[]}
+         */
+        this.alivePlayerList = [];
+        /**
          * 外部适配器实例，提供日志、广播和游戏时间接口
          * @type {import("../util/definition").Adapter} 
          */
@@ -88,6 +94,7 @@ export class PlayerManager {
             },
             damage: (player, payload) => {
                 player.takeDamage(payload.amount ?? 0, null);
+                this._syncAlivePlayer(player);
                 return true;
             },
             weapon: (player, payload) => {
@@ -103,10 +110,12 @@ export class PlayerManager {
                     payload.armor ?? 0,
                     payload.targetState ?? (this.ingame ? PlayerState.ALIVE : PlayerState.PREPARING)
                 );
+                this._syncAlivePlayer(player);
                 return true;
             },
             resetGameStatus: (player) => {
                 player.resetGameStatus();
+                this._syncAlivePlayer(player);
                 return true;
             },
             profession: (player, payload) => {
@@ -165,6 +174,7 @@ export class PlayerManager {
         const existingPlayer = this.players.get(slot);
         if (existingPlayer) {
             if (existingPlayer.isReady) this.readyCount--;
+            this._removeAlivePlayer(slot);
             existingPlayer.disconnect();
             this.players.delete(slot);
             this.totalPlayers--;
@@ -199,6 +209,7 @@ export class PlayerManager {
         if (!pawn) return;
 
         player.activate(pawn, this.ingame ? PlayerState.ALIVE : PlayerState.PREPARING);
+        this._syncAlivePlayer(player);
     }
 
     /**
@@ -217,6 +228,7 @@ export class PlayerManager {
             this.readyCount--;
         }
 
+        this._removeAlivePlayer(playerSlot);
         player.disconnect();
         this.players.delete(playerSlot);
         this.totalPlayers--;
@@ -249,6 +261,7 @@ export class PlayerManager {
         if (player) {
 
             player.handleReset(pawn, this.ingame ? PlayerState.ALIVE : PlayerState.PREPARING);
+            this._syncAlivePlayer(player);
             eventBus.emit(event.Player.Out.OnPlayerRespawn, {
                 player,
                 slot: controller.GetPlayerSlot(),
@@ -273,6 +286,7 @@ export class PlayerManager {
         const player = this.players.get(slot);
         if (!player) return;
 
+        this._removeAlivePlayer(slot);
         eventBus.emit(event.Player.Out.OnPlayerDeath, {
             player,
             slot,
@@ -296,21 +310,21 @@ export class PlayerManager {
         const command = parts[0];
         const count = Number(parts[1]);
 
-        if (command === "r" || command === "!r") {
-            //玩家准备
-            this._setPlayerReady(player, true);
-            return;
-        }
-        if (command ==="money"||command === "!money") {
-            //测试用，给予金钱
-            player.addMoney(100000);
-            return;
-        }
-        if (command ==="exp"||command === "!exp") {
-            //测试用，给予经验
-            player.addExp(100000);
-            return;
-        }
+        //if (command === "r" || command === "!r") {
+        //    //玩家准备
+        //    this._setPlayerReady(player, true);
+        //    return;
+        //}
+        //if (command ==="money"||command === "!money") {
+        //    //测试用，给予金钱
+        //    player.addMoney(100000);
+        //    return;
+        //}
+        //if (command ==="exp"||command === "!exp") {
+        //    //测试用，给予经验
+        //    player.addExp(100000);
+        //    return;
+        //}
     }
 
     /**
@@ -464,7 +478,7 @@ export class PlayerManager {
      * @returns {boolean}
      */
     hasAlivePlayers() {
-        return this.getAlivePlayers().length > 0;
+        return this.alivePlayerList.length > 0;
     }
 
     /**
@@ -544,6 +558,7 @@ export class PlayerManager {
         for (const [, player] of this.players) {
             if (!player.entityBridge.pawn) continue;
             player.enterAliveState();
+            this._syncAlivePlayer(player);
         }
     }
 
@@ -553,6 +568,7 @@ export class PlayerManager {
         for (const [, player] of this.players) {
             player.resetGameStatus();
         }
+        this.alivePlayerList = [];
     }
 
     /**
@@ -570,11 +586,35 @@ export class PlayerManager {
     }
 
     /**
-     * 获取所有存活玩家。
-     * @returns {Player[]}
+     * @param {Player} player
+     * @returns {void}
      */
-    getAlivePlayers() {
-        return Array.from(this.players.values()).filter(p => p.isAlive);
+    _addAlivePlayer(player) {
+        if (this.alivePlayerList.some(alivePlayer => alivePlayer.slot === player.slot)) return;
+        this.alivePlayerList.push(player);
+    }
+
+    /**
+     * @param {number} playerSlot
+     * @returns {boolean}
+     */
+    _removeAlivePlayer(playerSlot) {
+        const alivePlayerIndex = this.alivePlayerList.findIndex(player => player.slot === playerSlot);
+        if (alivePlayerIndex < 0) return false;
+        this.alivePlayerList.splice(alivePlayerIndex, 1);
+        return true;
+    }
+
+    /**
+     * @param {Player} player
+     * @returns {void}
+     */
+    _syncAlivePlayer(player) {
+        if (player.isAlive) {
+            this._addAlivePlayer(player);
+            return;
+        }
+        this._removeAlivePlayer(player.slot);
     }
 
     /**
@@ -594,7 +634,7 @@ export class PlayerManager {
         return {
             total: this.totalPlayers,
             ready: this.readyCount,
-            alive: this.getAlivePlayers().length
+            alive: this.alivePlayerList.length
         };
     }
 

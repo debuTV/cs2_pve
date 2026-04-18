@@ -37,6 +37,7 @@ export class InputManager {
         const source = this._getOrCreateSource(startRequest.slot);
         source.pawn = startRequest.pawn;
         source.use = true;
+        source.detector.reset();
         return true;
     }
     /**

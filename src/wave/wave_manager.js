@@ -4,7 +4,7 @@
 
 import { eventBus } from "../util/event_bus";
 import { event } from "../util/definition";
-import { WaveState,wavesConfig } from "./wave_const";
+import { createRuntimeWaveConfig, WaveState,wavesConfig } from "./wave_const";
 
 /**
  * 独立版波次管理器，维护波次推进状态机（IDLE → PREPARING → ACTIVE → COMPLETED）。
@@ -33,6 +33,8 @@ export class WaveManager {
          * @type {import("../util/definition").waveConfig[]} 
          */
         this.waves = wavesConfig;
+        /** @type {import("../util/definition").waveConfig | null} */
+        this.currentWaveConfig = null;
         /**
          * 外部适配器实例，提供日志、广播和游戏时间接口
          * @type {import("../util/definition").Adapter} 
@@ -89,6 +91,13 @@ export class WaveManager {
             broadcastIndex: 0,
             messages: wave.broadcastmessage
         };
+        /** @type {import("./wave_const").OnWavePreparing} */
+        const payload = {
+            waveIndex: this.currentWave,
+            preparationTime: wave.preparationTime,
+            broadcastMessage: wave.broadcastmessage[0]?.message || ""
+        };
+        eventBus.emit(event.Wave.Out.OnWavePreparing, payload);
     }
 
     /**
@@ -129,13 +138,16 @@ export class WaveManager {
             return false;
         }
 
-        const wave = this.getWaveConfig(waveStartRequest.waveIndex);
+        const baseWave = this.waves[waveStartRequest.waveIndex - 1];
+        const wave = createRuntimeWaveConfig(baseWave, waveStartRequest.playerCount);
+        this.currentWaveConfig = wave;
 
         // 广播波次信息
         const message =
             `=== 第 ${waveStartRequest.waveIndex} 波: ${wave.name} ===\n` +
             `怪物总数: ${wave.totalMonsters}\n` +
-            `奖励: $${wave.reward}\n` +
+            `同屏上限: ${wave.aliveMonster}\n` +
+            `奖励: $${wave.moneyReward} / ${wave.expReward} EXP\n` +
             `准备时间: ${wave.preparationTime} 秒`;
         this._adapter.broadcast(message);
 
@@ -158,7 +170,7 @@ export class WaveManager {
 
         let message =
             `=== 第 ${this.currentWave} 波完成 ===\n` +
-            `奖励: $${wave.reward}`;
+            `奖励: $${wave.moneyReward} / ${wave.expReward} EXP`;
         if (!this.hasNextWave()) {
             message += "\n=== 所有波次完成 ===";
         }
@@ -171,22 +183,11 @@ export class WaveManager {
     }
 
     /**
-     * 开始下一波。
-     * @returns {boolean}
-     */
-    nextWave() {
-        if (!this.hasNextWave()) {
-            this._adapter.log("所有波次已完成！");
-            return false;
-        }
-        return this.startWave({ waveIndex: this.currentWave + 1 ,result: false});
-    }
-
-    /**
      * 重置波次状态。重启游戏或重新进入地图时调用，回到初始状态（currentWave=0, state=IDLE）。
      */
     resetGame() {
         this.currentWave = 0;
+        this.currentWaveConfig = null;
         this.waveState = WaveState.IDLE;
         this._resetPrepareState();
         this._adapter.log("波次已重置");
@@ -202,6 +203,9 @@ export class WaveManager {
      * @returns {import("../util/definition").waveConfig}
      */
     getWaveConfig(waveNumber) {
+        if (waveNumber === this.currentWave && this.currentWaveConfig) {
+            return this.currentWaveConfig;
+        }
         return this.waves[waveNumber - 1];
     }
     /**

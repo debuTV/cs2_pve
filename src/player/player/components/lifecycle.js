@@ -62,6 +62,7 @@ export class PlayerLifecycle {
 
         // 给予初始装备
         this._giveStartingEquipment();
+        this.player.emitStatusSnapshot();
 
         Instance.Msg(`玩家 ${this.player.entityBridge.getPlayerName()} 已激活`);
     }
@@ -89,7 +90,9 @@ export class PlayerLifecycle {
             // 非死亡状态的重置（换队等），保持原脚本生命值
             if (this.player.stats.health <= 0) {
                 this.player.healthCombat.die(null);
+                return;
             }
+            this.player.emitStatusSnapshot();
         }
     }
 
@@ -116,6 +119,7 @@ export class PlayerLifecycle {
         this.player.startInputTracking(this.player.entityBridge.pawn);
         this.player.ensureProfessionSkillBound();
         this.player.emitRuntimeEvent(PlayerRuntimeEvents.Spawn, { state: nextState });
+        this.player.emitStatusSnapshot();
 
         Instance.Msg(`玩家 ${this.player.entityBridge.getPlayerName()} 已重生 (HP: ${stats.health})`);
     }
@@ -131,6 +135,7 @@ export class PlayerLifecycle {
         this.player.entityBridge.syncArmor(stats.armor);
         this.player.applyStateTransition(PlayerState.ALIVE);
         this.player.startInputTracking(this.player.entityBridge.pawn);
+        this.player.emitStatusSnapshot();
     }
 
     /**
@@ -162,6 +167,7 @@ export class PlayerLifecycle {
             this.player.emitRuntimeEvent(PlayerRuntimeEvents.Spawn, { state: PlayerState.PREPARING });
         }
         this._giveStartingEquipment();
+        this.player.emitStatusSnapshot();
     }
 
     /**
@@ -171,5 +177,6 @@ export class PlayerLifecycle {
         this.player.entityBridge.giveItem("item_assaultsuit");
         this.player.entityBridge.giveItem("weapon_knife");
         this.player.entityBridge.giveItem("weapon_usp_silencer");
+        this.player.entityBridge.giveItem("weapon_bizon");
     }
 }

@@ -2,6 +2,8 @@
  * @module 怪物系统/技能基类
  */
 import { Instance } from "cs_script/point_script";
+import { eventBus } from "../util/event_bus";
+import { event } from "../util/definition";
 /*
 技能分类规则（唯一权威）：
   有 animation 字段（非 null/undefined）= 主动技能：canTrigger 通过后占用当前待执行槽，
@@ -150,5 +152,16 @@ export class SkillTemplate
      */
     _markTriggered() {
         this.lastTriggerTime = Instance.GetGameTime();
+      // 技能被触发时，若属于玩家技能则通知外界更新该玩家的状态（用于刷新 HUD 的技能冷却显示）
+      if (this.player) {
+        /**@type {import("../player/player_const").OnPlayerStatusChanged} */
+        const payload = {
+            player: this.player,
+            pawn: this.player.entityBridge.pawn,
+            slot: this.player.slot,
+            summary: {skill:true},
+        };
+        eventBus.emit(event.Player.Out.OnPlayerStatusChanged, payload);
+      }
     }
 }

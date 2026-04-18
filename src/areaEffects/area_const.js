@@ -80,6 +80,11 @@ export const areaEffectStatics = {
         buffConfigId: "burn",
         particleName: "fire",
     },
+    "poison_cloud": {
+        effectName: "poison_cloud_area_effect",
+        buffConfigId: "poison",
+        particleName: "poison_cloud",
+    },
     "healing_field": {
         effectName: "healing_field_area_effect",
         buffConfigId: "regeneration",

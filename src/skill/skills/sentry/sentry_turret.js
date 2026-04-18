@@ -8,7 +8,9 @@
 import { Instance } from "cs_script/point_script";
 import { MonsterState } from "../../../monster/monster_const";
 import { createLaserEndpoints } from "../../../util/laser";
+import { createSoundEntity } from "../../../util/sound";
 import {
+    SENTRY_ATTACK_SOUND_EVENT_NAME,
     SENTRY_DEFAULTS,
     SENTRY_LASER_ORBIT_HEIGHT,
     SENTRY_LASER_ORBIT_RADIUS,
@@ -30,6 +32,7 @@ export class SentryTurret {
         this.ownerKey = options.ownerKey;
         this.laserStart = null;
         this.laserEnd = null;
+        this.soundEntity = null;
 
         /** @type {import("../../../monster/monster/monster").Monster|null} */
         this.target = null;
@@ -64,6 +67,12 @@ export class SentryTurret {
         const laserStartPos = this._getLaserStartPosition();
         if (!laserStartPos || !this._createLaserEndpoints(laserStartPos)) {
             Instance.Msg(`Sentry: 创建激光端点失败\n`);
+            this.destroy();
+            return;
+        }
+        const soundOrigin = this._getSoundOrigin();
+        if (!soundOrigin || !this._createSoundEntity(soundOrigin)) {
+            Instance.Msg(`Sentry: 创建声音实体失败\n`);
             this.destroy();
             return;
         }
@@ -136,6 +145,7 @@ export class SentryTurret {
 
         if (now >= this._nextAttackTime) {
             this.target.takeDamage(this.damage, null);
+            this._playAttackSound();
             this._nextAttackTime = now + this.attackInterval;
         }
     }
@@ -177,6 +187,9 @@ export class SentryTurret {
             }
             entities.push(this.laserEnd);
         }
+        if (this.soundEntity?.IsValid?.()) {
+            entities.push(this.soundEntity);
+        }
         const uniqueEntities = new Set(entities.filter((entity) => entity?.IsValid?.()));
         for (const entity of uniqueEntities) {
             entity.Remove();
@@ -184,6 +197,7 @@ export class SentryTurret {
 
         this.laserStart = null;
         this.laserEnd = null;
+        this.soundEntity = null;
     }
 
     _isTargetValid() {
@@ -194,13 +208,19 @@ export class SentryTurret {
         return this.base?.IsValid?.()
             && this.yaw?.IsValid?.()
             && this.laserStart?.IsValid?.()
-            && this.laserEnd?.IsValid?.();
+            && this.laserEnd?.IsValid?.()
+            && this.soundEntity?.IsValid?.();
     }
 
     _getTurretBasePosition() {
         return this._cloneVector(this._basePosition ?? (this.base?.IsValid?.() ? this.base.GetAbsOrigin() : null));
     }
 
+    /**
+     * @param {number} [yaw=this._currentYaw]
+     * @param {{x:number,y:number,z:number} | null} [turretPos=null]
+     * @returns {{x:number,y:number,z:number} | null}
+     */
     _getLaserStartPosition(yaw = this._currentYaw, turretPos = null) {
         const basePosition = this._cloneVector(turretPos ?? this._basePosition ?? (this.base?.IsValid?.() ? this.base.GetAbsOrigin() : null));
         if (!basePosition || !Number.isFinite(yaw)) return null;
@@ -229,6 +249,13 @@ export class SentryTurret {
     }
 
     /**
+     * @returns {{x:number,y:number,z:number} | null}
+     */
+    _getSoundOrigin() {
+        return this._cloneVector(this._yawPosition ?? this._basePosition ?? (this.yaw?.IsValid?.() ? this.yaw.GetAbsOrigin() : null));
+    }
+
+    /**
      * @param {{x:number,y:number,z:number}} laserStartPos
      * @returns {boolean}
      */
@@ -247,6 +274,28 @@ export class SentryTurret {
     }
 
     /**
+     * @param {{x:number,y:number,z:number}} soundOrigin
+     * @returns {boolean}
+     */
+    _createSoundEntity(soundOrigin) {
+        this.soundEntity = createSoundEntity({
+            position: soundOrigin,
+        });
+        if (!this.soundEntity?.IsValid?.()) {
+            this.soundEntity = null;
+            return false;
+        }
+
+        Instance.EntFireAtTarget({
+            target: this.soundEntity,
+            input: "Followentity",
+            value: "!activator",
+            activator: this.yaw,
+        });
+        return true;
+    }
+
+    /**
      * @param {{x:number,y:number,z:number}} laserStartPos
      * @param {{x:number,y:number,z:number}} laserEndPos
      */
@@ -256,6 +305,22 @@ export class SentryTurret {
         }
         this.laserStart.Teleport({ position: laserStartPos });
         this.laserEnd.Teleport({ position: laserEndPos });
+    }
+
+    _playAttackSound() {
+        if (!this.soundEntity?.IsValid?.()) {
+            return;
+        }
+
+        Instance.EntFireAtTarget({
+            target: this.soundEntity,
+            input: "SetSoundEventName",
+            value: SENTRY_ATTACK_SOUND_EVENT_NAME,
+        });
+        Instance.EntFireAtTarget({
+            target: this.soundEntity,
+            input: "StartSound",
+        });
     }
 
     /**

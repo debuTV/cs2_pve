@@ -21,6 +21,12 @@ export class MonsterManager {
         /** 当前活跃怪物计数。由 lifecycle recordSpawn/recordDeath 更新。
          * @type {number} */
         this.activeMonsters = 0;
+        /**
+         * 当前存活怪物实例数组。
+         * 创建时加入，死亡或清理时移除，避免每次查询都遍历全表。
+         * @type {Monster[]}
+         */
+        this.activeMonsterList = [];
         /** 累计击杀数。
          * @type {number} */
         this.totalKills = 0;
@@ -58,9 +64,9 @@ export class MonsterManager {
      */
     handleMonsterDeath(monsterInstance, killer) {
         const monsterId = monsterInstance.id;
-        if (!this.monsters.has(monsterId)) return;
+        const removed = this._removeActiveMonster(monsterId);
+        if (!removed) return;
         void killer;
-        this.activeMonsters = Math.max(0, this.activeMonsters - 1);
         this.totalKills++;
         if(this.spawnconfig && this.activeMonsters==0 && this.spawnmonstercount>=this.spawnconfig.totalMonsters) {
             eventBus.emit(event.Monster.Out.OnAllMonstersDead, {});
@@ -72,12 +78,14 @@ export class MonsterManager {
             monster.dispose();
         }
         this.monsters.clear();
+        this.activeMonsterList = [];
         this.activeMonsters = 0;
         this.spawnPoints = [];
         this.spawnpretick = -1;
         this.spawnmonstercount = 0;
         this.spawn = false;
         this.spawnconfig = null;
+        this.glowing = false;
     }
 
     /**
@@ -100,15 +108,16 @@ export class MonsterManager {
     {
         for (const [id, monster] of this.monsters) {
             if (monster.state === MonsterState.DEAD && !monster.model && !monster.breakable) {
+                this._removeActiveMonster(id);
                 this.monsters.delete(id);
                 continue;
             }
             monster.tick(allplayers);
             if (monster.state === MonsterState.DEAD && !monster.model && !monster.breakable) {
+                this._removeActiveMonster(id);
                 this.monsters.delete(id);
             }
         }
-        this.updateMonsterGlow();
         this.spawntick();
     }
     spawntick()
@@ -137,25 +146,46 @@ export class MonsterManager {
     }
 
     /**
-     * @returns {Monster[]}
+     * @param {Monster} monster
+     * @returns {void}
      */
-    getActiveMonsters() {
-        return Array.from(this.monsters.values()).filter(monster => monster.state !== MonsterState.DEAD);
+    _addActiveMonster(monster) {
+        if (this.activeMonsterList.some(activeMonster => activeMonster.id === monster.id)) return;
+        this.activeMonsterList.push(monster);
+        this.activeMonsters = this.activeMonsterList.length;
+    }
+
+    /**
+     * @param {number} monsterId
+     * @returns {boolean}
+     */
+    _removeActiveMonster(monsterId) {
+        const activeMonsterIndex = this.activeMonsterList.findIndex(monster => monster.id === monsterId);
+        if (activeMonsterIndex < 0) return false;
+        this.activeMonsterList.splice(activeMonsterIndex, 1);
+        this.activeMonsters = this.activeMonsterList.length;
+        this.updateMonsterGlow();
+        return true;
     }
 
     updateMonsterGlow() {
         const shouldGlow = this.activeMonsters > 0 && this.activeMonsters <= 20;
-        if(this.glowing==shouldGlow)return;
-        this.glowing=shouldGlow;
-        for (const monster of this.getActiveMonsters()) {
-            const model = monster.model;
-            if (!model || !(model instanceof BaseModelEntity)) continue;
-            if (shouldGlow) {
-                model.Glow({ r: 255, g: 0, b: 0 });
-            }
-            else{
+        if (!shouldGlow) {
+            if (!this.glowing) return;
+            this.glowing = false;
+            for (const monster of this.activeMonsterList) {
+                const model = monster.model;
+                if (!model || !(model instanceof BaseModelEntity) || !model.IsGlowing()) continue;
                 model.Unglow();
             }
+            return;
+        }
+
+        this.glowing = true;
+        for (const monster of this.activeMonsterList) {
+            const model = monster.model;
+            if (!model || !(model instanceof BaseModelEntity)) continue;
+            model.Glow({ r: 255, g: 0, b: 0 });
         }
     }
 
@@ -280,8 +310,9 @@ export class MonsterManager {
     /**
      * 由其他情况触发的怪物产卵。在施法者周围随机位置尝试生成一只指定类型的怪物。
      *
-     * 在 `radiusMin`~`radiusMax` 范围内随机采样位置，最多尝试 `tries` 次，
-     * 每次用包围盒检测碰撞遮挡，通过后调用 `createMonster` 创建。
+    * 在 `radiusMin`~`radiusMax` 范围内随机采样位置，最多尝试 10 次，
+    * 每次先从较高位置向下探测可站立地面，再检查球形出生点遮挡，
+    * 通过后调用 `createMonster` 创建。
      *
      * @param {Monster} caster 施法者怪物，用于获取中心坐标和默认类型
      * @param {{typeName?:string,radiusMin?:number,radiusMax?:number,tries?:number}} options 产卵选项
@@ -295,12 +326,22 @@ export class MonsterManager {
             Instance.Msg(`技能产卵失败: 未找到怪物类型 ${typeName}`);
             return false;
         }
-        const center = caster.pos;
+        const center = this.getSpawnCenter(caster);
+        if (!center) {
+            Instance.Msg(`技能产卵失败: 怪物 #${caster.id} 缺少有效生成中心`);
+            return false;
+        }
         const radiusMin = Math.max(0, options.radiusMin ?? 24);
         const radiusMax = Math.max(radiusMin, options.radiusMax ?? 96);
-        const tries = Math.max(1, options.tries ?? 6);
-        const mins = this.spawnconfig?.monster_breakablemins ?? { x: -30, y: -30, z: -30 };
-        const maxs = this.spawnconfig?.monster_breakablemaxs ?? { x: 30, y: 30, z: 30 };
+        const tries = Math.min(10, Math.max(1, options.tries ?? 10));
+        const spawnLift = 100;
+        const probeHeight = 200;
+        const probeDepth = 400;
+        const clearanceRadius = 30;
+        /** @type {import("cs_script/point_script").Entity[]} */
+        const ignoreEntities = [];
+        if (caster.breakable?.IsValid?.()) ignoreEntities.push(caster.breakable);
+        if (caster.model?.IsValid?.()) ignoreEntities.push(caster.model);
 
         for (let i = 0; i < tries; i++) {
             const angle = Math.random() * Math.PI * 2;
@@ -310,16 +351,57 @@ export class MonsterManager {
                 y: center.y + Math.sin(angle) * dist,
                 z: center.z
             };
-            const start = { x: pos.x, y: pos.y, z: pos.z + 45 };
-            const end = { x: pos.x, y: pos.y, z: pos.z + 50 };
-            if (Instance.TraceBox({ mins, maxs, start, end, ignorePlayers: true }).hitEntity) continue;
-            const monster = this.createMonster(typeConfig, end);
+            const start = { x: pos.x, y: pos.y, z: pos.z + probeHeight };
+            const end = { x: pos.x, y: pos.y, z: pos.z - probeDepth };
+            const groundTrace = Instance.TraceLine({
+                start,
+                end,
+                ignorePlayers: true,
+                ignoreEntity: ignoreEntities.length > 0 ? ignoreEntities : undefined,
+            });
+            if (!groundTrace.didHit || groundTrace.startedInSolid || groundTrace.normal.z < 0.5) {
+                continue;
+            }
+
+            const spawnPos = {
+                x: groundTrace.end.x,
+                y: groundTrace.end.y,
+                z: groundTrace.end.z + spawnLift,
+            };
+            const clearanceTrace = Instance.TraceSphere({
+                radius: clearanceRadius,
+                start: spawnPos,
+                end: spawnPos,
+                ignorePlayers: true,
+                ignoreEntity: ignoreEntities.length > 0 ? ignoreEntities : undefined,
+            });
+            if (clearanceTrace.didHit || clearanceTrace.startedInSolid) {
+                continue;
+            }
+
+            const monster = this.createMonster(typeConfig, spawnPos);
             if (!monster) return false;
             Instance.Msg(`技能产卵成功 #${monster.id} ${monster.type}`);
             return true;
         }
 
+        Instance.Msg(`技能产卵失败: ${typeName} 在 ${tries} 次尝试内未找到可用位置`);
         return false;
+    }
+
+    /**
+     * 优先读取当前实体的实时坐标，避免使用延迟同步的缓存位置。
+     * @param {Monster} caster
+     * @returns {import("cs_script/point_script").Vector|null}
+     */
+    getSpawnCenter(caster) {
+        const breakableOrigin = caster.breakable?.IsValid?.() ? caster.breakable.GetAbsOrigin?.() : null;
+        if (breakableOrigin) return breakableOrigin;
+
+        const modelOrigin = caster.model?.IsValid?.() ? caster.model.GetAbsOrigin?.() : null;
+        if (modelOrigin) return modelOrigin;
+
+        return caster.pos ?? null;
     }
 
     /**
@@ -337,11 +419,12 @@ export class MonsterManager {
         const monster = new Monster(monsterId, position, typeConfig);
         if(!monster)return monster;
         this.monsters.set(monsterId, monster);
+        this._addActiveMonster(monster);
         /** @type {import("./monster_const").OnMonsterSpawn} */
         const payload = { monster };
         eventBus.emit(event.Monster.Out.OnMonsterSpawn, payload);
-        this.activeMonsters++;
         monster.init();
+        this.updateMonsterGlow();
         return monster;
     }
 

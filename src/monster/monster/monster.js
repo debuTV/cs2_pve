@@ -56,7 +56,8 @@ export class Monster {
         this.speed = this.baseSpeed;
 
         this.attackdist = typeConfig.attackdist;
-        this.baseReward = typeConfig.reward;
+        this.baseMoneyReward = typeConfig.moneyReward;
+        this.baseExpReward = typeConfig.expReward;
         this.atc = typeConfig.attackCooldown;
 
         this.occupation = "";
@@ -388,7 +389,12 @@ export class Monster {
      */
     emitDeathEvent(killer) {
         /** @type {import("../monster_const").OnMonsterDeath} */
-        const payload = { monster: this, killer, reward: this.baseReward };
+        const payload = {
+            monster: this,
+            killer,
+            moneyReward: this.baseMoneyReward,
+            expReward: this.baseExpReward,
+        };
         eventBus.emit(event.Monster.Out.OnMonsterDeath, payload);
     }
 

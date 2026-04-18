@@ -220,7 +220,8 @@ const eventBus=new EventBus();
  * @property {number} baseHealth - 基础生命值
  * @property {number} baseDamage - 基础伤害
  * @property {number} speed - 移动速度
- * @property {number} reward - 击杀奖励
+ * @property {number} moneyReward - 击杀金钱奖励
+ * @property {number} expReward - 击杀经验奖励
  * @property {number} attackdist - 攻击距离
  * @property {number} attackCooldown - 攻击冷却时间（秒）
  * @property {string} movementmode - 移动模式（例如 `walk`、`fly` 等，具体逻辑由怪物系统实现）
@@ -231,13 +232,12 @@ const eventBus=new EventBus();
  * @typedef {object} waveConfig - 波次配置对象。每波包含一个或多个 monsterTypes 配置项，定义该波次的怪物类型和属性。
  * @property {string} name - 波次名称
  * @property {number} totalMonsters - 怪物总数（仅作记录/展示）
- * @property {number} reward - 波次奖励（仅作记录/展示）
+ * @property {number} moneyReward - 波次金钱奖励
+ * @property {number} expReward - 波次经验奖励
  * @property {number} spawnInterval - 怪物生成间隔（秒）
  * @property {number} preparationTime - 波次准备时间（秒）
  * @property {number} aliveMonster - 同时存在的怪物数量（仅作记录/展示）
  * @property {string[]} monster_spawn_points_name - 怪物生成点名称数组，对应地图中 PointTemplate 的实体名称
- * @property {{x: number, y: number, z: number}} monster_breakablemins - 怪物破坏物最小边界坐标（相对于生成点位置的偏移）
- * @property {{x: number, y: number, z: number}} monster_breakablemaxs - 怪物破坏物最大边界坐标（相对于生成点位置的偏移）
  * @property {broadcastMessage[]} broadcastmessage - 准备阶段广播消息
  * @property {monsterTypes[]} monsterTypes - 怪物类型配置数组，定义该波次的怪物类型和属性
  */
@@ -282,6 +282,7 @@ const MovementRequestType$1 = {
  * @property {boolean} [useNPCSeparation] - 是否启用 NPC 分离速度；false 时每 tick 传空分离上下文
  * @property {string}  [Mode] - 切换移动模式（walk / air / fly 等）
  * @property {Vector}  [Velocity] - 设置速度向量（技能位移用，例如飞扑就需要）
+ * @property {boolean} [preserveVelocityInAir] - 在 air 模式下保留初始水平速度，不再被常规空中转向覆盖
  * @property {number}  [maxSpeed] - 速度上限
  * @property {boolean} [clearPath] - 是否清空现有路径
  */
@@ -341,10 +342,10 @@ const event = {
         In: {
             ShowHudRequest: "Hud_OnShowHudRequest",        // 显示 Hud 请求，payload 包含 {slot: number, pawn: CSPlayerPawn, text: string, channel: number, alwaysVisible?: boolean}
             HideHudRequest: "Hud_OnHideHudRequest",        // 隐藏 Hud 请求，payload 包含 {slot: number, channel?: number}
+            StatusUpdateRequest: "Hud_OnStatusUpdateRequest", // 结构化状态更新请求，payload 可包含 { updates: [...], waveSummary: {...}, flags: {...} }
         },
         Out: {
             OnHudShown: "Hud_OnHudShown",                  // Hud 显示后，payload 包含 {slot: number, channel: number, text: string}
-            OnHudUpdated: "Hud_OnHudUpdated",              // Hud 文本或渠道更新后，payload 包含 {slot: number, channel: number, text: string, previousChannel?: number}
             OnHudHidden: "Hud_OnHudHidden",                // Hud 隐藏后，payload 包含 {slot: number, channel: number}
         },
     },
@@ -400,6 +401,7 @@ const event = {
             OnAllPlayersReady: "Player_OnAllPlayersReady",      // 全员准备后
             OnPlayerDeath: "Player_OnPlayerDeath",              // 玩家死亡后
             OnPlayerRespawn: "Player_OnPlayerRespawn",          // 玩家重生后
+            OnPlayerStatusChanged: "Player_OnPlayerStatusChanged", // 玩家数值/状态更新，payload 包含 { player, slot, summary }
         },
     },
     Shop: {
@@ -433,10 +435,11 @@ const event = {
     },
     Wave: {
         In: {
-            WaveStartRequest: "Wave_OnWaveStartRequest",    // 请求开始波次，payload 包含 {waveIndex: number}
+            WaveStartRequest: "Wave_OnWaveStartRequest",    // 请求开始波次，payload 包含 {waveIndex: number, playerCount: number}
             WaveEndRequest: "Wave_OnWaveEndRequest",        // 请求结束波次，payload 包含 {waveIndex: number, survived: boolean}
         },
         Out: {
+            OnWavePreparing: "Wave_OnWavePreparing",        // 波次进入准备阶段，payload 包含 {waveIndex: number, preparationTime: number, broadcastMessage: string}
             OnWaveStart: "Wave_OnWaveStart",                // 波次开始后，payload 包含 {waveIndex: number}
             OnWaveEnd: "Wave_OnWaveEnd",                    // 波次结束后，payload 包含 {waveIndex: number, survived: boolean}
         },
@@ -677,7 +680,8 @@ const MonsterState = {
  * @typedef {object} OnMonsterDeath
  * @property {import("./monster/monster").Monster} monster
  * @property {import("cs_script/point_script").Entity|null|undefined} killer
- * @property {number} reward
+ * @property {number} moneyReward
+ * @property {number} expReward
  */
 /**
  * @typedef {object} OnMonsterDamaged
@@ -738,14 +742,20 @@ const MonsterType={
         template_name:"headcrab_classic_template",
         model_name:"headcrab_classic_model",//模型本体，animations播放的是这个模型的动画
         name: "headcrab_classic",
-        baseHealth: 100,
-        baseDamage: 10,
-        speed: 150,
-        reward: 100,
+        baseHealth: 210,
+        baseDamage: 16,
+        speed: 70,
+        moneyReward: 150,
+        expReward: 24,
         attackdist:80,
-        attackCooldown:0.1,
+        attackCooldown:0.85,
         movementmode:"walk",
         skill_pool:[
+            {
+                id:"pounce",
+                chance: 1,
+                params:{ cooldown:5, distance:350, duration:0.5, animation:"pounce" }
+            },
             //{
             //    id:"sound",
             //    chance: 1,
@@ -772,13 +782,13 @@ const MonsterType={
             //{
             //    id:"pounce",
             //    chance: 1,
-            //    params:{ cooldown:5, distance:250, animation:"pounce" }
-            //},
+            //    params:{ cooldown:5, distance:500, duration:0.5, animation:"pounce" }
+            //},                        触发距离        飞扑时间(小：更快、更平、更像猛扑,大：更慢、更高、更像抛起来再落下)
             //// 示例：无动画的 pounce（在 canTrigger 内直接执行）
             //{
             //    id:"pounce",
             //    chance: 1,
-            //    params:{ cooldown:10, distance:400 }  // 无 animation → 无动画直触发
+            //    params:{ cooldown:5, distance:500, duration:0.5}  // 无 animation → 无动画直触发
             //},
             //// 示例：护盾
             //{
@@ -842,50 +852,69 @@ const MonsterType={
             ]
         }
     },
-    "headcrab_reviver":{            
-        template_name:"headcrab_reviver_template",
-        model_name:"headcrab_reviver_model",//模型本体，animations播放的是这个模型的动画
-        name: "headcrab_reviver",
-        baseHealth: 100,
-        baseDamage: 10,
-        speed: 150,
-        reward: 100,
-        attackdist:80,
-        attackCooldown:0.1,
-        movementmode:"walk",
-        skill_pool:[],
-        animations:{
-            "idle":[
-                "rhc_aggro_idle",
-                "rhc_aggro_idle_twitch_01",
-                "rhc_sneak_idle_lookaround"
-            ],
-            "walk":[
-                "rhc_scorpion_run_angled"
-            ],
-            "attack":[
-                "rhc_aggro_jumpattack"
-            ],
-            "skill":[
-                "rhc_aggro_jumpattack"
-            ],
-            "dead":[
-                "rhc_die"
-            ]
-        }
-    },
+    //"headcrab_reviver":{            
+    //    template_name:"headcrab_reviver_template",
+    //    model_name:"headcrab_reviver_model",//模型本体，animations播放的是这个模型的动画
+    //    name: "headcrab_reviver",
+    //    baseHealth: 240,
+    //    baseDamage: 18,
+    //    speed: 170,
+    //    moneyReward: 210,
+    //    expReward: 28,
+    //    attackdist:80,
+    //    attackCooldown:0.95,
+    //    movementmode:"walk",
+    //    skill_pool:[
+    //        {
+    //            id:"pounce",
+    //            chance: 1,
+    //            params:{ cooldown:5, distance:250, duration:1, animation:"pounce" }
+    //        }
+    //    ],
+    //    animations:{
+    //        "idle":[
+    //            "rhc_aggro_idle",
+    //            "rhc_aggro_idle_twitch_01",
+    //            "rhc_sneak_idle_lookaround"
+    //        ],
+    //        "walk":[
+    //            "rhc_scorpion_run_angled"
+    //        ],
+    //        "attack":[
+    //            "rhc_aggro_jumpattack"
+    //        ],
+    //        "skill":[
+    //            "rhc_aggro_jumpattack"
+    //        ],
+    //        "dead":[
+    //            "rhc_die"
+    //        ]
+    //    }
+    //},
     "headcrab_black":{            
         template_name:"headcrab_black_template",
         model_name:"headcrab_black_model",//模型本体，animations播放的是这个模型的动画
         name: "headcrab_black",
-        baseHealth: 100,
-        baseDamage: 10,
-        speed: 150,
-        reward: 100,
+        baseHealth: 300,
+        baseDamage: 18,
+        speed: 160,
+        moneyReward: 225,
+        expReward: 32,
         attackdist:80,
-        attackCooldown:0.1,
+        attackCooldown:1.05,
         movementmode:"walk",
-        skill_pool:[],
+        skill_pool:[
+            {
+                id:"pounce",
+                chance: 1,
+                params:{ cooldown:5, distance:400, duration:1, animation:"pounce" }
+            },
+            {
+                id:"powerattack",
+                chance: 1,
+                params:{ cooldown:0, buffConfigId:"poison", bonusDamageMultiplier:0 }
+            }
+        ],
         animations:{
             "idle":[
                 "headcrabblack_idlesniff"
@@ -912,14 +941,26 @@ const MonsterType={
         template_name:"headcrab_armored_template",
         model_name:"headcrab_armored_model",//模型本体，animations播放的是这个模型的动画
         name: "headcrab_armored",
-        baseHealth: 100,
-        baseDamage: 10,
-        speed: 150,
-        reward: 100,
+        baseHealth: 630,
+        baseDamage: 24,
+        speed: 55,
+        moneyReward: 300,
+        expReward: 44,
         attackdist:80,
-        attackCooldown:0.1,
+        attackCooldown:1.0,
         movementmode:"walk",
-        skill_pool:[],
+        skill_pool:[
+            {
+                id:"pounce",
+                chance: 1,
+                params:{ cooldown:5, distance:180, duration:1, animation:"pounce" }
+            },
+            {
+                id: "shield",
+                chance: 1,
+                params: { cooldown:15, runtime:-1, value:50 }
+            },
+        ],
         animations:{
             "idle":[
                 "headcrab_classic_idle",
@@ -955,14 +996,21 @@ const MonsterType={
         template_name:"headcrab_template",
         model_name:"headcrab_model",//模型本体，animations播放的是这个模型的动画
         name: "headcrab",
-        baseHealth: 100,
-        baseDamage: 10,
-        speed: 150,
-        reward: 100,
+        baseHealth: 285,
+        baseDamage: 22,
+        speed: 220,
+        moneyReward: 180,
+        expReward: 28,
         attackdist:80,
-        attackCooldown:0.1,
+        attackCooldown:0.95,
         movementmode:"walk",
-        skill_pool:[],
+        skill_pool:[
+            {
+                id:"pounce",
+                chance: 1,
+                params:{ cooldown:15, distance:800, duration:2, animation:"pounce" }
+            }
+        ],
         animations:{
             "idle":[
                 "headcrab_idle",
@@ -990,12 +1038,13 @@ const MonsterType={
         template_name:"zombie_classic_template",
         model_name:"zombie_classic_model",//模型本体，animations播放的是这个模型的动画
         name: "zombie_classic",
-        baseHealth: 100,
-        baseDamage: 10,
-        speed: 150,
-        reward: 100,
+        baseHealth: 405,
+        baseDamage: 24,
+        speed: 40,
+        moneyReward: 180,
+        expReward: 28,
         attackdist:80,
-        attackCooldown:0.1,
+        attackCooldown:2,
         movementmode:"walk",
         skill_pool:[],
         animations:{
@@ -1022,14 +1071,21 @@ const MonsterType={
         template_name:"zombie_fast_template",
         model_name:"zombie_fast_model",//模型本体，animations播放的是这个模型的动画
         name: "zombie_fast",
-        baseHealth: 100,
-        baseDamage: 10,
-        speed: 150,
-        reward: 100,
+        baseHealth: 360,
+        baseDamage: 28,
+        speed: 180,
+        moneyReward: 225,
+        expReward: 32,
         attackdist:80,
-        attackCooldown:0.1,
+        attackCooldown:0.92,
         movementmode:"walk",
-        skill_pool:[],
+        skill_pool:[
+            {
+                id:"pounce",
+                chance: 1,
+                params:{ cooldown:25, distance:1000, duration:3, animation:"pounce" }
+            }
+        ],
         animations:{
             "idle":[
                 "idle_angry"
@@ -1054,14 +1110,21 @@ const MonsterType={
         template_name:"zombie_poison_template",
         model_name:"zombie_poison_model",//模型本体，animations播放的是这个模型的动画
         name: "zombie_poison",
-        baseHealth: 100,
-        baseDamage: 10,
-        speed: 150,
-        reward: 100,
+        baseHealth: 720,
+        baseDamage: 28,
+        speed: 130,
+        moneyReward: 360,
+        expReward: 48,
         attackdist:80,
-        attackCooldown:0.1,
+        attackCooldown:1.12,
         movementmode:"walk",
-        skill_pool:[],
+        skill_pool:[
+            {
+                id:"spawn",
+                chance: 1,
+                params: { count:1, typeName:"headcrab_black", maxSummons:1, radiusMin:0, radiusMax:48, tries:10 }
+            }
+        ],
         animations:{
             "idle":[
                 "Idle01"
@@ -1079,16 +1142,53 @@ const MonsterType={
             ]
         }
     },
-    "antlion_worker":{            
-        template_name:"antlion_worker_template",
-        model_name:"antlion_worker_model",//模型本体，animations播放的是这个模型的动画
-        name: "antlion_worker",
-        baseHealth: 100,
-        baseDamage: 10,
-        speed: 150,
-        reward: 100,
+    //"antlion_worker":{            
+    //    template_name:"antlion_worker_template",
+    //    model_name:"antlion_worker_model",//模型本体，animations播放的是这个模型的动画
+    //    name: "antlion_worker",
+    //    baseHealth: 630,
+    //    baseDamage: 34,
+    //    speed: 190,
+    //    moneyReward: 390,
+    //    expReward: 52,
+    //    attackdist:80,
+    //    attackCooldown:0.95,
+    //    movementmode:"walk",
+    //    skill_pool:[],
+    //    animations:{
+    //        "idle":[
+    //            "distractidle01",
+    //            "distractidle03",
+    //            "idle01"
+    //        ],
+    //        "walk":[
+    //            "runn"
+    //        ],
+    //        "attack":[
+    //            "attack_02",
+    //            "attack_03"
+    //        ],
+    //        "skill":[
+    //            "flyattack05all"
+    //        ],
+    //        "dead":[],
+    //        "pounce":[
+    //            "flyattack01all",
+    //            "flyattack02all"
+    //        ]
+    //    }
+    //},
+    "antlion":{            
+        template_name:"antlion_template",
+        model_name:"antlion_model",//模型本体，animations播放的是这个模型的动画
+        name: "antlion",
+        baseHealth: 450,
+        baseDamage: 30,
+        speed: 205,
+        moneyReward: 270,
+        expReward: 40,
         attackdist:80,
-        attackCooldown:0.1,
+        attackCooldown:0.9,
         movementmode:"walk",
         skill_pool:[],
         animations:{
@@ -1114,41 +1214,6 @@ const MonsterType={
             ]
         }
     },
-    "antlion":{            
-        template_name:"antlion_template",
-        model_name:"antlion_model",//模型本体，animations播放的是这个模型的动画
-        name: "antlion",
-        baseHealth: 100,
-        baseDamage: 10,
-        speed: 150,
-        reward: 100,
-        attackdist:80,
-        attackCooldown:0.1,
-        movementmode:"walk",
-        skill_pool:[],
-        animations:{
-            "idle":[
-                "distractidle01",
-                "distractidle03",
-                "idle01"
-            ],
-            "walk":[
-                "runn"
-            ],
-            "attack":[
-                "attack_02",
-                "attack_03"
-            ],
-            "skill":[
-                "flyattack05all"
-            ],
-            "dead":[],
-            "pounce":[
-                "flyattack01all",
-                "flyattack02all"
-            ]
-        }
-    }
 };
 
 /**
@@ -1174,14 +1239,114 @@ const WaveState = {
     ACTIVE: 'ACTIVE',
     COMPLETED: 'COMPLETED'
 };
+
+const MAX_ALIVE_MONSTERS = 100;
+
+/**
+ * @typedef {object} PlayerCountScalePoint
+ * @property {number} players
+ * @property {number} totalMultiplier
+ * @property {number} aliveMultiplier
+ * @property {number} spawnIntervalMultiplier
+ */
+
+/** @typedef {"totalMultiplier" | "aliveMultiplier" | "spawnIntervalMultiplier"} PlayerCountScaleKey */
+
+/** @type {PlayerCountScalePoint[]} */
+const PLAYER_COUNT_SCALE_POINTS = [
+    { players: 1, totalMultiplier: 1.0, aliveMultiplier: 1.0, spawnIntervalMultiplier: 1.0 },
+    { players: 2, totalMultiplier: 1.4, aliveMultiplier: 1.25, spawnIntervalMultiplier: 0.94 },
+    { players: 4, totalMultiplier: 2.2, aliveMultiplier: 1.6, spawnIntervalMultiplier: 0.88 },
+    { players: 8, totalMultiplier: 3.8, aliveMultiplier: 2.2, spawnIntervalMultiplier: 0.8 },
+    { players: 16, totalMultiplier: 5.9, aliveMultiplier: 3.0, spawnIntervalMultiplier: 0.72 },
+    { players: 32, totalMultiplier: 8.8, aliveMultiplier: 4.0, spawnIntervalMultiplier: 0.66 },
+    { players: 64, totalMultiplier: 14.6, aliveMultiplier: 5.4, spawnIntervalMultiplier: 0.6 },
+];
+
+/**
+ * @param {number} playerCount
+ */
+function normalizePlayerCount(playerCount) {
+    if (!Number.isFinite(playerCount)) return 1;
+    return Math.max(1, Math.min(64, Math.round(playerCount)));
+}
+
+/**
+ * @param {number} playerCount
+ * @param {PlayerCountScaleKey} key
+ */
+function interpolateScale(playerCount, key) {
+    const normalizedPlayerCount = normalizePlayerCount(playerCount);
+    const points = PLAYER_COUNT_SCALE_POINTS;
+    const firstPoint = points[0];
+    const lastPoint = points[points.length - 1];
+
+    if (!firstPoint || !lastPoint) return 1;
+    if (normalizedPlayerCount <= firstPoint.players) return firstPoint[key];
+
+    for (let index = 1; index < points.length; index++) {
+        const previousPoint = points[index - 1];
+        const nextPoint = points[index];
+        if (!previousPoint || !nextPoint) continue;
+        if (normalizedPlayerCount > nextPoint.players) continue;
+
+        const ratio = (normalizedPlayerCount - previousPoint.players) / (nextPoint.players - previousPoint.players);
+        return previousPoint[key] + (nextPoint[key] - previousPoint[key]) * ratio;
+    }
+
+    return lastPoint[key];
+}
+
+/**
+ * 按开波时玩家人数生成当前波次的运行时配置副本。
+ *
+ * - totalMonsters 随玩家人数扩张。
+ * - aliveMonster 单独缩放并硬上限为 100。
+ * - spawnInterval 随人数适度缩短。
+ * - monsterTypes 直接沿用 const 中显式定义的怪物参数，不再做运行时属性缩放。
+ *
+ * @param {import("../util/definition").waveConfig} waveConfig
+ * @param {number} playerCount
+ * @returns {import("../util/definition").waveConfig}
+ */
+function createRuntimeWaveConfig(waveConfig, playerCount) {
+    const totalMultiplier = interpolateScale(playerCount, "totalMultiplier");
+    const aliveMultiplier = interpolateScale(playerCount, "aliveMultiplier");
+    const spawnIntervalMultiplier = interpolateScale(playerCount, "spawnIntervalMultiplier");
+
+    const totalMonsters = Math.max(1, Math.round(waveConfig.totalMonsters * totalMultiplier));
+    const aliveMonster = Math.max(
+        1,
+        Math.min(
+            MAX_ALIVE_MONSTERS,
+            totalMonsters,
+            Math.round(waveConfig.aliveMonster * aliveMultiplier)
+        )
+    );
+
+    return {
+        ...waveConfig,
+        totalMonsters,
+        aliveMonster,
+        spawnInterval: Math.max(0.03, Number((waveConfig.spawnInterval * spawnIntervalMultiplier).toFixed(3))),
+        monsterTypes: [...waveConfig.monsterTypes],
+    };
+}
 /**
  * @typedef {object} WaveStartRequest - 请求开始波次的消息载荷
  * @property {number} waveIndex - 要开始的波次索引
+ * @property {number} playerCount - 开波时确认的当前人数
  * @property {boolean} result - 结果回填字段
  */
 /**
  * @typedef {object} WaveEndRequest - 请求结束波次的消息载荷
  * @property {boolean} result - 结果回填字段
+ */
+/**
+ * @typedef {object} OnWavePreparing - 波次配置对象
+ * @property {number} waveIndex - 已准备的波次索引
+ * @property {number} preparationTime - 波次准备时间（秒）
+ * @property {string} broadcastMessage - 波次准备阶段的广播消息
  */
 /**
  * @typedef {object} OnWaveStart
@@ -1199,33 +1364,130 @@ const WaveState = {
  * @navigationTitle 默认波次配置
  */
 const wavesConfig=[
-        { 
-            name: "训练波", 
-            totalMonsters: 200, 
-            reward: 500, 
-            spawnInterval: 0.01, 
-            preparationTime: 0, //波次开始到第一个怪物出现时间，这段时间可以用来发消息
-            aliveMonster:150, //同时存在的怪物数量
-            monster_spawn_points_name:["monster_spawnpoint"],//这一波生成点
-            monster_breakablemins:{x:-30,y:-30,z:0},//最大怪物的breakable的mins
-            monster_breakablemaxs:{x:30,y:30,z:75},//最大怪物的breakable的maxs
-            broadcastmessage:[{message:"",delay:1}],
-            // monster 系统已独立拆出，主工程仅保留波次元数据。
-            monsterTypes:[MonsterType.headcrab_classic]
-        },{ 
-            name: "训练波", 
-            totalMonsters: 1, 
-            reward: 500, 
-            spawnInterval: 0.1, 
-            preparationTime: 0, //波次开始到第一个怪物出现时间，这段时间可以用来发消息
-            aliveMonster:1, //同时存在的怪物数量
-            monster_spawn_points_name:["monster_spawnpoint"],//这一波生成点
-            monster_breakablemins:{x:-30,y:-30,z:0},//最大怪物的breakable的mins
-            monster_breakablemaxs:{x:30,y:30,z:75},//最大怪物的breakable的maxs
-            broadcastmessage:[{message:"",delay:1}],
-            monsterTypes:[MonsterType.headcrab_classic]
-        },
-    ];
+    //待处理怪物
+    //MonsterType.headcrab_reviver,
+    //MonsterType.antlion_worker,
+    //{
+    //    name: "test",
+    //    totalMonsters: 5,
+    //    moneyReward: 750,
+    //    expReward: 60,
+    //    spawnInterval: 0.16,
+    //    preparationTime: 5,
+    //    aliveMonster: 5,
+    //    monster_spawn_points_name:["monster_spawnpoint"],
+    //    broadcastmessage:[{message:"第1波即将开始，准备迎敌。",delay:15}],
+    //    monsterTypes:[
+    //        //MonsterType.headcrab_classic,
+    //        //MonsterType.headcrab_armored,
+    //        //MonsterType.headcrab_black,
+    //        //MonsterType.headcrab,
+    //        //MonsterType.zombie_classic,
+    //        //MonsterType.antlion,
+    //        //MonsterType.zombie_fast,
+//
+    //        //MonsterType.zombie_poison,
+//
+    //        //MonsterType.headcrab_reviver,
+    //        //MonsterType.antlion_worker,
+    //    ]
+    //},
+    {
+        name: "热身波",
+        totalMonsters: 16,
+        moneyReward: 750,
+        expReward: 60,
+        spawnInterval: 0.16,
+        preparationTime: 5,
+        aliveMonster: 6,
+        monster_spawn_points_name:["monster_spawnpoint"],
+        broadcastmessage:[{message:"第1波",delay:30}],
+        monsterTypes:[
+            MonsterType.zombie_classic,
+            MonsterType.headcrab_classic,
+        ]
+    },
+    {
+        name: "追猎波",
+        totalMonsters: 24,
+        moneyReward: 1050,
+        expReward: 96,
+        spawnInterval: 0.14,
+        preparationTime: 7,
+        aliveMonster: 10,
+        monster_spawn_points_name:["monster_spawnpoint"],
+        broadcastmessage:[{message:"第2波",delay:30}],
+        monsterTypes:[
+            MonsterType.zombie_classic,
+            MonsterType.zombie_classic,
+            MonsterType.headcrab_classic,
+            MonsterType.headcrab_classic,
+            MonsterType.headcrab,
+            MonsterType.zombie_fast,
+        ]
+    },
+    {
+        name: "压制波",
+        totalMonsters: 36,
+        moneyReward: 1500,
+        expReward: 144,
+        spawnInterval: 0.12,
+        preparationTime: 9,
+        aliveMonster: 14,
+        monster_spawn_points_name:["monster_spawnpoint"],
+        broadcastmessage:[{message:"第3波",delay:30}],
+        monsterTypes:[
+            MonsterType.zombie_classic,
+            MonsterType.headcrab,
+            MonsterType.zombie_fast,
+            MonsterType.headcrab_armored,
+            MonsterType.antlion,
+            MonsterType.headcrab_black,
+        ]
+    },
+    {
+        name: "突破波",
+        totalMonsters: 50,
+        moneyReward: 2100,
+        expReward: 204,
+        spawnInterval: 0.10,
+        preparationTime: 11,
+        aliveMonster: 18,
+        monster_spawn_points_name:["monster_spawnpoint"],
+        broadcastmessage:[{message:"第4波",delay:30}],
+        monsterTypes:[
+            MonsterType.zombie_classic,
+            MonsterType.zombie_classic,
+            MonsterType.zombie_fast,
+            MonsterType.headcrab_black,
+            MonsterType.zombie_poison,
+            MonsterType.antlion,
+            MonsterType.headcrab_armored,
+        ]
+    },
+    {
+        name: "终局波",
+        totalMonsters: 70,
+        moneyReward: 2850,
+        expReward: 276,
+        spawnInterval: 0.09,
+        preparationTime: 14,
+        aliveMonster: 22,
+        monster_spawn_points_name:["monster_spawnpoint"],
+        broadcastmessage:[{message:"第5波",delay:30}],
+        monsterTypes:[
+            MonsterType.zombie_classic,
+            MonsterType.zombie_classic,
+            MonsterType.zombie_fast,
+            MonsterType.zombie_poison,
+            MonsterType.antlion,
+            MonsterType.antlion,
+            MonsterType.antlion,
+            MonsterType.headcrab_black,
+            MonsterType.headcrab_armored,
+        ]
+    },
+];
 
 /**
  * @module 波次系统/波次管理器
@@ -1259,6 +1521,8 @@ class WaveManager {
          * @type {import("../util/definition").waveConfig[]} 
          */
         this.waves = wavesConfig;
+        /** @type {import("../util/definition").waveConfig | null} */
+        this.currentWaveConfig = null;
         /**
          * 外部适配器实例，提供日志、广播和游戏时间接口
          * @type {import("../util/definition").Adapter} 
@@ -1315,6 +1579,13 @@ class WaveManager {
             broadcastIndex: 0,
             messages: wave.broadcastmessage
         };
+        /** @type {import("./wave_const").OnWavePreparing} */
+        const payload = {
+            waveIndex: this.currentWave,
+            preparationTime: wave.preparationTime,
+            broadcastMessage: wave.broadcastmessage[0]?.message || ""
+        };
+        eventBus.emit(event.Wave.Out.OnWavePreparing, payload);
     }
 
     /**
@@ -1355,13 +1626,16 @@ class WaveManager {
             return false;
         }
 
-        const wave = this.getWaveConfig(waveStartRequest.waveIndex);
+        const baseWave = this.waves[waveStartRequest.waveIndex - 1];
+        const wave = createRuntimeWaveConfig(baseWave, waveStartRequest.playerCount);
+        this.currentWaveConfig = wave;
 
         // 广播波次信息
         const message =
             `=== 第 ${waveStartRequest.waveIndex} 波: ${wave.name} ===\n` +
             `怪物总数: ${wave.totalMonsters}\n` +
-            `奖励: $${wave.reward}\n` +
+            `同屏上限: ${wave.aliveMonster}\n` +
+            `奖励: $${wave.moneyReward} / ${wave.expReward} EXP\n` +
             `准备时间: ${wave.preparationTime} 秒`;
         this._adapter.broadcast(message);
 
@@ -1384,7 +1658,7 @@ class WaveManager {
 
         let message =
             `=== 第 ${this.currentWave} 波完成 ===\n` +
-            `奖励: $${wave.reward}`;
+            `奖励: $${wave.moneyReward} / ${wave.expReward} EXP`;
         if (!this.hasNextWave()) {
             message += "\n=== 所有波次完成 ===";
         }
@@ -1397,22 +1671,11 @@ class WaveManager {
     }
 
     /**
-     * 开始下一波。
-     * @returns {boolean}
-     */
-    nextWave() {
-        if (!this.hasNextWave()) {
-            this._adapter.log("所有波次已完成！");
-            return false;
-        }
-        return this.startWave({ waveIndex: this.currentWave + 1 ,result: false});
-    }
-
-    /**
      * 重置波次状态。重启游戏或重新进入地图时调用，回到初始状态（currentWave=0, state=IDLE）。
      */
     resetGame() {
         this.currentWave = 0;
+        this.currentWaveConfig = null;
         this.waveState = WaveState.IDLE;
         this._resetPrepareState();
         this._adapter.log("波次已重置");
@@ -1428,6 +1691,9 @@ class WaveManager {
      * @returns {import("../util/definition").waveConfig}
      */
     getWaveConfig(waveNumber) {
+        if (waveNumber === this.currentWave && this.currentWaveConfig) {
+            return this.currentWaveConfig;
+        }
         return this.waves[waveNumber - 1];
     }
     /**
@@ -1914,6 +2180,8 @@ class PlayerEntityBridge {
  * - 经验语义：每升一级扣除当前等级所需经验，剩余经验继续向下一等级积累。
  * - 生命、攻击、暴击率、暴击伤害均为该等级的基础值。
  */
+
+
 /**
  * 升级回血策略枚举。
  * @enum {string}
@@ -1959,7 +2227,29 @@ const PlayerState = {
     DEAD:         5,
     /** 重生中 */
     RESPAWNING:   6};
-
+/**
+ * @typedef {object} OnPlayerStatusChanged
+ * @property {Player} player - 状态变化的玩家实例
+ * @property {CSPlayerPawn|null} pawn
+ * @property {number} slot - 玩家槽位
+ * @property {PlayerSummary} summary - 玩家状态摘要
+ */
+/**
+ * @typedef {object} PlayerSummary
+ * @property {string} [name]
+ * @property {number} [level]
+ * @property {string} [professionId]
+ * @property {string} [professionDisplayName]
+ * @property {number} [health]
+ * @property {number} [maxHealth]
+ * @property {number} [armor]
+ * @property {number} [money]
+ * @property {number} [exp]
+ * @property {number} [expNeeded]
+ * @property {number} [lastMonsterDamage]
+ * @property {boolean} [buff] - 是否刷新 Buff 列表
+ * @property {boolean} [skill] - 是否刷新技能（用于技能冷却显示）
+ */
 /**
  * 玩家职业配置。
  *
@@ -2051,7 +2341,7 @@ const DEFAULT_LEVEL_UP_HEAL_POLICY = LevelUpHealPolicy.FULL;
 const LEVEL_CONFIGS = [
     {
         level: 1,
-        expRequired: 100,
+        expRequired: 90,
         maxHealth: 100,
         attackScale: 1.0,
         critChance: 0.1,
@@ -2060,38 +2350,83 @@ const LEVEL_CONFIGS = [
     },
     {
         level: 2,
-        expRequired: 150,
-        maxHealth: 110,
-        attackScale: 1.1,
-        critChance: 0.105,
+        expRequired: 120,
+        maxHealth: 108,
+        attackScale: 1.07,
+        critChance: 0.104,
         critMultiplier: 1.52,
         healOnLevelUp: DEFAULT_LEVEL_UP_HEAL_POLICY,
     },
     {
         level: 3,
-        expRequired: 200,
-        maxHealth: 120,
-        attackScale: 1.2,
-        critChance: 0.11,
-        critMultiplier: 1.54,
+        expRequired: 150,
+        maxHealth: 116,
+        attackScale: 1.14,
+        critChance: 0.108,
+        critMultiplier: 1.55,
         healOnLevelUp: DEFAULT_LEVEL_UP_HEAL_POLICY,
     },
     {
         level: 4,
-        expRequired: 250,
-        maxHealth: 130,
-        attackScale: 1.3,
-        critChance: 0.115,
-        critMultiplier: 1.56,
+        expRequired: 190,
+        maxHealth: 124,
+        attackScale: 1.22,
+        critChance: 0.113,
+        critMultiplier: 1.58,
         healOnLevelUp: DEFAULT_LEVEL_UP_HEAL_POLICY,
     },
     {
         level: 5,
+        expRequired: 230,
+        maxHealth: 133,
+        attackScale: 1.31,
+        critChance: 0.118,
+        critMultiplier: 1.62,
+        healOnLevelUp: DEFAULT_LEVEL_UP_HEAL_POLICY,
+    },
+    {
+        level: 6,
+        expRequired: 280,
+        maxHealth: 143,
+        attackScale: 1.41,
+        critChance: 0.124,
+        critMultiplier: 1.67,
+        healOnLevelUp: DEFAULT_LEVEL_UP_HEAL_POLICY,
+    },
+    {
+        level: 7,
+        expRequired: 330,
+        maxHealth: 154,
+        attackScale: 1.52,
+        critChance: 0.131,
+        critMultiplier: 1.73,
+        healOnLevelUp: DEFAULT_LEVEL_UP_HEAL_POLICY,
+    },
+    {
+        level: 8,
+        expRequired: 390,
+        maxHealth: 166,
+        attackScale: 1.64,
+        critChance: 0.139,
+        critMultiplier: 1.8,
+        healOnLevelUp: DEFAULT_LEVEL_UP_HEAL_POLICY,
+    },
+    {
+        level: 9,
+        expRequired: 450,
+        maxHealth: 179,
+        attackScale: 1.78,
+        critChance: 0.148,
+        critMultiplier: 1.88,
+        healOnLevelUp: DEFAULT_LEVEL_UP_HEAL_POLICY,
+    },
+    {
+        level: 10,
         expRequired: 0,
-        maxHealth: 140,
-        attackScale: 1.4,
-        critChance: 0.12,
-        critMultiplier: 1.58,
+        maxHealth: 193,
+        attackScale: 1.93,
+        critChance: 0.158,
+        critMultiplier: 1.97,
         healOnLevelUp: DEFAULT_LEVEL_UP_HEAL_POLICY,
     },
 ];
@@ -2228,6 +2563,7 @@ class PlayerStats {
         if (this.money < roundedAmount) return false;
 
         this.money -= roundedAmount;
+        this.player.emitStatusChanged({ money: this.money });
         return true;
     }
 
@@ -2276,11 +2612,11 @@ class PlayerStats {
             maxHealth: this.maxHealth,
             armor: this.armor,
             attack: this.attackScale,
-            attackScale: this.attackScale,
-            critChance: this.critChance,
-            critMultiplier: this.critMultiplier,
-            kills: this.kills,
-            score: this.score,
+            //attackScale: this.attackScale,
+            //critChance: this.critChance,
+            //critMultiplier: this.critMultiplier,
+            //kills: this.kills,
+            //score: this.score,
             lastMonsterDamage: this.lastMonsterDamage,
             exp: this.exp,
             expNeeded: this._getExpNeeded(),
@@ -2315,6 +2651,10 @@ class PlayerStats {
      */
     setHealth(value) {
         this.health = clampRounded(value, 0, this.maxHealth);
+        this.player.emitStatusChanged({
+            health: this.health,
+            maxHealth: this.maxHealth,
+        });
     }
 
     /**
@@ -2334,6 +2674,7 @@ class PlayerStats {
      */
     setArmor(value) {
         this.armor = clampRounded(value, 0, 100);
+        this.player.emitStatusChanged({ armor: this.armor });
     }
 
     /**
@@ -2359,6 +2700,7 @@ class PlayerStats {
 
         this.lastMonsterDamage = finalAmount;
         this.damageDealt += finalAmount;
+        this.player.emitStatusChanged({ lastMonsterDamage: this.lastMonsterDamage });
         return finalAmount;
     }
 
@@ -2410,6 +2752,14 @@ class PlayerStats {
 
         if (didLevelUp) {
             this._syncCombatState();
+            this.player.emitStatusChanged({
+                level: this.level,
+                exp: this.exp,
+                expNeeded: this._getExpNeeded(),
+                health: this.health,
+                maxHealth: this.maxHealth,
+                armor: this.armor,
+            });
         }
     }
 
@@ -2566,6 +2916,7 @@ class PlayerStats {
         if (!actual) return 0;
 
         this[field] = nextValue;
+        this.player.emitStatusChanged({ [field]: this[field] });
         return actual;
     }
 
@@ -2786,6 +3137,19 @@ class PlayerHealthCombat {
         if (!bridge.isPawnValid()) return;
         this.player.stats.health = bridge.readHealth();
         this.player.stats.armor  = bridge.readArmor();
+
+        /**@type {import("../../player_const").OnPlayerStatusChanged} */
+        const payload = {
+            player: this.player,
+            pawn: this.player.entityBridge.pawn,
+            slot: this.player.slot,
+            summary: {
+                health: this.player.stats.health,
+                maxHealth: this.player.stats.maxHealth,
+                armor: this.player.stats.armor,
+            },
+        };
+        eventBus.emit(event.Player.Out.OnPlayerStatusChanged, payload);
     }
 }
 
@@ -2850,6 +3214,7 @@ class PlayerLifecycle {
 
         // 给予初始装备
         this._giveStartingEquipment();
+        this.player.emitStatusSnapshot();
 
         Instance.Msg(`玩家 ${this.player.entityBridge.getPlayerName()} 已激活`);
     }
@@ -2877,7 +3242,9 @@ class PlayerLifecycle {
             // 非死亡状态的重置（换队等），保持原脚本生命值
             if (this.player.stats.health <= 0) {
                 this.player.healthCombat.die(null);
+                return;
             }
+            this.player.emitStatusSnapshot();
         }
     }
 
@@ -2904,6 +3271,7 @@ class PlayerLifecycle {
         this.player.startInputTracking(this.player.entityBridge.pawn);
         this.player.ensureProfessionSkillBound();
         this.player.emitRuntimeEvent(PlayerRuntimeEvents.Spawn, { state: nextState });
+        this.player.emitStatusSnapshot();
 
         Instance.Msg(`玩家 ${this.player.entityBridge.getPlayerName()} 已重生 (HP: ${stats.health})`);
     }
@@ -2919,6 +3287,7 @@ class PlayerLifecycle {
         this.player.entityBridge.syncArmor(stats.armor);
         this.player.applyStateTransition(PlayerState.ALIVE);
         this.player.startInputTracking(this.player.entityBridge.pawn);
+        this.player.emitStatusSnapshot();
     }
 
     /**
@@ -2950,6 +3319,7 @@ class PlayerLifecycle {
             this.player.emitRuntimeEvent(PlayerRuntimeEvents.Spawn, { state: PlayerState.PREPARING });
         }
         this._giveStartingEquipment();
+        this.player.emitStatusSnapshot();
     }
 
     /**
@@ -2959,6 +3329,7 @@ class PlayerLifecycle {
         this.player.entityBridge.giveItem("item_assaultsuit");
         this.player.entityBridge.giveItem("weapon_knife");
         this.player.entityBridge.giveItem("weapon_usp_silencer");
+        this.player.entityBridge.giveItem("weapon_bizon");
     }
 }
 
@@ -3198,6 +3569,7 @@ class Player {
         if (addRequest.result <= 0) return false;
         this.buffMap.set(typeId, addRequest.result);
         this.recomputeDerivedStats();
+        this.emitStatusChanged({ buff: true });
         return true;
     }
 
@@ -3234,6 +3606,7 @@ class Player {
         eventBus.emit(event.Buff.In.BuffRefreshRequest, refreshRequest);
         if (!refreshRequest.result) return false;
         this.recomputeDerivedStats();
+        this.emitStatusChanged({ buff: true });
         return true;
     }
 
@@ -3254,6 +3627,7 @@ class Player {
             if (id !== buffId) continue;
             this.buffMap.delete(typeId);
             this.recomputeDerivedStats();
+            this.emitStatusChanged({ buff: true });
             break;
         }
     }
@@ -3393,6 +3767,13 @@ class Player {
         this.professionId = professionId;
         this.skillId = nextSkillId;
         this.skillTypeId = config.skillTypeId ?? null;
+
+        this.emitStatusChanged({
+            professionId: this.professionId,
+            professionDisplayName: config.displayName,
+            skill: true,
+        });
+
         return true;
     }
 
@@ -3519,6 +3900,34 @@ class Player {
         return true;
     }
 
+    /**
+     * 向外发送玩家状态变化事件。
+     * @param {import("../player_const").PlayerSummary} summary
+     * @returns {void}
+     */
+    emitStatusChanged(summary) {
+        /**@type {import("../player_const").OnPlayerStatusChanged} */
+        const payload = {
+            player: this,
+            pawn: this.entityBridge.pawn,
+            slot: this.slot,
+            summary,
+        };
+        eventBus.emit(event.Player.Out.OnPlayerStatusChanged, payload);
+    }
+
+    /**
+     * 发送一份完整的 HUD 基线快照。
+     * @returns {void}
+     */
+    emitStatusSnapshot() {
+        this.emitStatusChanged({
+            ...this.getSummary(),
+            buff: true,
+            skill: true,
+        });
+    }
+
     // ——— Tick ———
     /**
      * 每帧调度入口。
@@ -3607,6 +4016,12 @@ class PlayerManager {
          */
         this.readyCount = 0;
         /**
+         * 当前存活玩家实例数组。
+         * 玩家进入 ALIVE 时加入，离开 ALIVE 时移除，避免每次查询都遍历全表。
+         * @type {Player[]}
+         */
+        this.alivePlayerList = [];
+        /**
          * 外部适配器实例，提供日志、广播和游戏时间接口
          * @type {import("../util/definition").Adapter} 
          */
@@ -3635,6 +4050,7 @@ class PlayerManager {
             },
             damage: (player, payload) => {
                 player.takeDamage(payload.amount ?? 0, null);
+                this._syncAlivePlayer(player);
                 return true;
             },
             weapon: (player, payload) => {
@@ -3650,10 +4066,12 @@ class PlayerManager {
                     payload.armor ?? 0,
                     payload.targetState ?? (this.ingame ? PlayerState.ALIVE : PlayerState.PREPARING)
                 );
+                this._syncAlivePlayer(player);
                 return true;
             },
             resetGameStatus: (player) => {
                 player.resetGameStatus();
+                this._syncAlivePlayer(player);
                 return true;
             },
             profession: (player, payload) => {
@@ -3712,6 +4130,7 @@ class PlayerManager {
         const existingPlayer = this.players.get(slot);
         if (existingPlayer) {
             if (existingPlayer.isReady) this.readyCount--;
+            this._removeAlivePlayer(slot);
             existingPlayer.disconnect();
             this.players.delete(slot);
             this.totalPlayers--;
@@ -3746,6 +4165,7 @@ class PlayerManager {
         if (!pawn) return;
 
         player.activate(pawn, this.ingame ? PlayerState.ALIVE : PlayerState.PREPARING);
+        this._syncAlivePlayer(player);
     }
 
     /**
@@ -3764,6 +4184,7 @@ class PlayerManager {
             this.readyCount--;
         }
 
+        this._removeAlivePlayer(playerSlot);
         player.disconnect();
         this.players.delete(playerSlot);
         this.totalPlayers--;
@@ -3796,6 +4217,7 @@ class PlayerManager {
         if (player) {
 
             player.handleReset(pawn, this.ingame ? PlayerState.ALIVE : PlayerState.PREPARING);
+            this._syncAlivePlayer(player);
             eventBus.emit(event.Player.Out.OnPlayerRespawn, {
                 player,
                 slot: controller.GetPlayerSlot(),
@@ -3820,6 +4242,7 @@ class PlayerManager {
         const player = this.players.get(slot);
         if (!player) return;
 
+        this._removeAlivePlayer(slot);
         eventBus.emit(event.Player.Out.OnPlayerDeath, {
             player,
             slot,
@@ -3840,24 +4263,24 @@ class PlayerManager {
         if (!player) return;
 
         const parts = text.trim().toLowerCase().split(/\s+/);
-        const command = parts[0];
+        parts[0];
         Number(parts[1]);
 
-        if (command === "r" || command === "!r") {
-            //玩家准备
-            this._setPlayerReady(player, true);
-            return;
-        }
-        if (command ==="money"||command === "!money") {
-            //测试用，给予金钱
-            player.addMoney(100000);
-            return;
-        }
-        if (command ==="exp"||command === "!exp") {
-            //测试用，给予经验
-            player.addExp(100000);
-            return;
-        }
+        //if (command === "r" || command === "!r") {
+        //    //玩家准备
+        //    this._setPlayerReady(player, true);
+        //    return;
+        //}
+        //if (command ==="money"||command === "!money") {
+        //    //测试用，给予金钱
+        //    player.addMoney(100000);
+        //    return;
+        //}
+        //if (command ==="exp"||command === "!exp") {
+        //    //测试用，给予经验
+        //    player.addExp(100000);
+        //    return;
+        //}
     }
 
     /**
@@ -4011,7 +4434,7 @@ class PlayerManager {
      * @returns {boolean}
      */
     hasAlivePlayers() {
-        return this.getAlivePlayers().length > 0;
+        return this.alivePlayerList.length > 0;
     }
 
     /**
@@ -4091,6 +4514,7 @@ class PlayerManager {
         for (const [, player] of this.players) {
             if (!player.entityBridge.pawn) continue;
             player.enterAliveState();
+            this._syncAlivePlayer(player);
         }
     }
 
@@ -4100,6 +4524,7 @@ class PlayerManager {
         for (const [, player] of this.players) {
             player.resetGameStatus();
         }
+        this.alivePlayerList = [];
     }
 
     /**
@@ -4117,11 +4542,35 @@ class PlayerManager {
     }
 
     /**
-     * 获取所有存活玩家。
-     * @returns {Player[]}
+     * @param {Player} player
+     * @returns {void}
      */
-    getAlivePlayers() {
-        return Array.from(this.players.values()).filter(p => p.isAlive);
+    _addAlivePlayer(player) {
+        if (this.alivePlayerList.some(alivePlayer => alivePlayer.slot === player.slot)) return;
+        this.alivePlayerList.push(player);
+    }
+
+    /**
+     * @param {number} playerSlot
+     * @returns {boolean}
+     */
+    _removeAlivePlayer(playerSlot) {
+        const alivePlayerIndex = this.alivePlayerList.findIndex(player => player.slot === playerSlot);
+        if (alivePlayerIndex < 0) return false;
+        this.alivePlayerList.splice(alivePlayerIndex, 1);
+        return true;
+    }
+
+    /**
+     * @param {Player} player
+     * @returns {void}
+     */
+    _syncAlivePlayer(player) {
+        if (player.isAlive) {
+            this._addAlivePlayer(player);
+            return;
+        }
+        this._removeAlivePlayer(player.slot);
     }
 
     /**
@@ -4141,7 +4590,7 @@ class PlayerManager {
         return {
             total: this.totalPlayers,
             ready: this.readyCount,
-            alive: this.getAlivePlayers().length
+            alive: this.alivePlayerList.length
         };
     }
 
@@ -4302,6 +4751,7 @@ class InputManager {
         const source = this._getOrCreateSource(startRequest.slot);
         source.pawn = startRequest.pawn;
         source.use = true;
+        source.detector.reset();
         return true;
     }
     /**
@@ -4428,10 +4878,49 @@ const CHANNEL_PRIORITY = {
  * @property {number} activeChannel - 当前生效的渠道
  * @property {import("cs_script/point_script").CSPlayerPawn | null} pawn - 当前跟随的 Pawn
  * @property {boolean} use - 实体是否处于 Enable 状态
- * @property {string} lastText - 上次渲染的文本（用于去重）
  * @property {Map<number, HudRequest>} requests - 各渠道的显示请求
+ * @property {HudPlayerSummary} [playerInfo] - 玩家信息
+ * @property {string} [renderedText] - 最近一次已渲染的文本
  */
-
+/**
+ * @typedef {object} HudPlayerSummary
+ * @property {number} slot
+ * @property {import("cs_script/point_script").CSPlayerPawn | null} [pawn]
+ * @property {number} [health]
+ * @property {number} [maxHealth]
+ * @property {number} [level]
+ * @property {string} [professionId]
+ * @property {string} [professionDisplayName]
+ * @property {number} [armor]
+ * @property {number} [money]
+ * @property {number} [exp]
+ * @property {number} [expNeeded]
+ * @property {number} [lastMonsterDamage]
+ * @property {HudBuffSummary[]} [buffs]
+ * @property {HudSkillSummary | null} [skill]
+ */
+/**
+ * @typedef {object} HudBuffSummary
+ * @property {number} id - buff 实例 id
+ * @property {string} typeId - buff 类型 id
+ * @property {number} remaining - buff 剩余时间（秒）
+ */
+/**
+ * @typedef {object} HudSkillSummary
+ * @property {number} id - 技能实例 id
+ * @property {string} typeId - 技能类型 id
+ * @property {number} cooldown - 技能冷却时间（秒）
+ * @property {number} remainingCooldown - 技能剩余冷却时间（秒）
+ * @property {boolean} isReady - 技能是否可用（不在冷却中且未被消耗）
+ * @property {boolean} isConsumed - 技能是否已被消耗（一次性技能触发后即为 true）
+ */
+/**
+ * @typedef {object} HudWaveSummary
+ * @property {number} [currentWave] - 当前波数
+ * @property {number} [totalWaves] - 总波数
+ * @property {number} [monstersRemaining] - 本波剩余怪物数量
+ * @property {number} [prepareTime] - 准备开始时间
+ */
 /**
  * @typedef {object} ShowHudRequest
  * @property {number} slot - 玩家槽位
@@ -4508,23 +4997,22 @@ const ShopResult = {
 
 /** @type {ShopItemConfig[]} */
 const BASE_SHOP_ITEMS = [
-    { id: "heal_small",  displayName: "治疗30",          cost: 200,  requiredLevel: 1, payload: { type: "heal",  amount: 30 } },
-    { id: "heal_large",  displayName: "治疗80",          cost: 500,  requiredLevel: 3, payload: { type: "heal",  amount: 80 } },
-    { id: "armor_small", displayName: "一半护甲",         cost: 300,  requiredLevel: 1, payload: { type: "armor", amount: 50 } },
-    { id: "armor_full",  displayName: "全部护甲",         cost: 800,  requiredLevel: 5, payload: { type: "armor", amount: 100 } },
-    { id: "buff_attack", displayName: "强攻增益",         cost: 600,  requiredLevel: 2, payload: { type: "buff",  buffConfigId: "attack_up" } },
-    { id: "weapon_glock", displayName: "格洛克手枪",      cost: 500,  requiredLevel: 1, payload: { type: "weapon", weaponName: "weapon_glock" } },
-    { id: "weapon_p250", displayName: "P250 手枪",        cost: 700,  requiredLevel: 2, payload: { type: "weapon", weaponName: "weapon_p250" } },
-    { id: "weapon_deagle", displayName: "沙漠之鹰",        cost: 1200, requiredLevel: 3, payload: { type: "weapon", weaponName: "weapon_deagle" } },
-    { id: "weapon_usp_silencer", displayName: "USP 消音版", cost: 900,  requiredLevel: 1, payload: { type: "weapon", weaponName: "weapon_usp_silencer" } },
-    { id: "weapon_ak47", displayName: "AK-47",             cost: 2700, requiredLevel: 4, payload: { type: "weapon", weaponName: "weapon_ak47" } },
-    { id: "weapon_m4a1", displayName: "M4A1 突击步枪",     cost: 2600, requiredLevel: 4, payload: { type: "weapon", weaponName: "weapon_m4a1" } },
-    { id: "weapon_aug", displayName: "AUG 突击步枪",       cost: 3100, requiredLevel: 5, payload: { type: "weapon", weaponName: "weapon_aug" } },
-    { id: "weapon_awp", displayName: "AWP 狙击枪",         cost: 5000, requiredLevel: 7, payload: { type: "weapon", weaponName: "weapon_awp" } },
+    { id: "heal_small",  displayName: "治疗30",          cost: 100,  requiredLevel: 1, payload: { type: "heal",  amount: 30 } },
+    { id: "heal_large",  displayName: "治疗80",          cost: 200,  requiredLevel: 3, payload: { type: "heal",  amount: 80 } },
+    { id: "armor_small", displayName: "一半护甲",         cost: 120,  requiredLevel: 1, payload: { type: "armor", amount: 50 } },
+    { id: "armor_full",  displayName: "全部护甲",         cost: 200,  requiredLevel: 5, payload: { type: "armor", amount: 100 } },
+    { id: "weapon_glock", displayName: "格洛克手枪",      cost: 300,  requiredLevel: 1, payload: { type: "weapon", weaponName: "weapon_glock" } },
+    { id: "weapon_p250", displayName: "P250 手枪",        cost: 200,  requiredLevel: 2, payload: { type: "weapon", weaponName: "weapon_p250" } },
+    { id: "weapon_deagle", displayName: "沙漠之鹰",        cost: 200, requiredLevel: 3, payload: { type: "weapon", weaponName: "weapon_deagle" } },
+    { id: "weapon_usp_silencer", displayName: "USP 消音版", cost: 200,  requiredLevel: 1, payload: { type: "weapon", weaponName: "weapon_usp_silencer" } },
+    { id: "weapon_ak47", displayName: "AK-47",             cost: 1300, requiredLevel: 4, payload: { type: "weapon", weaponName: "weapon_ak47" } },
+    { id: "weapon_m4a1", displayName: "M4A1 突击步枪",     cost: 1400, requiredLevel: 4, payload: { type: "weapon", weaponName: "weapon_m4a1" } },
+    { id: "weapon_aug", displayName: "AUG 突击步枪",       cost: 2000, requiredLevel: 4, payload: { type: "weapon", weaponName: "weapon_aug" } },
+    { id: "weapon_awp", displayName: "AWP 狙击枪",         cost: 3000, requiredLevel: 4, payload: { type: "weapon", weaponName: "weapon_awp" } },
     { id: "weapon_p90", displayName: "P90 冲锋枪",         cost: 2200, requiredLevel: 3, payload: { type: "weapon", weaponName: "weapon_p90" } },
-    { id: "weapon_mac10", displayName: "MAC-10 冲锋枪",   cost: 1800, requiredLevel: 2, payload: { type: "weapon", weaponName: "weapon_mac10" } },
-    { id: "weapon_xm1014", displayName: "XM1014 霰弹枪",  cost: 2500, requiredLevel: 4, payload: { type: "weapon", weaponName: "weapon_xm1014" } },
-    { id: "weapon_m249", displayName: "M249 机枪",        cost: 6000, requiredLevel: 8, payload: { type: "weapon", weaponName: "weapon_m249" } },
+    { id: "weapon_mac10", displayName: "MAC-10 冲锋枪",   cost: 1500, requiredLevel: 2, payload: { type: "weapon", weaponName: "weapon_mac10" } },
+    { id: "weapon_xm1014", displayName: "XM1014 霰弹枪",  cost: 1800, requiredLevel: 4, payload: { type: "weapon", weaponName: "weapon_xm1014" } },
+    { id: "weapon_m249", displayName: "M249 机枪",        cost: 4000, requiredLevel: 5, payload: { type: "weapon", weaponName: "weapon_m249" } },
 ];
 
 /**
@@ -5151,7 +5639,20 @@ class HudManager {
             eventBus.on(event.Hud.In.HideHudRequest, (/** @type {import("./hud_const").HideHudRequest} */ payload) => {
                 payload.result=this.hideHud(payload);
             })
+            ,
+            eventBus.on(event.Hud.In.StatusUpdateRequest, (/** @type {{slot:number} & import("./hud_const").HudPlayerSummary} */ payload) => {
+                this.handlePlayerStatusUpdateRequest(payload);
+            })
         ];
+        /** 全局波次摘要，供文本合并显示 */
+        /**@type {import("./hud_const").HudWaveSummary} */
+        this._waveSummary={
+            currentWave: 0,
+            totalWaves: 0,
+            monstersRemaining: 0,
+            prepareTime:0
+        };
+        this._wavetime=0;
     }
 
     destroy() {
@@ -5207,35 +5708,62 @@ class HudManager {
 
         return true;
     }
+    /**
+     * @param {import("./hud_const").HudWaveSummary} waveSummary
+     */
+    setwaveSummary(waveSummary){
+        if (waveSummary.currentWave !== undefined) this._waveSummary.currentWave = waveSummary.currentWave;
+        if (waveSummary.totalWaves !== undefined) this._waveSummary.totalWaves = waveSummary.totalWaves;
+        if (waveSummary.monstersRemaining !== undefined) this._waveSummary.monstersRemaining = waveSummary.monstersRemaining;
+        if (waveSummary.prepareTime !== undefined)
+        {
+            this._waveSummary.prepareTime=waveSummary.prepareTime;
+            this._wavetime=0;
+        }
+        for (const [, session] of this._sessions) {
+            // 只要会话中有 playerInfo（或此前缓存过 pendingText），都要尝试刷新文本
+            if (!session.playerInfo) continue;
+            this._refreshSessionText(session);
+        }
+    }
+    /**
+     * 处理结构化的 HUD 状态更新请求（可合并）。
+     * payload 示例： { updates: [{ slot, pawn, health, maxHealth, money, lastDamage, level, exp, expNeeded }], waveSummary: { remainingMonsters, currentWave, totalWaves }, flags: { shouldMerge, immediate } }
+     * @param {{slot:number} & import("./hud_const").HudPlayerSummary} payload
+     */
+    handlePlayerStatusUpdateRequest(payload) {
+        const slot = payload.slot;
+        const session = this._getOrCreateSession(slot);
+        session.playerInfo = this._mergePlayerInfo(session.playerInfo, payload);
+        this._refreshSessionText(session);
+    }
 
     /**
      * 每 tick 刷新全部可见 HUD 的贴脸位置。
-     * @param {{ id: number; name: string; slot: number; level: number; professionId: string; professionDisplayName: string; money: number; health: number; maxHealth: number; armor: number; attack: number; critChance: number; critMultiplier: number; kills: number; score: number; lastMonsterDamage: number; exp: number; expNeeded: number; pawn: import("cs_script/point_script").CSPlayerPawn | null; }[]} [allAlivePlayersSummary=[]]
-     * @param {{ remainingMonsters?: number; currentWave?: number; totalWaves?: number; }} [waveSummary={}]
-     * @param {Map<number, { buffs?: { id: number; typeId: string; remaining: number; }[]; skill?: { id: number; typeId: string; cooldown: number; remainingCooldown: number; isReady: boolean; isConsumed: boolean; } | null; }>} [runtimeSummaryBySlot=new Map()]
+     * @param {number} dt 
      */
-    tick(allAlivePlayersSummary=[], waveSummary={}, runtimeSummaryBySlot=new Map()) {
-        const remainingMonsters = Math.max(0, Math.round(waveSummary.remainingMonsters ?? 0));
-        const currentWave = Math.max(0, Math.round(waveSummary.currentWave ?? 0));
-        const totalWaves = Math.max(0, Math.round(waveSummary.totalWaves ?? 0));
-        const waveLabel = totalWaves > 0 ? `${currentWave}/${totalWaves}` : `${currentWave}`;
-        
-        for (const s of allAlivePlayersSummary) {
-            if(!s.pawn)continue;
-            const remainingExp = Math.max(0, s.expNeeded - s.exp);
-            const runtimeSummary = runtimeSummaryBySlot.get(s.slot);
-            const buffLabel = this._formatBuffLabel(runtimeSummary?.buffs ?? []);
-            const skillLabel = this._formatSkillCooldownLabel(runtimeSummary?.skill ?? null);
-            const professionLabel = s.professionDisplayName ? `职业:${s.professionDisplayName}` : `职业:${s.professionId ?? "未知"}`;
-            const text = `Lv.${s.level} ${professionLabel}\nHP:${s.health}/${s.maxHealth} \n护甲:${s.armor}\nMoney:$${s.money} \n升级还需:${remainingExp}EXP\n伤害:${s.lastMonsterDamage} \nBuff:${buffLabel}\n技能CD:${skillLabel}\n剩余怪物:${remainingMonsters} \n波次:${waveLabel}`;
-            this.showHud({ slot: s.slot, pawn: s.pawn, text, channel: CHANNAL.STATUS, alwaysVisible: HUD_ALWAYS_VISIBLE, result: true });
+    tick(dt) {
+        let shouldRefreshWaveText = false;
+        const prepareTime = this._waveSummary.prepareTime ?? 0;
+        if (prepareTime > 0 && this._wavetime < prepareTime) {
+            const nextWaveTime = Math.min(prepareTime, this._wavetime + dt);
+            shouldRefreshWaveText = nextWaveTime !== this._wavetime;
+            this._wavetime = nextWaveTime;
         }
+
         for (const [, session] of this._sessions) {
             if (!session.use) continue;
             const refreshed = this._refreshHudPosition(session);
             if (!refreshed) {
                 this._hideEntity(session);
             }
+        }
+
+        for (const [, session] of this._sessions) {
+            if (!session.playerInfo) continue;
+            const countdownChanged = this._tickCountdownState(session.playerInfo, dt);
+            if (!countdownChanged && !shouldRefreshWaveText) continue;
+            this._refreshSessionText(session);
         }
     }
 
@@ -5256,12 +5784,50 @@ class HudManager {
                 activeChannel: CHANNAL.NONE,
                 pawn: null,
                 use: false,
-                lastText: "",
                 requests: new Map(),
+                renderedText: "",
             };
             this._sessions.set(slot, session);
         }
         return session;
+    }
+
+    /**
+     * @param {import("./hud_const").HudPlayerSummary | undefined} current
+     * @param {import("./hud_const").HudPlayerSummary} update
+     * @returns {import("./hud_const").HudPlayerSummary}
+     */
+    _mergePlayerInfo(current, update) {
+        return {
+            ...(current ?? { slot: update.slot }),
+            ...update,
+        };
+    }
+
+    /**
+     * 统一刷新单个会话的显示文本：使用会话的 playerInfo 与 manager 的 waveSummary 拼接文本并在需要时显示。
+     * - 若存在 pawn 则立即调用 showHud 刷新
+     * - 若不存在 pawn 则缓存到 session.pendingText
+     * @param {import("./hud_const").HudSession} session
+     */
+    _refreshSessionText(session) {
+        const status = session.playerInfo ?? null;
+        if(!status)return;
+        const text = this._buildTextFromStatusAndWave(status, this._waveSummary);
+
+        const pawn = status?.pawn ?? session.pawn ?? null;
+
+        if (!text) {
+            // 无文本则清除 pending 并隐藏（若已显示）
+            if (session.use) this._hideEntity(session);
+            return;
+        }
+
+        if (pawn) {
+            // 有 pawn 时立即显示
+            this.showHud({ slot: session.slot, pawn, text, channel: CHANNAL.STATUS, alwaysVisible: HUD_ALWAYS_VISIBLE, result: true });
+            return;
+        }
     }
 
     /**
@@ -5312,11 +5878,11 @@ class HudManager {
             return;
         }
         const channelChanged = previousChannel !== winnerChannel;
-        const textChanged = session.lastText !== request.text;
         const pawnChanged = session.pawn !== request.pawn;
+        const textChanged = session.renderedText !== request.text;
 
         // 无变化且已显示 → 跳过
-        if (!channelChanged && !textChanged && !pawnChanged && session.use) return;
+        if (!channelChanged && !pawnChanged && !textChanged && session.use) return;
 
         session.activeChannel = winnerChannel;
         session.pawn = request.pawn;
@@ -5324,15 +5890,12 @@ class HudManager {
         this._ensureEntity(session);
         if (!session.entity||!session.entity.IsValid()) return;
 
-        // 文本更新
-        if (textChanged || channelChanged) {
-            session.lastText = request.text;
-            Instance.EntFireAtTarget({
-                target: session.entity,
-                input: "SetMessage",
-                value: request.text,
-            });
-        }
+        Instance.EntFireAtTarget({
+            target: session.entity,
+            input: "SetMessage",
+            value: request.text,
+        });
+        session.renderedText = request.text;
 
         // 首次启用或 Pawn 变更 → 重新绑定
         if (!session.use) {
@@ -5363,15 +5926,6 @@ class HudManager {
                 text: request.text,
             };
             eventBus.emit(event.Hud.Out.OnHudShown, payload);
-        } else if ((channelChanged || textChanged || pawnChanged) && session.use) {
-            /** @type {import("./hud_const").OnHudUpdated} */
-            const payload = {
-                slot: session.slot,
-                channel: winnerChannel,
-                text: request.text,
-                previousChannel,
-            };
-            eventBus.emit(event.Hud.Out.OnHudUpdated, payload);
         }
     }
 
@@ -5402,7 +5956,7 @@ class HudManager {
 
 
     /**
-     * @param {{ id: number; typeId: string; remaining: number; }[]} buffSummaries
+     * @param {import("./hud_const").HudBuffSummary[]} buffSummaries
      * @returns {string}
      */
     _formatBuffLabel(buffSummaries) {
@@ -5416,7 +5970,7 @@ class HudManager {
     }
 
     /**
-     * @param {{ id: number; typeId: string; remaining: number; }} buffSummary
+     * @param {import("./hud_const").HudBuffSummary} buffSummary
      * @returns {string}
      */
     _formatSingleBuffLabel(buffSummary) {
@@ -5428,7 +5982,7 @@ class HudManager {
     }
 
     /**
-     * @param {{ id: number; typeId: string; cooldown: number; remainingCooldown: number; isReady: boolean; isConsumed: boolean; } | null} skillSummary
+     * @param {import("./hud_const").HudSkillSummary | null} skillSummary
      * @returns {string}
      */
     _formatSkillCooldownLabel(skillSummary) {
@@ -5437,6 +5991,107 @@ class HudManager {
         if (skillSummary.isConsumed) return `${displayName}(已使用)`;
         if (!skillSummary.isReady) return `${displayName}(${skillSummary.remainingCooldown.toFixed(1)}s)`;
         return `${displayName}(就绪)`;
+    }
+
+    /**
+     * @param {import("./hud_const").HudPlayerSummary} playerInfo
+     * @param {number} dt
+     * @returns {boolean}
+     */
+    _tickCountdownState(playerInfo, dt) {
+        let changed = false;
+
+        if (Array.isArray(playerInfo.buffs)) {
+            const nextBuffs = [];
+            let removedExpiredBuff = false;
+
+            for (const buff of playerInfo.buffs) {
+                if (buff.remaining < 0) {
+                    nextBuffs.push(buff);
+                    continue;
+                }
+                const nextRemaining = Math.max(0, buff.remaining - dt);
+                if (nextRemaining <= 0) {
+                    removedExpiredBuff = true;
+                    continue;
+                }
+                if (nextRemaining === buff.remaining) {
+                    nextBuffs.push(buff);
+                    continue;
+                }
+                buff.remaining = nextRemaining;
+                nextBuffs.push(buff);
+                changed = true;
+            }
+
+            if (removedExpiredBuff) {
+                playerInfo.buffs = nextBuffs;
+                changed = true;
+            }
+        }
+
+        if (playerInfo.skill && playerInfo.skill.cooldown > 0 && !playerInfo.skill.isConsumed) {
+            const nextRemaining = Math.max(0, playerInfo.skill.remainingCooldown - dt);
+            if (nextRemaining !== playerInfo.skill.remainingCooldown) {
+                playerInfo.skill.remainingCooldown = nextRemaining;
+                playerInfo.skill.isReady = nextRemaining <= 0;
+                changed = true;
+            }
+        }
+
+        return changed;
+    }
+
+    /**
+     * @param {number | undefined} value
+     * @returns {boolean}
+     */
+    _hasNumber(value) {
+        return typeof value === "number";
+    }
+
+    /**
+     * 根据单个玩家的状态与当前波次摘要构建显示文本（多行）。
+     * @param {import("./hud_const").HudPlayerSummary} status
+     * @param {import("./hud_const").HudWaveSummary} waveSummary
+     */
+    _buildTextFromStatusAndWave(status, waveSummary) {
+        const parts = [];
+
+        if (this._hasNumber(status.level)) {
+            const prof = status.professionDisplayName? status.professionDisplayName : (status.professionId ?? "未知");
+            parts.push(`Lv.${status.level} ${prof}`);
+        }
+
+        if (this._hasNumber(status.health) && this._hasNumber(status.maxHealth)) parts.push(`HP:${status.health}/${status.maxHealth}`);
+        else if (this._hasNumber(status.health)) parts.push(`HP:${status.health}`);
+        if (this._hasNumber(status.armor)) parts.push(`护甲:${status.armor}`);
+
+        if (this._hasNumber(status.money)) parts.push(`Money:$${status.money}`);
+        if (typeof status.exp === "number" && typeof status.expNeeded === "number") {
+            const currentExp = status.exp;
+            const expNeeded = status.expNeeded;
+            parts.push(`升级还需:${Math.max(0, expNeeded - currentExp)}EXP`);
+        }
+
+        if (this._hasNumber(status.lastMonsterDamage)) parts.push(`伤害:${status.lastMonsterDamage}`);
+
+        const buffLabel = Array.isArray(status.buffs) ? this._formatBuffLabel(status.buffs) : null;
+        const skillLabel = status.skill !== undefined ? this._formatSkillCooldownLabel(status.skill ?? null) : null;
+        if (buffLabel) parts.push(`Buff:${buffLabel}`);
+        if (skillLabel) parts.push(`技能:${skillLabel}`);
+        parts.push(`波次:${waveSummary.currentWave}/${waveSummary.totalWaves}`);
+        const nexttime=Math.max(0,waveSummary.prepareTime? (waveSummary.prepareTime - this._wavetime):0);
+        if (nexttime>0) 
+        {
+            parts.push(`准备时间:${nexttime}s`);
+        }
+        else
+        {
+            parts.push(`剩余怪物:${Math.max(0, waveSummary.monstersRemaining??0)}`);
+        }
+
+        return parts.join(" \n");
     }
 
     /**
@@ -5485,7 +6140,7 @@ class HudManager {
         });
 
         session.use = false;
-        session.lastText = "";
+        session.renderedText = "";
     }
 
     /**
@@ -6032,6 +6687,17 @@ class SkillTemplate
      */
     _markTriggered() {
         this.lastTriggerTime = Instance.GetGameTime();
+      // 技能被触发时，若属于玩家技能则通知外界更新该玩家的状态（用于刷新 HUD 的技能冷却显示）
+      if (this.player) {
+        /**@type {import("../player/player_const").OnPlayerStatusChanged} */
+        const payload = {
+            player: this.player,
+            pawn: this.player.entityBridge.pawn,
+            slot: this.player.slot,
+            summary: {skill:true},
+        };
+        eventBus.emit(event.Player.Out.OnPlayerStatusChanged, payload);
+      }
     }
 }
 
@@ -6098,8 +6764,14 @@ class CoreStats extends SkillTemplate {
             if (this.params.damage_mult) this.monster.baseDamage *= this.params.damage_mult;
             if (this.params.speed_value ) this.monster.baseSpeed += this.params.speed_value;
             if (this.params.speed_mult ) this.monster.baseSpeed *= this.params.speed_mult;
-            if (this.params.reward_value ) this.monster.baseReward += this.params.reward_value;
-            if (this.params.reward_mult ) this.monster.baseReward *= this.params.reward_mult;
+            if (this.params.reward_value ) {
+                this.monster.baseMoneyReward += this.params.reward_value;
+                this.monster.baseExpReward += this.params.reward_value;
+            }
+            if (this.params.reward_mult ) {
+                this.monster.baseMoneyReward *= this.params.reward_mult;
+                this.monster.baseExpReward *= this.params.reward_mult;
+            }
             this.monster.recomputeDerivedStats();
         }
     }
@@ -6171,6 +6843,9 @@ class PounceSkill extends SkillTemplate {
         this.animation = params.animation ?? null;
         this.events = params.events ?? [MonsterRuntimeEvents.Tick];
         this._duration = params.duration ?? 1;
+        this._hitDistance = params.hitDistance ?? 0;
+        this._impactVelocity = null;
+        this._impactTarget = null;
         this.asyncOccupation = "pounce";
     }
 
@@ -6203,9 +6878,42 @@ class PounceSkill extends SkillTemplate {
         if (!this.running || !monster) return;
 
         if (monster.movementStateMovemode==="walk") {
+            this._applyLandingImpact(monster);
             this.running = false;
             monster.onOccupationEnd("pounce");
+            this._resetImpactState();
         }
+    }
+
+    /**
+     * @param {import("../../monster/monster/monster").Monster} monster
+     */
+    _applyLandingImpact(monster) {
+        const target = this._impactTarget;
+        const pawn = target?.entityBridge?.pawn;
+        if (!target || !pawn?.IsValid?.()) return;
+
+        const hitDistance = this._hitDistance > 0 ? this._hitDistance : monster.attackdist;
+        if (!(hitDistance > 0)) return;
+
+        const targetPos = pawn.GetAbsOrigin?.() ?? target.pos;
+        if (!targetPos) return;
+        if (monster.distanceTosq(targetPos) > hitDistance * hitDistance) return;
+
+        const damage = Math.max(1, Math.round(monster.damage * 2));
+        const attacker = monster.model?.IsValid?.() ? monster.model : null;
+        const killed = target.takeDamage(damage, attacker);
+
+        if (!killed && this._impactVelocity) {
+            pawn.Teleport({
+                velocity: { ...this._impactVelocity },
+            });
+        }
+    }
+
+    _resetImpactState() {
+        this._impactVelocity = null;
+        this._impactTarget = null;
     }
 
     trigger() {
@@ -6231,6 +6939,15 @@ class PounceSkill extends SkillTemplate {
             z: (targetPos.z - start.z + 0.5 * DEFAULT_WORLD_GRAVITY * duration * duration) / duration,
         };
 
+        const horizontalSpeed = Math.hypot(velocity.x, velocity.y);
+        const impactHorizontalScale = horizontalSpeed > 1e-6 ? 200 / horizontalSpeed : 0;
+        this._impactVelocity = {
+            x: velocity.x * impactHorizontalScale,
+            y: velocity.y * impactHorizontalScale,
+            z: 400,
+        };
+        this._impactTarget = target;
+
         monster.animation.setOccupation("pounce");
         this.running = true;
 
@@ -6243,10 +6960,12 @@ class PounceSkill extends SkillTemplate {
             useNPCSeparation: true,
             Mode: "air",
             Velocity: velocity,
+            preserveVelocityInAir: true,
         });
 
         if (!submitted) {
             this.running = false;
+            this._resetImpactState();
             monster.onOccupationEnd("pounce");
             return;
         }
@@ -6368,6 +7087,7 @@ class PowerAttackSkill extends SkillTemplate {
      *   events?: string[];
      *   animation?: string | null;
      *   buffConfigId?: string;
+     *   bonusDamageMultiplier?: number;
      * }} [params]
      */
     constructor(player, monster, id, params = {}) {
@@ -6377,6 +7097,10 @@ class PowerAttackSkill extends SkillTemplate {
         this.buffConfigId = typeof params.buffConfigId === "string"
             ? params.buffConfigId.trim()
             : "";
+        this.bonusDamageMultiplier = typeof params.bonusDamageMultiplier === "number"
+            ? Math.max(0, params.bonusDamageMultiplier)
+            : 2;
+        this._pendingTarget = null;
     }
 
     canTrigger(/** @type {any} */ event) {
@@ -6385,31 +7109,39 @@ class PowerAttackSkill extends SkillTemplate {
 
         const monster = this.monster;
         if (monster) {
-            if (!monster.target) return false;
-            if (monster.isOccupied()) return false;
+            const target = event?.target ?? monster.target;
+            if (!target) return false;
+            if (event.type !== MonsterRuntimeEvents.AttackTrue && monster.isOccupied()) return false;
+            this._pendingTarget = target;
         }
 
         if (this.animation === null) {
-            this.trigger();
+            this.trigger(this._pendingTarget);
             return false;
         }
         return true;
     }
 
-    trigger() {
+    /**
+     * @param {Player|null} [targetOverride]
+     */
+    trigger(targetOverride = null) {
         if (this.player) {
             this._markTriggered();
             return;
         }
         const monster = this.monster;
-        const target = monster?.target;
+        const target = targetOverride ?? this._pendingTarget ?? monster?.target ?? null;
+        this._pendingTarget = null;
         if (!monster || !target) return;
         if (monster.distanceTosq(target.pos) > monster.attackdist * monster.attackdist) return;
 
         this._markTriggered();
         this._applyTargetBuff(target);
         const pawn=target.entityBridge?.pawn;
-        if(pawn)monster.emitAttackEvent(Math.max(1, Math.round(monster.damage * 2)), pawn);
+        if (pawn && this.bonusDamageMultiplier > 0) {
+            monster.emitAttackEvent(Math.max(1, Math.round(monster.damage * this.bonusDamageMultiplier)), pawn);
+        }
     }
 
     /**
@@ -6418,20 +7150,7 @@ class PowerAttackSkill extends SkillTemplate {
      */
     _applyTargetBuff(target) {
         if (!this.buffConfigId) return false;
-
-        const slot = target.slot;
-        if (typeof slot !== "number" || slot < 0) return false;
-
-        const rewardRequest = {
-            slot,
-            reward: {
-                type: "buff",
-                buffConfigId: this.buffConfigId,
-            },
-            result: false,
-        };
-        eventBus.emit(event.Player.In.DispatchRewardRequest, rewardRequest);
-        return rewardRequest.result === true;
+        return target.refreshBuff(this.buffConfigId);
     }
 }
 
@@ -6516,6 +7235,11 @@ const areaEffectStatics = {
         effectName: "fire_area_effect",
         buffConfigId: "burn",
         particleName: "fire",
+    },
+    "poison_cloud": {
+        effectName: "poison_cloud_area_effect",
+        buffConfigId: "poison",
+        particleName: "poison_cloud",
     },
     "healing_field": {
         effectName: "healing_field_area_effect",
@@ -7221,6 +7945,78 @@ class ThrowStoneSkill extends SkillTemplate {
 }
 
 /**
+ * @module 工具/声音实体工具
+ */
+
+/** 声音实体 PointTemplate 默认实体名。 */
+const SOUND_TEMPLATE_NAME = "sound_template";
+
+/**
+ * 声音实体创建参数。
+ *
+ * 说明：
+ * - 该工具不管理实体生命周期，只负责创建并返回一个声音实体。
+ * - 模板必须且只能生成一个独立实体。
+ *
+ * @typedef {object} SoundEntityCreateOptions
+ * @property {import("cs_script/point_script").Vector} position - 创建后覆盖声音实体的位置
+ */
+
+/**
+ * 创建一个声音实体。
+ *
+ * 该函数只负责：
+ * - 查找 PointTemplate
+ * - 生成声音实体
+ * - 按需覆盖位置与角度
+ * - 返回创建结果
+ *
+ * 它不会：
+ * - 持有实体引用
+ * - 在后续 tick 中维护实体
+ * - 在外部不再需要时自动删除实体
+ *
+ * @param {SoundEntityCreateOptions} options
+ * @returns {import("cs_script/point_script").Entity | null}
+ */
+function createSoundEntity(options) {
+	const template = Instance.FindEntityByName(SOUND_TEMPLATE_NAME);
+	if (!template || !(template instanceof PointTemplate)) {
+		return null;
+	}
+
+	const spawned = template.ForceSpawn(options.position);
+	if (!spawned || spawned.length !== 1) {
+		cleanupSpawnedEntities$1(spawned ?? []);
+		return null;
+	}
+
+	const [soundEntity] = spawned;
+	if (!soundEntity?.IsValid?.()) {
+		cleanupSpawnedEntities$1(spawned);
+		return null;
+	}
+
+	soundEntity.Teleport({
+		position: options.position,
+	});
+
+	return soundEntity;
+}
+
+/**
+ * 失败时清理由模板生成出的实体，避免遗留无主实体。
+ * @param {import("cs_script/point_script").Entity[]} entities
+ */
+function cleanupSpawnedEntities$1(entities) {
+	for (const entity of entities) {
+		if (entity?.IsValid?.()) {
+			entity.Remove();
+		}
+	}
+}
+
+/**
  * @module 怪物系统/怪物技能/声音实体
  */
 
@@ -7230,7 +8026,6 @@ class SoundSkill extends SkillTemplate {
      * @param {import("../../monster/monster/monster").Monster|null} monster
      * @param {number} id
      * @param {{
-     *   templateName?: string;
      *   eventSoundMap?: Record<string, string>;
      *   cooldown?: number;
      *   events?: string[];
@@ -7241,7 +8036,6 @@ class SoundSkill extends SkillTemplate {
         super(player, monster, "sound", id, params);
         this.cooldown = params.cooldown ?? 0;
         this.animation = params.animation ?? null;
-        this.templateName = typeof params.templateName === "string" ? params.templateName.trim() : "";
         this.eventSoundMap = params.eventSoundMap ?? {};
         const configuredEvents = Array.isArray(params.events) && params.events.length > 0
             ? params.events
@@ -7249,8 +8043,6 @@ class SoundSkill extends SkillTemplate {
         this.events = configuredEvents.length > 0
             ? configuredEvents
             : [MonsterRuntimeEvents.Spawn];
-        /** @type {import("cs_script/point_script").Entity[]} */
-        this._spawnedEntities = [];
         /** @type {import("cs_script/point_script").Entity|null} */
         this._soundEntity = null;
         /** @type {string | null} */
@@ -7321,32 +8113,25 @@ class SoundSkill extends SkillTemplate {
 
         const monster = this.monster;
         const model = monster?.model;
-        if (!this.templateName) {
+        if (!model?.IsValid?.()) {
             return false;
         }
-        if (!model?.IsValid?.()) {
+
+        const origin = model.GetAbsOrigin?.();
+        if (!origin) {
             return false;
         }
 
         this._cleanupEntities();
 
-        const template = Instance.FindEntityByName(this.templateName);
-        if (!template || !(template instanceof PointTemplate)) {
+        this._soundEntity = createSoundEntity({
+            position: origin,
+        });
+        if (!this._soundEntity?.IsValid?.()) {
+            this._soundEntity = null;
             return false;
         }
 
-        const origin = model.GetAbsOrigin?.();
-        const spawned = template.ForceSpawn(origin);
-        if (!spawned || spawned.length === 0) {
-            return false;
-        }
-
-        this._spawnedEntities = spawned;
-        this._soundEntity = spawned.find((entity) => entity?.IsValid?.()) ?? null;
-        if (!this._soundEntity||!this._soundEntity.IsValid()) {
-            this._cleanupEntities();
-            return false;
-        }
         Instance.EntFireAtTarget({
             target: this._soundEntity,
             input: "Followentity",
@@ -7357,12 +8142,9 @@ class SoundSkill extends SkillTemplate {
     }
 
     _cleanupEntities() {
-        for (const entity of this._spawnedEntities) {
-            if (entity?.IsValid?.()) {
-                entity.Remove();
-            }
+        if (this._soundEntity?.IsValid?.()) {
+            this._soundEntity.Remove();
         }
-        this._spawnedEntities = [];
         this._soundEntity = null;
     }
 }
@@ -7639,6 +8421,9 @@ const SENTRY_DEFAULTS = {
 /** 哨戒炮台 PointTemplate 默认实体名。 */
 const SENTRY_DEFAULT_TEMPLATE_NAME = "sentry_template";
 
+/** 哨戒炮台攻击时播放的声音事件名。 */
+const SENTRY_ATTACK_SOUND_EVENT_NAME = "Weapon_M249.Single";
+
 /** 激光发射点围绕底座中心的水平半径。 */
 const SENTRY_LASER_ORBIT_RADIUS = 25;
 
@@ -7699,6 +8484,7 @@ class SentryTurret {
         this.ownerKey = options.ownerKey;
         this.laserStart = null;
         this.laserEnd = null;
+        this.soundEntity = null;
 
         /** @type {import("../../../monster/monster/monster").Monster|null} */
         this.target = null;
@@ -7733,6 +8519,12 @@ class SentryTurret {
         const laserStartPos = this._getLaserStartPosition();
         if (!laserStartPos || !this._createLaserEndpoints(laserStartPos)) {
             Instance.Msg(`Sentry: 创建激光端点失败\n`);
+            this.destroy();
+            return;
+        }
+        const soundOrigin = this._getSoundOrigin();
+        if (!soundOrigin || !this._createSoundEntity(soundOrigin)) {
+            Instance.Msg(`Sentry: 创建声音实体失败\n`);
             this.destroy();
             return;
         }
@@ -7805,6 +8597,7 @@ class SentryTurret {
 
         if (now >= this._nextAttackTime) {
             this.target.takeDamage(this.damage, null);
+            this._playAttackSound();
             this._nextAttackTime = now + this.attackInterval;
         }
     }
@@ -7846,6 +8639,9 @@ class SentryTurret {
             }
             entities.push(this.laserEnd);
         }
+        if (this.soundEntity?.IsValid?.()) {
+            entities.push(this.soundEntity);
+        }
         const uniqueEntities = new Set(entities.filter((entity) => entity?.IsValid?.()));
         for (const entity of uniqueEntities) {
             entity.Remove();
@@ -7853,6 +8649,7 @@ class SentryTurret {
 
         this.laserStart = null;
         this.laserEnd = null;
+        this.soundEntity = null;
     }
 
     _isTargetValid() {
@@ -7863,13 +8660,19 @@ class SentryTurret {
         return this.base?.IsValid?.()
             && this.yaw?.IsValid?.()
             && this.laserStart?.IsValid?.()
-            && this.laserEnd?.IsValid?.();
+            && this.laserEnd?.IsValid?.()
+            && this.soundEntity?.IsValid?.();
     }
 
     _getTurretBasePosition() {
         return this._cloneVector(this._basePosition ?? (this.base?.IsValid?.() ? this.base.GetAbsOrigin() : null));
     }
 
+    /**
+     * @param {number} [yaw=this._currentYaw]
+     * @param {{x:number,y:number,z:number} | null} [turretPos=null]
+     * @returns {{x:number,y:number,z:number} | null}
+     */
     _getLaserStartPosition(yaw = this._currentYaw, turretPos = null) {
         const basePosition = this._cloneVector(turretPos ?? this._basePosition ?? (this.base?.IsValid?.() ? this.base.GetAbsOrigin() : null));
         if (!basePosition || !Number.isFinite(yaw)) return null;
@@ -7898,6 +8701,13 @@ class SentryTurret {
     }
 
     /**
+     * @returns {{x:number,y:number,z:number} | null}
+     */
+    _getSoundOrigin() {
+        return this._cloneVector(this._yawPosition ?? this._basePosition ?? (this.yaw?.IsValid?.() ? this.yaw.GetAbsOrigin() : null));
+    }
+
+    /**
      * @param {{x:number,y:number,z:number}} laserStartPos
      * @returns {boolean}
      */
@@ -7916,6 +8726,28 @@ class SentryTurret {
     }
 
     /**
+     * @param {{x:number,y:number,z:number}} soundOrigin
+     * @returns {boolean}
+     */
+    _createSoundEntity(soundOrigin) {
+        this.soundEntity = createSoundEntity({
+            position: soundOrigin,
+        });
+        if (!this.soundEntity?.IsValid?.()) {
+            this.soundEntity = null;
+            return false;
+        }
+
+        Instance.EntFireAtTarget({
+            target: this.soundEntity,
+            input: "Followentity",
+            value: "!activator",
+            activator: this.yaw,
+        });
+        return true;
+    }
+
+    /**
      * @param {{x:number,y:number,z:number}} laserStartPos
      * @param {{x:number,y:number,z:number}} laserEndPos
      */
@@ -7925,6 +8757,22 @@ class SentryTurret {
         }
         this.laserStart.Teleport({ position: laserStartPos });
         this.laserEnd.Teleport({ position: laserEndPos });
+    }
+
+    _playAttackSound() {
+        if (!this.soundEntity?.IsValid?.()) {
+            return;
+        }
+
+        Instance.EntFireAtTarget({
+            target: this.soundEntity,
+            input: "SetSoundEventName",
+            value: SENTRY_ATTACK_SOUND_EVENT_NAME,
+        });
+        Instance.EntFireAtTarget({
+            target: this.soundEntity,
+            input: "StartSound",
+        });
     }
 
     /**
@@ -8700,11 +9548,11 @@ initanim    初始动画（默认 OnSpawn 一次性）
 doubleattack  双倍攻击（默认 AttackTrue 触发）
   { cooldown?, events?, animation? }
 
-powerattack   重击（默认 AttackTrue 触发，可选给目标追加预配置 Buff）
-  { cooldown?, events?, animation?, buffConfigId? }
+powerattack   重击（默认 AttackTrue 触发，可选给目标追加预配置 Buff，可选补一段额外伤害）
+  { cooldown?, events?, animation?, buffConfigId?, bonusDamageMultiplier? }
 
-fire          燃烧区域（怪物默认 Die 触发；玩家默认 InspectWeapon 触发）
-  { cooldown?, events?, animation?, inputKey?, zoneDuration?, zoneRadius?, triggerDistance?/distance?, targetTypes? }
+fire          持续区域效果（怪物默认 Die 触发；玩家默认 InspectWeapon 触发）
+  { areaEffectStaticKey?, cooldown?, events?, animation?, inputKey?, zoneDuration?, zoneRadius?, triggerDistance?/distance?, targetTypes? }
 
 shield      能量护盾（默认 [OnSpawn, OnTick]，Spawn 始终保留以初始化修饰器）
   { runtime: number, value: number, cooldown?, events?, animation? }
@@ -9255,7 +10103,8 @@ class Monster {
         this.speed = this.baseSpeed;
 
         this.attackdist = typeConfig.attackdist;
-        this.baseReward = typeConfig.reward;
+        this.baseMoneyReward = typeConfig.moneyReward;
+        this.baseExpReward = typeConfig.expReward;
         this.atc = typeConfig.attackCooldown;
 
         this.occupation = "";
@@ -9587,7 +10436,12 @@ class Monster {
      */
     emitDeathEvent(killer) {
         /** @type {import("../monster_const").OnMonsterDeath} */
-        const payload = { monster: this, killer, reward: this.baseReward };
+        const payload = {
+            monster: this,
+            killer,
+            moneyReward: this.baseMoneyReward,
+            expReward: this.baseExpReward,
+        };
         eventBus.emit(event.Monster.Out.OnMonsterDeath, payload);
     }
 
@@ -9867,13 +10721,13 @@ class SkillManager {
     /**
      * @param {number} skillId
      * @param {Player|Monster|null} [target]
-     * @returns {{ id: number; typeId: string; cooldown: number; remainingCooldown: number; isReady: boolean; isConsumed: boolean; } | null}
+     * @returns {{ id: number; typeId: string; cooldown: number; remainingCooldown: number; isReady: boolean; isConsumed: boolean; }|undefined}
      */
     getSkillSummary(skillId, target = null)
     {
         const skill = this.SkillMap.get(skillId);
-        if (skill === undefined) return null;
-        if (!this._matchTarget(skill, target)) return null;
+        if (skill === undefined) return;
+        if (!this._matchTarget(skill, target)) return;
 
         const neverTriggered = skill.lastTriggerTime === -999;
         const isConsumed = skill.cooldown === -1 && !neverTriggered;
@@ -9932,6 +10786,12 @@ class MonsterManager {
         /** 当前活跃怪物计数。由 lifecycle recordSpawn/recordDeath 更新。
          * @type {number} */
         this.activeMonsters = 0;
+        /**
+         * 当前存活怪物实例数组。
+         * 创建时加入，死亡或清理时移除，避免每次查询都遍历全表。
+         * @type {Monster[]}
+         */
+        this.activeMonsterList = [];
         /** 累计击杀数。
          * @type {number} */
         this.totalKills = 0;
@@ -9969,8 +10829,8 @@ class MonsterManager {
      */
     handleMonsterDeath(monsterInstance, killer) {
         const monsterId = monsterInstance.id;
-        if (!this.monsters.has(monsterId)) return;
-        this.activeMonsters = Math.max(0, this.activeMonsters - 1);
+        const removed = this._removeActiveMonster(monsterId);
+        if (!removed) return;
         this.totalKills++;
         if(this.spawnconfig && this.activeMonsters==0 && this.spawnmonstercount>=this.spawnconfig.totalMonsters) {
             eventBus.emit(event.Monster.Out.OnAllMonstersDead, {});
@@ -9982,12 +10842,14 @@ class MonsterManager {
             monster.dispose();
         }
         this.monsters.clear();
+        this.activeMonsterList = [];
         this.activeMonsters = 0;
         this.spawnPoints = [];
         this.spawnpretick = -1;
         this.spawnmonstercount = 0;
         this.spawn = false;
         this.spawnconfig = null;
+        this.glowing = false;
     }
 
     /**
@@ -10010,15 +10872,16 @@ class MonsterManager {
     {
         for (const [id, monster] of this.monsters) {
             if (monster.state === MonsterState.DEAD && !monster.model && !monster.breakable) {
+                this._removeActiveMonster(id);
                 this.monsters.delete(id);
                 continue;
             }
             monster.tick(allplayers);
             if (monster.state === MonsterState.DEAD && !monster.model && !monster.breakable) {
+                this._removeActiveMonster(id);
                 this.monsters.delete(id);
             }
         }
-        this.updateMonsterGlow();
         this.spawntick();
     }
     spawntick()
@@ -10047,25 +10910,46 @@ class MonsterManager {
     }
 
     /**
-     * @returns {Monster[]}
+     * @param {Monster} monster
+     * @returns {void}
      */
-    getActiveMonsters() {
-        return Array.from(this.monsters.values()).filter(monster => monster.state !== MonsterState.DEAD);
+    _addActiveMonster(monster) {
+        if (this.activeMonsterList.some(activeMonster => activeMonster.id === monster.id)) return;
+        this.activeMonsterList.push(monster);
+        this.activeMonsters = this.activeMonsterList.length;
+    }
+
+    /**
+     * @param {number} monsterId
+     * @returns {boolean}
+     */
+    _removeActiveMonster(monsterId) {
+        const activeMonsterIndex = this.activeMonsterList.findIndex(monster => monster.id === monsterId);
+        if (activeMonsterIndex < 0) return false;
+        this.activeMonsterList.splice(activeMonsterIndex, 1);
+        this.activeMonsters = this.activeMonsterList.length;
+        this.updateMonsterGlow();
+        return true;
     }
 
     updateMonsterGlow() {
         const shouldGlow = this.activeMonsters > 0 && this.activeMonsters <= 20;
-        if(this.glowing==shouldGlow)return;
-        this.glowing=shouldGlow;
-        for (const monster of this.getActiveMonsters()) {
-            const model = monster.model;
-            if (!model || !(model instanceof BaseModelEntity)) continue;
-            if (shouldGlow) {
-                model.Glow({ r: 255, g: 0, b: 0 });
-            }
-            else {
+        if (!shouldGlow) {
+            if (!this.glowing) return;
+            this.glowing = false;
+            for (const monster of this.activeMonsterList) {
+                const model = monster.model;
+                if (!model || !(model instanceof BaseModelEntity) || !model.IsGlowing()) continue;
                 model.Unglow();
             }
+            return;
+        }
+
+        this.glowing = true;
+        for (const monster of this.activeMonsterList) {
+            const model = monster.model;
+            if (!model || !(model instanceof BaseModelEntity)) continue;
+            model.Glow({ r: 255, g: 0, b: 0 });
         }
     }
 
@@ -10190,8 +11074,9 @@ class MonsterManager {
     /**
      * 由其他情况触发的怪物产卵。在施法者周围随机位置尝试生成一只指定类型的怪物。
      *
-     * 在 `radiusMin`~`radiusMax` 范围内随机采样位置，最多尝试 `tries` 次，
-     * 每次用包围盒检测碰撞遮挡，通过后调用 `createMonster` 创建。
+    * 在 `radiusMin`~`radiusMax` 范围内随机采样位置，最多尝试 10 次，
+    * 每次先从较高位置向下探测可站立地面，再检查球形出生点遮挡，
+    * 通过后调用 `createMonster` 创建。
      *
      * @param {Monster} caster 施法者怪物，用于获取中心坐标和默认类型
      * @param {{typeName?:string,radiusMin?:number,radiusMax?:number,tries?:number}} options 产卵选项
@@ -10205,12 +11090,22 @@ class MonsterManager {
             Instance.Msg(`技能产卵失败: 未找到怪物类型 ${typeName}`);
             return false;
         }
-        const center = caster.pos;
+        const center = this.getSpawnCenter(caster);
+        if (!center) {
+            Instance.Msg(`技能产卵失败: 怪物 #${caster.id} 缺少有效生成中心`);
+            return false;
+        }
         const radiusMin = Math.max(0, options.radiusMin ?? 24);
         const radiusMax = Math.max(radiusMin, options.radiusMax ?? 96);
-        const tries = Math.max(1, options.tries ?? 6);
-        const mins = this.spawnconfig?.monster_breakablemins ?? { x: -30, y: -30, z: -30 };
-        const maxs = this.spawnconfig?.monster_breakablemaxs ?? { x: 30, y: 30, z: 30 };
+        const tries = Math.min(10, Math.max(1, options.tries ?? 10));
+        const spawnLift = 100;
+        const probeHeight = 200;
+        const probeDepth = 400;
+        const clearanceRadius = 30;
+        /** @type {import("cs_script/point_script").Entity[]} */
+        const ignoreEntities = [];
+        if (caster.breakable?.IsValid?.()) ignoreEntities.push(caster.breakable);
+        if (caster.model?.IsValid?.()) ignoreEntities.push(caster.model);
 
         for (let i = 0; i < tries; i++) {
             const angle = Math.random() * Math.PI * 2;
@@ -10220,16 +11115,57 @@ class MonsterManager {
                 y: center.y + Math.sin(angle) * dist,
                 z: center.z
             };
-            const start = { x: pos.x, y: pos.y, z: pos.z + 45 };
-            const end = { x: pos.x, y: pos.y, z: pos.z + 50 };
-            if (Instance.TraceBox({ mins, maxs, start, end, ignorePlayers: true }).hitEntity) continue;
-            const monster = this.createMonster(typeConfig, end);
+            const start = { x: pos.x, y: pos.y, z: pos.z + probeHeight };
+            const end = { x: pos.x, y: pos.y, z: pos.z - probeDepth };
+            const groundTrace = Instance.TraceLine({
+                start,
+                end,
+                ignorePlayers: true,
+                ignoreEntity: ignoreEntities.length > 0 ? ignoreEntities : undefined,
+            });
+            if (!groundTrace.didHit || groundTrace.startedInSolid || groundTrace.normal.z < 0.5) {
+                continue;
+            }
+
+            const spawnPos = {
+                x: groundTrace.end.x,
+                y: groundTrace.end.y,
+                z: groundTrace.end.z + spawnLift,
+            };
+            const clearanceTrace = Instance.TraceSphere({
+                radius: clearanceRadius,
+                start: spawnPos,
+                end: spawnPos,
+                ignorePlayers: true,
+                ignoreEntity: ignoreEntities.length > 0 ? ignoreEntities : undefined,
+            });
+            if (clearanceTrace.didHit || clearanceTrace.startedInSolid) {
+                continue;
+            }
+
+            const monster = this.createMonster(typeConfig, spawnPos);
             if (!monster) return false;
             Instance.Msg(`技能产卵成功 #${monster.id} ${monster.type}`);
             return true;
         }
 
+        Instance.Msg(`技能产卵失败: ${typeName} 在 ${tries} 次尝试内未找到可用位置`);
         return false;
+    }
+
+    /**
+     * 优先读取当前实体的实时坐标，避免使用延迟同步的缓存位置。
+     * @param {Monster} caster
+     * @returns {import("cs_script/point_script").Vector|null}
+     */
+    getSpawnCenter(caster) {
+        const breakableOrigin = caster.breakable?.IsValid?.() ? caster.breakable.GetAbsOrigin?.() : null;
+        if (breakableOrigin) return breakableOrigin;
+
+        const modelOrigin = caster.model?.IsValid?.() ? caster.model.GetAbsOrigin?.() : null;
+        if (modelOrigin) return modelOrigin;
+
+        return caster.pos ?? null;
     }
 
     /**
@@ -10247,11 +11183,12 @@ class MonsterManager {
         const monster = new Monster(monsterId, position, typeConfig);
         if(!monster)return monster;
         this.monsters.set(monsterId, monster);
+        this._addActiveMonster(monster);
         /** @type {import("./monster_const").OnMonsterSpawn} */
         const payload = { monster };
         eventBus.emit(event.Monster.Out.OnMonsterSpawn, payload);
-        this.activeMonsters++;
         monster.init();
+        this.updateMonsterGlow();
         return monster;
     }
 
@@ -10449,6 +11386,107 @@ class BurnBuff extends BuffTemplate {
     }
 }
 
+class PoisonBuff extends BuffTemplate {
+    /**
+     * @param {number} id
+     * @param {import("../../monster/monster/monster").Monster|import("../../player/player/player").Player} target
+     * @param {string} targetType
+     * @param {{ duration?: number; tickInterval?: number; dps?: number }} [params]
+     */
+    constructor(id, target, targetType, params = {}) {
+        super(id, target, targetType, "poison", params);
+        this.duration = typeof params.duration === "number" ? params.duration : 1;
+        this.tickInterval = Math.max(0.1, typeof params.tickInterval === "number" ? params.tickInterval : 0.5);
+        this.dps = Math.max(0, typeof params.dps === "number" ? params.dps : 8);
+        this._nextTickTime = Instance.GetGameTime() + this.tickInterval;
+    }
+
+    start() {
+        const started = super.start();
+        if (!started) return false;
+        this._nextTickTime = Instance.GetGameTime() + this.tickInterval;
+        return true;
+    }
+
+    refresh() {
+        const refreshed = super.refresh();
+        if (!refreshed) return false;
+        return true;
+    }
+
+    tick() {
+        if (!this.use) return;
+        if (!this._isTargetAlive()) {
+            this.stop();
+            return;
+        }
+
+        super.tick();
+        if (!this.use) return;
+
+        const now = Instance.GetGameTime();
+        while (this.use && now >= this._nextTickTime) {
+            this._applyTickDamage(this.tickInterval);
+            this._nextTickTime += this.tickInterval;
+        }
+    }
+
+    /**
+     * @param {string} eventName
+     * @param {{ nextState?: number }} [params]
+     */
+    OnBuffEmit(eventName, params = {}) {
+        const runtimeEvents = this.targetType === "player" ? PlayerRuntimeEvents : MonsterRuntimeEvents;
+
+        if (eventName === runtimeEvents.Die) {
+            this.stop();
+            return { result: true };
+        }
+
+        if (eventName === runtimeEvents.StateChange) {
+            if (this.targetType === "player" && params.nextState === PlayerState.DEAD) {
+                this.stop();
+                return { result: true };
+            }
+            if (this.targetType === "monster" && params.nextState === MonsterState.DEAD) {
+                this.stop();
+                return { result: true };
+            }
+        }
+
+        return { result: false };
+    }
+
+    /**
+     * @param {number} intervalSeconds
+     */
+    _applyTickDamage(intervalSeconds) {
+        const damage = this.dps * intervalSeconds;
+        if (damage <= 0) return;
+
+        if (this.targetType === "player") {
+            this.target.takeDamage(damage, null);
+        } else if (this.targetType === "monster") {
+            this.target.takeDamage(damage, null, { reason: "poison" });
+        }
+
+        if (!this._isTargetAlive()) {
+            this.stop();
+        }
+    }
+
+    _isTargetAlive() {
+        if (!this.target) return false;
+        if (this.targetType === "player") {
+            return this.target.state !== PlayerState.DEAD && this.target.state !== PlayerState.DISCONNECTED;
+        }
+        if (this.targetType === "monster") {
+            return this.target.state !== MonsterState.DEAD;
+        }
+        return false;
+    }
+}
+
 class RegenerationBuff extends BuffTemplate {
     /**
      * @param {number} id
@@ -10605,6 +11643,8 @@ const BuffFactory = {
         switch (typeid) {
             case "burn":
                 return new BurnBuff(id, target, targetType, params);
+            case "poison":
+                return new PoisonBuff(id, target, targetType, params);
             case "regeneration":
                 return targetType === "player"
                     ? new RegenerationBuff(id, /** @type {import("../player/player/player").Player} */ (target), targetType, params)
@@ -10683,6 +11723,15 @@ const buffconfig={
 			duration:5,
 			tickInterval:0.5,
 			dps:25,
+		}
+	},
+	poison:{
+		configid:"poison",
+		typeid:"poison",
+		params:{
+			duration:5,
+			tickInterval:1,
+			dps:10,
 		}
 	},
 	regeneration:{
@@ -10881,6 +11930,12 @@ const particleConfigs = {
     fire: {
         id: "fire",
         // 运行时键已迁到 fire，底层模板资源名继续沿用现有预制体。
+        spawnTemplateName: "fire_particle_template",
+        middleEntityName: "fire_particle",
+    },
+    poison_cloud: {
+        id: "poison_cloud",
+        // 第一版复用现有火焰模板占位，后续可替换成专用毒雾 PointTemplate。
         spawnTemplateName: "fire_particle_template",
         middleEntityName: "fire_particle",
     },
@@ -21002,7 +22057,7 @@ const arriveDistance = 1;
 /** 转向速度 (度/s) */
 const turnSpeed = 360;
 /** movement.update 最多拆成多少个轮转分片。 */
-const movementUpdateShardCount = 1;
+const movementUpdateShardCount = 2;
 /** 异常长帧时单个实体单次最多消费多少累计 dt (s)。 */
 const movementMaxAccumulatedDt = 0.25;
 /** 真实地面检测最小间隔 (s)，沿用原 64Hz 下每 8 tick 的语义。 */
@@ -21653,6 +22708,7 @@ class PathFollower {
  * @property {Vector}       wishDir
  * @property {number}       wishSpeed
  * @property {number}       maxSpeed
+ * @property {boolean}      preserveVelocityInAir
  * @property {() => Vector} getPos        获取当前实体位置
  * @property {(name: string, arg?: any) => void} requestModeSwitch  请求切换模式（由 controller 处理）
  */
@@ -21740,7 +22796,12 @@ class MoveAir extends MoveMode {
 
         ctx.pathFollower.advanceIfReached(pos);
         const goal = ctx.pathFollower.getMoveGoal();
-        computeWish(ctx, goal);
+        if (ctx.preserveVelocityInAir) {
+            ctx.wishDir = vec$1.get(0, 0, 0);
+            ctx.wishSpeed = 0;
+        } else {
+            computeWish(ctx, goal);
+        }
 
         const newPos = ctx.motor.moveAir(pos, ctx.wishDir, ctx.wishSpeed, dt, sepCtx);
 
@@ -21957,6 +23018,7 @@ class MovementController {
  * @property {boolean}  [accelerate]    是否加速（预留，默认 true）
  * @property {number}   [speed]         本次任务速度（覆盖默认）
  * @property {Vector}   [initialVelocity] 本次任务起始速度；可用于飞扑/投掷等锁定 air 段
+ * @property {boolean}  [preserveVelocityInAir] 在 air 模式下保留起始水平速度，不走常规空中转向
  * @property {string}   [mode]          本次任务初始模式（覆盖默认，可传 walk / air / fly / ladder）
  */
 
@@ -22021,6 +23083,7 @@ class Movement {
             wishDir: vec$1.get(0, 0, 0),
             wishSpeed: 0,
             maxSpeed: this._defaultSpeed,
+            preserveVelocityInAir: false,
             getPos: () => this.pos,
             requestModeSwitch: () => {} // 由 controller 绑定
         };
@@ -22043,6 +23106,7 @@ class Movement {
         this._isStopped = false;
         this._ctx.maxSpeed = task.speed ?? this._defaultSpeed;
         this._usePathfinding = task.usePathfinding ?? this._defaultUsePathfinding;
+        this._ctx.preserveVelocityInAir = task.preserveVelocityInAir ?? false;
         if (task.initialVelocity) {
             this._motor.velocity = vec$1.clone(task.initialVelocity);
         }
@@ -22155,6 +23219,14 @@ class Movement {
         this._motor.velocity = velocity;
     }
 
+    /**
+     * 设置 air 模式下是否保留当前水平速度
+     * @param {boolean} preserveVelocityInAir
+     */
+    setPreserveVelocityInAir(preserveVelocityInAir) {
+        this._ctx.preserveVelocityInAir = preserveVelocityInAir;
+    }
+
     /** 获取当前速度快照 */
     getVelocity() {
         return this._motor.getVelocity();
@@ -22183,6 +23255,7 @@ class Movement {
         this._isStopped = true;
         this._ctx.wishDir = vec$1.get(0, 0, 0);
         this._ctx.wishSpeed = 0;
+        this._ctx.preserveVelocityInAir = false;
         this._motor.stop();
     }
 
@@ -22955,6 +24028,7 @@ class MovementManager {
 
         if (req.Mode) entry.movement.setMode(req.Mode);
         if (req.Velocity) entry.movement.setVelocity(req.Velocity);
+        entry.movement.setPreserveVelocityInAir(req.preserveVelocityInAir ?? false);
         if (req.maxSpeed !== undefined) entry.movement.setSpeed(req.maxSpeed);
         if (req.clearPath) entry.movement.clearPath();
 
@@ -22970,6 +24044,7 @@ class MovementManager {
                     usePathfinding: false,
                     mode: req.Mode,
                     initialVelocity: req.Velocity,
+                    preserveVelocityInAir: req.preserveVelocityInAir,
                 });
             }
         }
@@ -23591,10 +24666,10 @@ class AreaEffect {
     }
 
     /**
-     * 优先刷新目标当前缓存的 Buff；若缓存失效则当场回退到重新创建。
+     * 优先走目标对象自身的 buff 入口，保证运行时映射、派生属性与状态事件都能同步更新。
      *
-     * 这里只在命中路径消费 _buffid，因此采用懒修复即可：
-     * refresh 失败说明本地缓存已过期，立刻删掉并重新 add。
+     * 对玩家来说，必须经过 Player.refreshBuff/addBuff 才会维护 player.buffMap，
+     * 并发出 HUD 依赖的 emitStatusChanged({ buff: true })；直接操作 BuffManager 会绕过这层。
      *
      * @param {string} cooldownKey
      * @param {import("../player/player/player").Player | import("../monster/monster/monster").Monster} target
@@ -23602,6 +24677,18 @@ class AreaEffect {
      * @returns {number} 成功时返回有效 buffId，失败返回 -1
      */
     _ensureBuff(cooldownKey, target, targetType) {
+        if (typeof target?.refreshBuff === "function") {
+            const refreshed = target.refreshBuff(this.buffConfigId);
+            const runtimeBuffId = target.buffMap instanceof Map
+                ? target.buffMap.get(this.buffConfigId)
+                : undefined;
+
+            if (refreshed && typeof runtimeBuffId === "number" && runtimeBuffId > 0) {
+                this._buffid.set(cooldownKey, runtimeBuffId);
+                return runtimeBuffId;
+            }
+        }
+
         const cachedBuffId = this._buffid.get(cooldownKey);
         if (cachedBuffId&& cachedBuffId > 0) {
             /** @type {import("../buff/buff_const").BuffRefreshRequest} */
@@ -24257,15 +25344,17 @@ const ticks=1/64;
 // ═══════════════════════════════════════════════
 // 1. 服务器初始化
 // ═══════════════════════════════════════════════
-
-Instance.ServerCommand("mp_warmup_offline_enabled 1");
-Instance.ServerCommand("mp_warmup_pausetimer 1");
+Instance.ServerCommand("mp_warmup_end");
 Instance.ServerCommand("mp_roundtime 60");
 Instance.ServerCommand("mp_freezetime 1");
 Instance.ServerCommand("mp_ignore_round_win_conditions 1");
 Instance.ServerCommand("weapon_accuracy_nospread 1");
+Instance.ServerCommand("mp_solid_teammates 0");
+Instance.ServerCommand("mp_limitteams 0");
+Instance.ServerCommand("mp_autoteambalance 0");
+Instance.ServerCommand("mp_respawn_on_death_ct 1");
+Instance.ServerCommand("mp_respawn_on_death_t 1");
 Instance.ServerCommand("sv_infinite_ammo 2");
-//Instance.ServerCommand("sv_cheats false");
 // ═══════════════════════════════════════════════
 // 2. 实例化各模块（平级，互不持有）
 // ═══════════════════════════════════════════════
@@ -24316,7 +25405,8 @@ const particleManager = new ParticleManager();
 const areaEffectManager = new AreaEffectManager();
 const projectileManager = new ProjectileManager();
 
-sentryManager.setMonsterProvider(() => monsterManager.getActiveMonsters());
+
+sentryManager.setMonsterProvider(() => monsterManager.activeMonsterList);
 function cleanupFinishedMatch() {
     shopManager.closeAll();
     hudManager.clearAll();
@@ -24337,6 +25427,33 @@ function cleanupFinishedMatch() {
     gameManager.onPlayerRespawn();
 }
 
+/**
+ * @param {string} targetName
+ * @param {Player[]} players
+ * @returns {void}
+ */
+function teleportPlayersToNamedPosition(targetName, players) {
+    const position = Instance.FindEntityByName(targetName)?.GetAbsOrigin();
+    if (!position) return;
+
+    for (const player of players) {
+        player.entityBridge.pawn?.Teleport({
+            position,
+        });
+    }
+}
+
+function respawnDeadPlayersAndReturnAllToGameStart() {
+    for (const player of playerManager.players.values()) {
+        if (player.state !== PlayerState.DEAD) continue;
+        playerManager.dispatchReward(player.slot, {
+            type: "respawn"
+        });
+    }
+
+    teleportPlayersToNamedPosition("game_start", playerManager.getActivePlayers());
+}
+
 // ═══════════════════════════════════════════════
 // 3. 跨模块回调绑定（全部集中在此）
 // ═══════════════════════════════════════════════
@@ -24348,16 +25465,31 @@ eventBus.on(event.Wave.Out.OnWaveEnd, (/** @type {import("./wave/wave_const").On
     const waveConfig = waveManager.getWaveConfig(waveNumber);
 
     // 给予玩家波次奖励
-    playerManager.dispatchReward(null, {
-        type: "money",
-        amount: waveConfig?.reward ?? 0,
-        reason: `第${waveNumber}波通关奖励`
-    });
+    /** @type {import("./player/player_manager").TP_playerRewardPayload[]} */
+    const waveRewards = [];
+    if ((waveConfig?.moneyReward ?? 0) > 0) {
+        waveRewards.push({
+            type: "money",
+            amount: waveConfig?.moneyReward ?? 0,
+            reason: `第${waveNumber}波通关金钱`
+        });
+    }
+    if ((waveConfig?.expReward ?? 0) > 0) {
+        waveRewards.push({
+            type: "exp",
+            amount: waveConfig?.expReward ?? 0,
+            reason: `第${waveNumber}波通关经验`
+        });
+    }
+    if (waveRewards.length > 0) {
+        playerManager.dispatchRewardRequest(null, waveRewards);
+    }
 
     // 推进下一波或胜利
     if (waveManager.hasNextWave()) {
+        respawnDeadPlayersAndReturnAllToGameStart();
         /** @type {import("./wave/wave_const").WaveStartRequest} */
-        const payload = { waveIndex: waveNumber + 1, result: false };
+        const payload = { waveIndex: waveNumber + 1, playerCount: playerManager.totalPlayers, result: false };
         eventBus.emit(event.Wave.In.WaveStartRequest, payload);
     } else {
         eventBus.emit(event.Game.In.GameWinRequest,{});
@@ -24380,14 +25512,9 @@ eventBus.on(event.Game.Out.OnEnterPreparePhase, (payload) => {
 
 eventBus.on(event.Game.Out.OnStartGame, (payload) => {
     playerManager.enterGameStart();
-    const fp=Instance.FindEntityByName("game_start")?.GetAbsOrigin();
-    playerManager.getActivePlayers().forEach(player => {
-        player.entityBridge.pawn?.Teleport({
-            position:fp
-        });
-    });
+    teleportPlayersToNamedPosition("game_start", playerManager.getActivePlayers());
     /** @type {import("./wave/wave_const").WaveStartRequest} */
-    const waveStartPayload = { waveIndex: 1, result: false };
+    const waveStartPayload = { waveIndex: 1, playerCount: playerManager.totalPlayers, result: false };
     eventBus.emit(event.Wave.In.WaveStartRequest, waveStartPayload);
 });
 
@@ -24400,12 +25527,7 @@ eventBus.on(event.Game.Out.OnGameWin, (payload) => {
     playerManager.dispatchReward(null,{
         type:"respawn"
     });
-    const fp=Instance.FindEntityByName("game_complete")?.GetAbsOrigin();
-    playerManager.getActivePlayers().forEach(player => {
-        player.entityBridge.pawn?.Teleport({
-            position:fp
-        });
-    });
+    teleportPlayersToNamedPosition("game_complete", playerManager.getActivePlayers());
     cleanupFinishedMatch();
 });
 
@@ -24428,12 +25550,26 @@ eventBus.on(event.Monster.Out.OnMonsterDeath, (/** @type {import("./monster/mons
 
     const killerPawn = /** @type {import("cs_script/point_script").CSPlayerPawn | null | undefined} */ (payload.killer);
     const killerSlot = killerPawn?.GetPlayerController?.()?.GetPlayerSlot?.();
-    if (typeof killerSlot === "number" && killerSlot >= 0 && payload.reward > 0) {
-        playerManager.dispatchReward(killerSlot, {
-            type: "exp",
-            amount: payload.reward,
-            reason: `击杀 ${payload.monster.type} 经验`,
-        });
+    if (typeof killerSlot === "number" && killerSlot >= 0) {
+        /** @type {import("./player/player_manager").TP_playerRewardPayload[]} */
+        const killRewards = [];
+        if (payload.moneyReward > 0) {
+            killRewards.push({
+                type: "money",
+                amount: payload.moneyReward,
+                reason: `击杀 ${payload.monster.type} 金钱`,
+            });
+        }
+        if (payload.expReward > 0) {
+            killRewards.push({
+                type: "exp",
+                amount: payload.expReward,
+                reason: `击杀 ${payload.monster.type} 经验`,
+            });
+        }
+        if (killRewards.length > 0) {
+            playerManager.dispatchRewardRequest(killerSlot, killRewards);
+        }
     }
 });
 eventBus.on(event.Monster.Out.OnMonsterDamaged, (/** @type {import("./monster/monster_const").OnMonsterDamaged} */ payload) => {
@@ -24478,6 +25614,34 @@ eventBus.on(event.Throw.Out.OnProjectileHit, (/** @type {import("./throw/throw_c
 eventBus.on(event.Monster.Out.OnAllMonstersDead, () => {
     eventBus.emit(event.Wave.In.WaveEndRequest, {result: false});
 });
+eventBus.on(event.Wave.Out.OnWavePreparing, (/** @type {import("./wave/wave_const").OnWavePreparing} */ payload) => {
+    hudManager.setwaveSummary({
+        currentWave: payload.waveIndex,
+        prepareTime: payload.preparationTime
+    });
+});
+// --- HUD: 转发回合/怪物变化为 HUD 状态更新请求（轻量、可合并）
+eventBus.on(event.Wave.Out.OnWaveStart, (/** @type {import("./wave/wave_const").OnWaveStart} */ payload) => {
+    const waveConfig = payload.waveConfig;
+    const remaining = waveConfig?.totalMonsters;
+    const totalWaves = waveManager.getTotalWaves();
+    hudManager.setwaveSummary({
+        currentWave: payload.waveIndex, totalWaves, monstersRemaining: remaining
+    });
+});
+
+eventBus.on(event.Monster.Out.OnMonsterDeath, (/** @type {import("./monster/monster_const").OnMonsterDeath} */ payload) => {
+    const remaining = monsterManager.getRemainingMonsters();
+    hudManager.setwaveSummary({
+        monstersRemaining: remaining
+    });
+});
+
+eventBus.on(event.Monster.Out.OnAllMonstersDead, () => {
+    hudManager.setwaveSummary({
+        monstersRemaining: 0
+    });
+});
 eventBus.on(event.Player.Out.OnPlayerJoin, (payload) => {
     gameManager.onPlayerJoin();
 });
@@ -24521,6 +25685,47 @@ eventBus.on(event.Player.Out.OnPlayerDeath, (payload) => {
 
 eventBus.on(event.Player.Out.OnPlayerRespawn, (payload) => {
     gameManager.onPlayerRespawn();
+});
+
+// --- HUD: 玩家状态变化转发到 HUD 更新请求
+eventBus.on(event.Player.Out.OnPlayerStatusChanged, (/** @type {import("./player/player_const").OnPlayerStatusChanged} */ payload) => {
+    const summary = payload.summary;
+    if (!summary) return;
+    /**@type {Player} */
+    const playerObj = payload.player;
+    /**@type {import("./hud/hud_const").HudPlayerSummary} */
+    const update = {
+        slot: payload.slot,
+        pawn: payload.pawn,
+    };
+
+    /** @param {keyof import("./player/player_const").PlayerSummary} field */
+    const hasSummaryField = (field) => Object.prototype.hasOwnProperty.call(summary, field);
+
+    if (hasSummaryField("level")) update.level = summary.level;
+    if (hasSummaryField("professionId")) update.professionId = summary.professionId;
+    if (hasSummaryField("professionDisplayName")) update.professionDisplayName = summary.professionDisplayName;
+    if (hasSummaryField("health")) update.health = summary.health;
+    if (hasSummaryField("maxHealth")) update.maxHealth = summary.maxHealth;
+    if (hasSummaryField("armor")) update.armor = summary.armor;
+    if (hasSummaryField("money")) update.money = summary.money;
+    if (hasSummaryField("exp")) update.exp = summary.exp;
+    if (hasSummaryField("expNeeded")) update.expNeeded = summary.expNeeded;
+    if (hasSummaryField("lastMonsterDamage")) update.lastMonsterDamage = summary.lastMonsterDamage;
+
+    if (summary.buff === true) {
+        update.buffs = buffManager.getActiveBuffSummaries(playerObj);
+    }
+
+    if (summary.skill === true) {
+        update.skill = playerObj.skillId != null
+            ? (skillManager.getSkillSummary(playerObj.skillId, playerObj) ?? null)
+            : null;
+    }
+
+    if (Object.keys(update).length <= 1) return;
+
+    eventBus.emit(event.Hud.In.StatusUpdateRequest, update);
 });
 
 // ——— 3.3 全员准备 → 开始游戏 → 开始波次 ———
@@ -24571,7 +25776,7 @@ Instance.OnScriptInput("startWave", (scriptEvent) => {
     const waveNumber = parseInt(parts[parts.length - 1], 10);
     if (!isNaN(waveNumber)) {
         /** @type {import("./wave/wave_const").WaveStartRequest} */
-        const payload = { waveIndex: waveNumber, result: false };
+        const payload = { waveIndex: waveNumber, playerCount: playerManager.totalPlayers, result: false };
         eventBus.emit(event.Wave.In.WaveStartRequest, payload);
     }
 });
@@ -24651,20 +25856,24 @@ Instance.OnPlayerChat((chatEvent) => {
     if (!controller) return;
 
     const parts = text.trim().toLowerCase().split(/\s+/);
-    const command = parts[0];
+    parts[0];
     Number(parts[1]);
 
-    if (command === "shop" || command === "!shop") {
-        const pawn = controller.GetPlayerPawn();
-        if (pawn) {
-            /** @type {import("./shop/shop_const").ShopOpenRequest} */
-            const payload = { slot: controller.GetPlayerSlot(), pawn, result: false };
-            eventBus.emit(event.Shop.In.ShopOpenRequest, payload);
-        }
-    }
+    //if (command === "shop" || command === "!shop") {
+    //    const pawn = controller.GetPlayerPawn();
+    //    if (pawn) {
+    //        /** @type {import("./shop/shop_const").ShopOpenRequest} */
+    //        const payload = { slot: controller.GetPlayerSlot(), pawn, result: false };
+    //        eventBus.emit(event.Shop.In.ShopOpenRequest, payload);
+    //    }
+    //}
+    //if (command === "debug" || command === "!debug") {
+    //
+    //}
 });
 Instance.OnRoundStart(()=>{
     cleanupFinishedMatch();
+    Instance.ServerCommand("mp_warmup_end");
     playerManager.dispatchReward(null,{
         type:"respawn"
     });
@@ -24679,8 +25888,8 @@ Instance.SetThink(() => {
     const dt = Math.max(0, now - _lastTime);
     _lastTime = now;
     const isGamePlaying = gameManager.checkGameState();
-    const alivePlayers = playerManager.getAlivePlayers();//游戏中的存活玩家
-
+    const alivePlayers = playerManager.alivePlayerList;//游戏中的存活玩家
+    
     // ── 5.1 输入 / 玩家 / 波次 / Buff ──
     inputManager.tick();
     playerManager.tick();
@@ -24694,23 +25903,16 @@ Instance.SetThink(() => {
         skillManager.tick();
         sentryManager.tick();
 
-        const activeMonsters = monsterManager.getActiveMonsters();
-        for (const monster of activeMonsters) {
-            const breakable = monster.breakable;
-            if (!breakable?.IsValid?.()) continue;
-        }
-
         movementManager.tick(now, dt);
-
         monsterManager.syncMovementStates(movementManager.getAllStates());
 
         projectileManager.tick(now, dt, {
             players: alivePlayers,
-            monsters: activeMonsters,
+            monsters: monsterManager.activeMonsterList,
         });
         areaEffectManager.tick(now, {
             players: alivePlayers,
-            monsters: activeMonsters,
+            monsters: monsterManager.activeMonsterList,
         });
         particleManager.tick(now);
         buffManager.tick();
@@ -24719,27 +25921,7 @@ Instance.SetThink(() => {
     // ── 5.2 其他模块 tick ──
     shopManager.tick();
     {
-        const activePlayers = playerManager.getActivePlayers();//活着的所有人
-        let waveSummary = {};
-        let playerRuntimeSummary = new Map();
-        const waveProgress = waveManager.getProgress();
-        waveSummary = {
-            remainingMonsters: monsterManager.getRemainingMonsters(waveProgress.wave?.totalMonsters),
-            currentWave: waveProgress.current,
-            totalWaves: waveProgress.total,
-        };
-        playerRuntimeSummary = new Map(
-            activePlayers.map((player) => [
-                player.slot,
-                {
-                    buffs: buffManager.getActiveBuffSummaries(player),
-                    skill: player.skillId != null
-                        ? skillManager.getSkillSummary(player.skillId, player)
-                        : null,
-                },
-            ])
-        );
-        hudManager.tick(activePlayers.map(p => p.getSummary()), waveSummary, playerRuntimeSummary);
+        hudManager.tick(dt);
     }
 
     // ── 5.3 玩家状态 HUD 同步 ──

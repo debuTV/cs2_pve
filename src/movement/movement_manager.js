@@ -291,6 +291,7 @@ export class MovementManager {
 
         if (req.Mode) entry.movement.setMode(req.Mode);
         if (req.Velocity) entry.movement.setVelocity(req.Velocity);
+        entry.movement.setPreserveVelocityInAir(req.preserveVelocityInAir ?? false);
         if (req.maxSpeed !== undefined) entry.movement.setSpeed(req.maxSpeed);
         if (req.clearPath) entry.movement.clearPath();
 
@@ -306,6 +307,7 @@ export class MovementManager {
                     usePathfinding: false,
                     mode: req.Mode,
                     initialVelocity: req.Velocity,
+                    preserveVelocityInAir: req.preserveVelocityInAir,
                 });
             }
         }

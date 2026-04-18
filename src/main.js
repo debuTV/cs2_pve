@@ -43,19 +43,22 @@ import { NavMesh } from "./navmesh/path_manager";
 import { MovementManager } from "./movement/movement_manager";
 import { AreaEffectManager } from "./areaEffects/area_manager";
 import { ProjectileManager } from "./throw/projectile_manager";
+import { Player } from "./player/player/player";
 const ticks=1/64;
 // ═══════════════════════════════════════════════
 // 1. 服务器初始化
 // ═══════════════════════════════════════════════
-
-Instance.ServerCommand("mp_warmup_offline_enabled 1");
-Instance.ServerCommand("mp_warmup_pausetimer 1");
+Instance.ServerCommand("mp_warmup_end");
 Instance.ServerCommand("mp_roundtime 60");
 Instance.ServerCommand("mp_freezetime 1");
 Instance.ServerCommand("mp_ignore_round_win_conditions 1");
 Instance.ServerCommand("weapon_accuracy_nospread 1");
+Instance.ServerCommand("mp_solid_teammates 0");
+Instance.ServerCommand("mp_limitteams 0");
+Instance.ServerCommand("mp_autoteambalance 0");
+Instance.ServerCommand("mp_respawn_on_death_ct 1");
+Instance.ServerCommand("mp_respawn_on_death_t 1");
 Instance.ServerCommand("sv_infinite_ammo 2");
-//Instance.ServerCommand("sv_cheats false");
 // ═══════════════════════════════════════════════
 // 2. 实例化各模块（平级，互不持有）
 // ═══════════════════════════════════════════════
@@ -106,7 +109,8 @@ const particleManager = new ParticleManager();
 const areaEffectManager = new AreaEffectManager();
 const projectileManager = new ProjectileManager();
 
-sentryManager.setMonsterProvider(() => monsterManager.getActiveMonsters());
+
+sentryManager.setMonsterProvider(() => monsterManager.activeMonsterList);
 function cleanupFinishedMatch() {
     shopManager.closeAll();
     hudManager.clearAll();
@@ -127,6 +131,33 @@ function cleanupFinishedMatch() {
     gameManager.onPlayerRespawn();
 }
 
+/**
+ * @param {string} targetName
+ * @param {Player[]} players
+ * @returns {void}
+ */
+function teleportPlayersToNamedPosition(targetName, players) {
+    const position = Instance.FindEntityByName(targetName)?.GetAbsOrigin();
+    if (!position) return;
+
+    for (const player of players) {
+        player.entityBridge.pawn?.Teleport({
+            position,
+        });
+    }
+}
+
+function respawnDeadPlayersAndReturnAllToGameStart() {
+    for (const player of playerManager.players.values()) {
+        if (player.state !== PlayerState.DEAD) continue;
+        playerManager.dispatchReward(player.slot, {
+            type: "respawn"
+        });
+    }
+
+    teleportPlayersToNamedPosition("game_start", playerManager.getActivePlayers());
+}
+
 // ═══════════════════════════════════════════════
 // 3. 跨模块回调绑定（全部集中在此）
 // ═══════════════════════════════════════════════
@@ -138,16 +169,31 @@ eventBus.on(event.Wave.Out.OnWaveEnd, (/** @type {import("./wave/wave_const").On
     const waveConfig = waveManager.getWaveConfig(waveNumber);
 
     // 给予玩家波次奖励
-    playerManager.dispatchReward(null, {
-        type: "money",
-        amount: waveConfig?.reward ?? 0,
-        reason: `第${waveNumber}波通关奖励`
-    });
+    /** @type {import("./player/player_manager").TP_playerRewardPayload[]} */
+    const waveRewards = [];
+    if ((waveConfig?.moneyReward ?? 0) > 0) {
+        waveRewards.push({
+            type: "money",
+            amount: waveConfig?.moneyReward ?? 0,
+            reason: `第${waveNumber}波通关金钱`
+        });
+    }
+    if ((waveConfig?.expReward ?? 0) > 0) {
+        waveRewards.push({
+            type: "exp",
+            amount: waveConfig?.expReward ?? 0,
+            reason: `第${waveNumber}波通关经验`
+        });
+    }
+    if (waveRewards.length > 0) {
+        playerManager.dispatchRewardRequest(null, waveRewards);
+    }
 
     // 推进下一波或胜利
     if (waveManager.hasNextWave()) {
+        respawnDeadPlayersAndReturnAllToGameStart();
         /** @type {import("./wave/wave_const").WaveStartRequest} */
-        const payload = { waveIndex: waveNumber + 1, result: false };
+        const payload = { waveIndex: waveNumber + 1, playerCount: playerManager.totalPlayers, result: false };
         eventBus.emit(event.Wave.In.WaveStartRequest, payload);
     } else {
         eventBus.emit(event.Game.In.GameWinRequest,{});
@@ -172,14 +218,9 @@ eventBus.on(event.Game.Out.OnEnterPreparePhase, (payload) => {
 eventBus.on(event.Game.Out.OnStartGame, (payload) => {
     void payload;
     playerManager.enterGameStart();
-    const fp=Instance.FindEntityByName("game_start")?.GetAbsOrigin();
-    playerManager.getActivePlayers().forEach(player => {
-        player.entityBridge.pawn?.Teleport({
-            position:fp
-        });
-    });
+    teleportPlayersToNamedPosition("game_start", playerManager.getActivePlayers());
     /** @type {import("./wave/wave_const").WaveStartRequest} */
-    const waveStartPayload = { waveIndex: 1, result: false };
+    const waveStartPayload = { waveIndex: 1, playerCount: playerManager.totalPlayers, result: false };
     eventBus.emit(event.Wave.In.WaveStartRequest, waveStartPayload);
 });
 
@@ -192,12 +233,7 @@ eventBus.on(event.Game.Out.OnGameWin, (payload) => {
     playerManager.dispatchReward(null,{
         type:"respawn"
     });
-    const fp=Instance.FindEntityByName("game_complete")?.GetAbsOrigin();
-    playerManager.getActivePlayers().forEach(player => {
-        player.entityBridge.pawn?.Teleport({
-            position:fp
-        });
-    });
+    teleportPlayersToNamedPosition("game_complete", playerManager.getActivePlayers());
     cleanupFinishedMatch();
 });
 
@@ -220,12 +256,26 @@ eventBus.on(event.Monster.Out.OnMonsterDeath, (/** @type {import("./monster/mons
 
     const killerPawn = /** @type {import("cs_script/point_script").CSPlayerPawn | null | undefined} */ (payload.killer);
     const killerSlot = killerPawn?.GetPlayerController?.()?.GetPlayerSlot?.();
-    if (typeof killerSlot === "number" && killerSlot >= 0 && payload.reward > 0) {
-        playerManager.dispatchReward(killerSlot, {
-            type: "exp",
-            amount: payload.reward,
-            reason: `击杀 ${payload.monster.type} 经验`,
-        });
+    if (typeof killerSlot === "number" && killerSlot >= 0) {
+        /** @type {import("./player/player_manager").TP_playerRewardPayload[]} */
+        const killRewards = [];
+        if (payload.moneyReward > 0) {
+            killRewards.push({
+                type: "money",
+                amount: payload.moneyReward,
+                reason: `击杀 ${payload.monster.type} 金钱`,
+            });
+        }
+        if (payload.expReward > 0) {
+            killRewards.push({
+                type: "exp",
+                amount: payload.expReward,
+                reason: `击杀 ${payload.monster.type} 经验`,
+            });
+        }
+        if (killRewards.length > 0) {
+            playerManager.dispatchRewardRequest(killerSlot, killRewards);
+        }
     }
 });
 eventBus.on(event.Monster.Out.OnMonsterDamaged, (/** @type {import("./monster/monster_const").OnMonsterDamaged} */ payload) => {
@@ -269,6 +319,34 @@ eventBus.on(event.Throw.Out.OnProjectileHit, (/** @type {import("./throw/throw_c
 });
 eventBus.on(event.Monster.Out.OnAllMonstersDead, () => {
     eventBus.emit(event.Wave.In.WaveEndRequest, {result: false});
+});
+eventBus.on(event.Wave.Out.OnWavePreparing, (/** @type {import("./wave/wave_const").OnWavePreparing} */ payload) => {
+    hudManager.setwaveSummary({
+        currentWave: payload.waveIndex,
+        prepareTime: payload.preparationTime
+    })
+});
+// --- HUD: 转发回合/怪物变化为 HUD 状态更新请求（轻量、可合并）
+eventBus.on(event.Wave.Out.OnWaveStart, (/** @type {import("./wave/wave_const").OnWaveStart} */ payload) => {
+    const waveConfig = payload.waveConfig;
+    const remaining = waveConfig?.totalMonsters;
+    const totalWaves = waveManager.getTotalWaves();
+    hudManager.setwaveSummary({
+        currentWave: payload.waveIndex, totalWaves, monstersRemaining: remaining
+    });
+});
+
+eventBus.on(event.Monster.Out.OnMonsterDeath, (/** @type {import("./monster/monster_const").OnMonsterDeath} */ payload) => {
+    const remaining = monsterManager.getRemainingMonsters();
+    hudManager.setwaveSummary({
+        monstersRemaining: remaining
+    });
+});
+
+eventBus.on(event.Monster.Out.OnAllMonstersDead, () => {
+    hudManager.setwaveSummary({
+        monstersRemaining: 0
+    });
 });
 eventBus.on(event.Player.Out.OnPlayerJoin, (payload) => {
     void payload;
@@ -315,6 +393,47 @@ eventBus.on(event.Player.Out.OnPlayerDeath, (payload) => {
 eventBus.on(event.Player.Out.OnPlayerRespawn, (payload) => {
     void payload;
     gameManager.onPlayerRespawn();
+});
+
+// --- HUD: 玩家状态变化转发到 HUD 更新请求
+eventBus.on(event.Player.Out.OnPlayerStatusChanged, (/** @type {import("./player/player_const").OnPlayerStatusChanged} */ payload) => {
+    const summary = payload.summary;
+    if (!summary) return;
+    /**@type {Player} */
+    const playerObj = payload.player;
+    /**@type {import("./hud/hud_const").HudPlayerSummary} */
+    const update = {
+        slot: payload.slot,
+        pawn: payload.pawn,
+    };
+
+    /** @param {keyof import("./player/player_const").PlayerSummary} field */
+    const hasSummaryField = (field) => Object.prototype.hasOwnProperty.call(summary, field);
+
+    if (hasSummaryField("level")) update.level = summary.level;
+    if (hasSummaryField("professionId")) update.professionId = summary.professionId;
+    if (hasSummaryField("professionDisplayName")) update.professionDisplayName = summary.professionDisplayName;
+    if (hasSummaryField("health")) update.health = summary.health;
+    if (hasSummaryField("maxHealth")) update.maxHealth = summary.maxHealth;
+    if (hasSummaryField("armor")) update.armor = summary.armor;
+    if (hasSummaryField("money")) update.money = summary.money;
+    if (hasSummaryField("exp")) update.exp = summary.exp;
+    if (hasSummaryField("expNeeded")) update.expNeeded = summary.expNeeded;
+    if (hasSummaryField("lastMonsterDamage")) update.lastMonsterDamage = summary.lastMonsterDamage;
+
+    if (summary.buff === true) {
+        update.buffs = buffManager.getActiveBuffSummaries(playerObj);
+    }
+
+    if (summary.skill === true) {
+        update.skill = playerObj.skillId != null
+            ? (skillManager.getSkillSummary(playerObj.skillId, playerObj) ?? null)
+            : null;
+    }
+
+    if (Object.keys(update).length <= 1) return;
+
+    eventBus.emit(event.Hud.In.StatusUpdateRequest, update);
 });
 
 // ——— 3.3 全员准备 → 开始游戏 → 开始波次 ———
@@ -365,7 +484,7 @@ Instance.OnScriptInput("startWave", (scriptEvent) => {
     const waveNumber = parseInt(parts[parts.length - 1], 10);
     if (!isNaN(waveNumber)) {
         /** @type {import("./wave/wave_const").WaveStartRequest} */
-        const payload = { waveIndex: waveNumber, result: false };
+        const payload = { waveIndex: waveNumber, playerCount: playerManager.totalPlayers, result: false };
         eventBus.emit(event.Wave.In.WaveStartRequest, payload);
     }
 });
@@ -448,20 +567,21 @@ Instance.OnPlayerChat((chatEvent) => {
     const command = parts[0];
     const count = Number(parts[1]);
 
-    if (command === "shop" || command === "!shop") {
-        const pawn = controller.GetPlayerPawn();
-        if (pawn) {
-            /** @type {import("./shop/shop_const").ShopOpenRequest} */
-            const payload = { slot: controller.GetPlayerSlot(), pawn, result: false };
-            eventBus.emit(event.Shop.In.ShopOpenRequest, payload);
-        }
-    }
-    if (command === "debug" || command === "!debug") {
-
-    }
+    //if (command === "shop" || command === "!shop") {
+    //    const pawn = controller.GetPlayerPawn();
+    //    if (pawn) {
+    //        /** @type {import("./shop/shop_const").ShopOpenRequest} */
+    //        const payload = { slot: controller.GetPlayerSlot(), pawn, result: false };
+    //        eventBus.emit(event.Shop.In.ShopOpenRequest, payload);
+    //    }
+    //}
+    //if (command === "debug" || command === "!debug") {
+    //
+    //}
 });
 Instance.OnRoundStart(()=>{
     cleanupFinishedMatch();
+    Instance.ServerCommand("mp_warmup_end");
     playerManager.dispatchReward(null,{
         type:"respawn"
     });
@@ -476,8 +596,8 @@ Instance.SetThink(() => {
     const dt = Math.max(0, now - _lastTime);
     _lastTime = now;
     const isGamePlaying = gameManager.checkGameState();
-    const alivePlayers = playerManager.getAlivePlayers();//游戏中的存活玩家
-
+    const alivePlayers = playerManager.alivePlayerList;//游戏中的存活玩家
+    
     // ── 5.1 输入 / 玩家 / 波次 / Buff ──
     inputManager.tick();
     playerManager.tick();
@@ -490,18 +610,17 @@ Instance.SetThink(() => {
     if (isGamePlaying) {
         skillManager.tick();
         sentryManager.tick();
-        
-        const activeMonsters = monsterManager.getActiveMonsters();
+
         movementManager.tick(now, dt);
         monsterManager.syncMovementStates(movementManager.getAllStates());
 
         projectileManager.tick(now, dt, {
             players: alivePlayers,
-            monsters: activeMonsters,
+            monsters: monsterManager.activeMonsterList,
         });
         areaEffectManager.tick(now, {
             players: alivePlayers,
-            monsters: activeMonsters,
+            monsters: monsterManager.activeMonsterList,
         });
         particleManager.tick(now);
         buffManager.tick();
@@ -509,31 +628,8 @@ Instance.SetThink(() => {
 
     // ── 5.2 其他模块 tick ──
     shopManager.tick();
-    const isHudTickNeeded = HUD_ALWAYS_VISIBLE || gameManager.gameState === GameState.PLAYING;
-    if (isHudTickNeeded) {
-        const activePlayers = playerManager.getActivePlayers();//活着的所有人
-        let waveSummary = {};
-        let playerRuntimeSummary = new Map();
-        const waveProgress = waveManager.getProgress();
-        waveSummary = {
-            remainingMonsters: monsterManager.getRemainingMonsters(waveProgress.wave?.totalMonsters),
-            currentWave: waveProgress.current,
-            totalWaves: waveProgress.total,
-        };
-        playerRuntimeSummary = new Map(
-            activePlayers.map((player) => [
-                player.slot,
-                {
-                    buffs: buffManager.getActiveBuffSummaries(player),
-                    skill: player.skillId != null
-                        ? skillManager.getSkillSummary(player.skillId, player)
-                        : null,
-                },
-            ])
-        );
-        hudManager.tick(activePlayers.map(p => p.getSummary()), waveSummary, playerRuntimeSummary);
-    } else if (gameManager.gameState === GameState.WON || gameManager.gameState === GameState.LOST) {
-        hudManager.clearAll();
+    if (HUD_ALWAYS_VISIBLE || gameManager.gameState === GameState.PLAYING) {
+        hudManager.tick(dt);
     }
 
     // ── 5.3 玩家状态 HUD 同步 ──

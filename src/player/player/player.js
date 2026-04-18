@@ -243,6 +243,7 @@ export class Player {
         if (addRequest.result <= 0) return false;
         this.buffMap.set(typeId, addRequest.result);
         this.recomputeDerivedStats();
+        this.emitStatusChanged({ buff: true });
         return true;
     }
 
@@ -279,6 +280,7 @@ export class Player {
         eventBus.emit(event.Buff.In.BuffRefreshRequest, refreshRequest);
         if (!refreshRequest.result) return false;
         this.recomputeDerivedStats();
+        this.emitStatusChanged({ buff: true });
         return true;
     }
 
@@ -299,6 +301,7 @@ export class Player {
             if (id !== buffId) continue;
             this.buffMap.delete(typeId);
             this.recomputeDerivedStats();
+            this.emitStatusChanged({ buff: true });
             break;
         }
     }
@@ -438,6 +441,13 @@ export class Player {
         this.professionId = professionId;
         this.skillId = nextSkillId;
         this.skillTypeId = config.skillTypeId ?? null;
+
+        this.emitStatusChanged({
+            professionId: this.professionId,
+            professionDisplayName: config.displayName,
+            skill: true,
+        });
+
         return true;
     }
 
@@ -562,6 +572,34 @@ export class Player {
         this.state = nextState;
         this.emitRuntimeEvent(PlayerRuntimeEvents.StateChange, { oldState, nextState });
         return true;
+    }
+
+    /**
+     * 向外发送玩家状态变化事件。
+     * @param {import("../player_const").PlayerSummary} summary
+     * @returns {void}
+     */
+    emitStatusChanged(summary) {
+        /**@type {import("../player_const").OnPlayerStatusChanged} */
+        const payload = {
+            player: this,
+            pawn: this.entityBridge.pawn,
+            slot: this.slot,
+            summary,
+        };
+        eventBus.emit(event.Player.Out.OnPlayerStatusChanged, payload);
+    }
+
+    /**
+     * 发送一份完整的 HUD 基线快照。
+     * @returns {void}
+     */
+    emitStatusSnapshot() {
+        this.emitStatusChanged({
+            ...this.getSummary(),
+            buff: true,
+            skill: true,
+        });
     }
 
     // ——— Tick ———

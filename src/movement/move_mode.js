@@ -18,6 +18,7 @@ import { arriveDistance, jumpSpeed, PathState } from "./movement_const";
  * @property {Vector}       wishDir
  * @property {number}       wishSpeed
  * @property {number}       maxSpeed
+ * @property {boolean}      preserveVelocityInAir
  * @property {() => Vector} getPos        获取当前实体位置
  * @property {(name: string, arg?: any) => void} requestModeSwitch  请求切换模式（由 controller 处理）
  */
@@ -105,7 +106,12 @@ export class MoveAir extends MoveMode {
 
         ctx.pathFollower.advanceIfReached(pos);
         const goal = ctx.pathFollower.getMoveGoal();
-        computeWish(ctx, goal);
+        if (ctx.preserveVelocityInAir) {
+            ctx.wishDir = vec.get(0, 0, 0);
+            ctx.wishSpeed = 0;
+        } else {
+            computeWish(ctx, goal);
+        }
 
         const newPos = ctx.motor.moveAir(pos, ctx.wishDir, ctx.wishSpeed, dt, sepCtx);
 

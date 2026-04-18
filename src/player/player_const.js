@@ -9,6 +9,10 @@
  * - 经验语义：每升一级扣除当前等级所需经验，剩余经验继续向下一等级积累。
  * - 生命、攻击、暴击率、暴击伤害均为该等级的基础值。
  */
+
+import { CSPlayerPawn } from "cs_script/point_script";
+import { Player } from "./player/player";
+
 /**
  * 升级回血策略枚举。
  * @enum {string}
@@ -57,7 +61,29 @@ export const PlayerState = {
     /** 商店界面（预留） */
     SHOPPING:     7,
 };
-
+/**
+ * @typedef {object} OnPlayerStatusChanged
+ * @property {Player} player - 状态变化的玩家实例
+ * @property {CSPlayerPawn|null} pawn
+ * @property {number} slot - 玩家槽位
+ * @property {PlayerSummary} summary - 玩家状态摘要
+ */
+/**
+ * @typedef {object} PlayerSummary
+ * @property {string} [name]
+ * @property {number} [level]
+ * @property {string} [professionId]
+ * @property {string} [professionDisplayName]
+ * @property {number} [health]
+ * @property {number} [maxHealth]
+ * @property {number} [armor]
+ * @property {number} [money]
+ * @property {number} [exp]
+ * @property {number} [expNeeded]
+ * @property {number} [lastMonsterDamage]
+ * @property {boolean} [buff] - 是否刷新 Buff 列表
+ * @property {boolean} [skill] - 是否刷新技能（用于技能冷却显示）
+ */
 /**
  * 玩家职业配置。
  *
@@ -156,7 +182,7 @@ export const DEFAULT_LEVEL_UP_HEAL_POLICY = LevelUpHealPolicy.FULL;
 export const LEVEL_CONFIGS = [
     {
         level: 1,
-        expRequired: 100,
+        expRequired: 90,
         maxHealth: 100,
         attackScale: 1.0,
         critChance: 0.1,
@@ -165,38 +191,83 @@ export const LEVEL_CONFIGS = [
     },
     {
         level: 2,
-        expRequired: 150,
-        maxHealth: 110,
-        attackScale: 1.1,
-        critChance: 0.105,
+        expRequired: 120,
+        maxHealth: 108,
+        attackScale: 1.07,
+        critChance: 0.104,
         critMultiplier: 1.52,
         healOnLevelUp: DEFAULT_LEVEL_UP_HEAL_POLICY,
     },
     {
         level: 3,
-        expRequired: 200,
-        maxHealth: 120,
-        attackScale: 1.2,
-        critChance: 0.11,
-        critMultiplier: 1.54,
+        expRequired: 150,
+        maxHealth: 116,
+        attackScale: 1.14,
+        critChance: 0.108,
+        critMultiplier: 1.55,
         healOnLevelUp: DEFAULT_LEVEL_UP_HEAL_POLICY,
     },
     {
         level: 4,
-        expRequired: 250,
-        maxHealth: 130,
-        attackScale: 1.3,
-        critChance: 0.115,
-        critMultiplier: 1.56,
+        expRequired: 190,
+        maxHealth: 124,
+        attackScale: 1.22,
+        critChance: 0.113,
+        critMultiplier: 1.58,
         healOnLevelUp: DEFAULT_LEVEL_UP_HEAL_POLICY,
     },
     {
         level: 5,
+        expRequired: 230,
+        maxHealth: 133,
+        attackScale: 1.31,
+        critChance: 0.118,
+        critMultiplier: 1.62,
+        healOnLevelUp: DEFAULT_LEVEL_UP_HEAL_POLICY,
+    },
+    {
+        level: 6,
+        expRequired: 280,
+        maxHealth: 143,
+        attackScale: 1.41,
+        critChance: 0.124,
+        critMultiplier: 1.67,
+        healOnLevelUp: DEFAULT_LEVEL_UP_HEAL_POLICY,
+    },
+    {
+        level: 7,
+        expRequired: 330,
+        maxHealth: 154,
+        attackScale: 1.52,
+        critChance: 0.131,
+        critMultiplier: 1.73,
+        healOnLevelUp: DEFAULT_LEVEL_UP_HEAL_POLICY,
+    },
+    {
+        level: 8,
+        expRequired: 390,
+        maxHealth: 166,
+        attackScale: 1.64,
+        critChance: 0.139,
+        critMultiplier: 1.8,
+        healOnLevelUp: DEFAULT_LEVEL_UP_HEAL_POLICY,
+    },
+    {
+        level: 9,
+        expRequired: 450,
+        maxHealth: 179,
+        attackScale: 1.78,
+        critChance: 0.148,
+        critMultiplier: 1.88,
+        healOnLevelUp: DEFAULT_LEVEL_UP_HEAL_POLICY,
+    },
+    {
+        level: 10,
         expRequired: 0,
-        maxHealth: 140,
-        attackScale: 1.4,
-        critChance: 0.12,
-        critMultiplier: 1.58,
+        maxHealth: 193,
+        attackScale: 1.93,
+        critChance: 0.158,
+        critMultiplier: 1.97,
         healOnLevelUp: DEFAULT_LEVEL_UP_HEAL_POLICY,
     },
 ];

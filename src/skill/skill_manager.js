@@ -117,13 +117,13 @@ export class SkillManager {
     /**
      * @param {number} skillId
      * @param {Player|Monster|null} [target]
-     * @returns {{ id: number; typeId: string; cooldown: number; remainingCooldown: number; isReady: boolean; isConsumed: boolean; } | null}
+     * @returns {{ id: number; typeId: string; cooldown: number; remainingCooldown: number; isReady: boolean; isConsumed: boolean; }|undefined}
      */
     getSkillSummary(skillId, target = null)
     {
         const skill = this.SkillMap.get(skillId);
-        if (skill === undefined) return null;
-        if (!this._matchTarget(skill, target)) return null;
+        if (skill === undefined) return;
+        if (!this._matchTarget(skill, target)) return;
 
         const neverTriggered = skill.lastTriggerTime === -999;
         const isConsumed = skill.cooldown === -1 && !neverTriggered;

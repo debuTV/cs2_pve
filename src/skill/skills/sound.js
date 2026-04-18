@@ -1,7 +1,8 @@
 /**
  * @module 怪物系统/怪物技能/声音实体
  */
-import { Instance, PointTemplate } from "cs_script/point_script";
+import { Instance } from "cs_script/point_script";
+import { createSoundEntity, SOUND_TEMPLATE_NAME } from "../../util/sound.js";
 import { MonsterRuntimeEvents } from "../../util/runtime_events.js";
 import { SkillTemplate } from "../skill_template";
 
@@ -11,7 +12,6 @@ export class SoundSkill extends SkillTemplate {
      * @param {import("../../monster/monster/monster").Monster|null} monster
      * @param {number} id
      * @param {{
-     *   templateName?: string;
      *   eventSoundMap?: Record<string, string>;
      *   cooldown?: number;
      *   events?: string[];
@@ -22,7 +22,6 @@ export class SoundSkill extends SkillTemplate {
         super(player, monster, "sound", id, params);
         this.cooldown = params.cooldown ?? 0;
         this.animation = params.animation ?? null;
-        this.templateName = typeof params.templateName === "string" ? params.templateName.trim() : "";
         this.eventSoundMap = params.eventSoundMap ?? {};
         const configuredEvents = Array.isArray(params.events) && params.events.length > 0
             ? params.events
@@ -30,8 +29,6 @@ export class SoundSkill extends SkillTemplate {
         this.events = configuredEvents.length > 0
             ? configuredEvents
             : [MonsterRuntimeEvents.Spawn];
-        /** @type {import("cs_script/point_script").Entity[]} */
-        this._spawnedEntities = [];
         /** @type {import("cs_script/point_script").Entity|null} */
         this._soundEntity = null;
         /** @type {string | null} */
@@ -102,32 +99,25 @@ export class SoundSkill extends SkillTemplate {
 
         const monster = this.monster;
         const model = monster?.model;
-        if (!this.templateName) {
+        if (!model?.IsValid?.()) {
             return false;
         }
-        if (!model?.IsValid?.()) {
+
+        const origin = model.GetAbsOrigin?.();
+        if (!origin) {
             return false;
         }
 
         this._cleanupEntities();
 
-        const template = Instance.FindEntityByName(this.templateName);
-        if (!template || !(template instanceof PointTemplate)) {
+        this._soundEntity = createSoundEntity({
+            position: origin,
+        });
+        if (!this._soundEntity?.IsValid?.()) {
+            this._soundEntity = null;
             return false;
         }
 
-        const origin = model.GetAbsOrigin?.();
-        const spawned = template.ForceSpawn(origin);
-        if (!spawned || spawned.length === 0) {
-            return false;
-        }
-
-        this._spawnedEntities = spawned;
-        this._soundEntity = spawned.find((entity) => entity?.IsValid?.()) ?? null;
-        if (!this._soundEntity||!this._soundEntity.IsValid()) {
-            this._cleanupEntities();
-            return false;
-        }
         Instance.EntFireAtTarget({
             target: this._soundEntity,
             input: "Followentity",
@@ -138,12 +128,9 @@ export class SoundSkill extends SkillTemplate {
     }
 
     _cleanupEntities() {
-        for (const entity of this._spawnedEntities) {
-            if (entity?.IsValid?.()) {
-                entity.Remove();
-            }
+        if (this._soundEntity?.IsValid?.()) {
+            this._soundEntity.Remove();
         }
-        this._spawnedEntities = [];
         this._soundEntity = null;
     }
 }

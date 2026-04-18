@@ -18,6 +18,9 @@ export class PounceSkill extends SkillTemplate {
         this.animation = params.animation ?? null;
         this.events = params.events ?? [MonsterRuntimeEvents.Tick];
         this._duration = params.duration ?? 1;
+        this._hitDistance = params.hitDistance ?? 0;
+        this._impactVelocity = null;
+        this._impactTarget = null;
         this.asyncOccupation = "pounce";
     }
 
@@ -50,9 +53,42 @@ export class PounceSkill extends SkillTemplate {
         if (!this.running || !monster) return;
 
         if (monster.movementStateMovemode==="walk") {
+            this._applyLandingImpact(monster);
             this.running = false;
             monster.onOccupationEnd("pounce");
+            this._resetImpactState();
         }
+    }
+
+    /**
+     * @param {import("../../monster/monster/monster").Monster} monster
+     */
+    _applyLandingImpact(monster) {
+        const target = this._impactTarget;
+        const pawn = target?.entityBridge?.pawn;
+        if (!target || !pawn?.IsValid?.()) return;
+
+        const hitDistance = this._hitDistance > 0 ? this._hitDistance : monster.attackdist;
+        if (!(hitDistance > 0)) return;
+
+        const targetPos = pawn.GetAbsOrigin?.() ?? target.pos;
+        if (!targetPos) return;
+        if (monster.distanceTosq(targetPos) > hitDistance * hitDistance) return;
+
+        const damage = Math.max(1, Math.round(monster.damage * 2));
+        const attacker = monster.model?.IsValid?.() ? monster.model : null;
+        const killed = target.takeDamage(damage, attacker);
+
+        if (!killed && this._impactVelocity) {
+            pawn.Teleport({
+                velocity: { ...this._impactVelocity },
+            });
+        }
+    }
+
+    _resetImpactState() {
+        this._impactVelocity = null;
+        this._impactTarget = null;
     }
 
     trigger() {
@@ -78,6 +114,15 @@ export class PounceSkill extends SkillTemplate {
             z: (targetPos.z - start.z + 0.5 * DEFAULT_WORLD_GRAVITY * duration * duration) / duration,
         };
 
+        const horizontalSpeed = Math.hypot(velocity.x, velocity.y);
+        const impactHorizontalScale = horizontalSpeed > 1e-6 ? 200 / horizontalSpeed : 0;
+        this._impactVelocity = {
+            x: velocity.x * impactHorizontalScale,
+            y: velocity.y * impactHorizontalScale,
+            z: 400,
+        };
+        this._impactTarget = target;
+
         monster.animation.setOccupation("pounce");
         this.running = true;
 
@@ -90,10 +135,12 @@ export class PounceSkill extends SkillTemplate {
             useNPCSeparation: true,
             Mode: "air",
             Velocity: velocity,
+            preserveVelocityInAir: true,
         });
 
         if (!submitted) {
             this.running = false;
+            this._resetImpactState();
             monster.onOccupationEnd("pounce");
             return;
         }

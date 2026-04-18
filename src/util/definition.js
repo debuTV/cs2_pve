@@ -26,7 +26,8 @@
  * @property {number} baseHealth - 基础生命值
  * @property {number} baseDamage - 基础伤害
  * @property {number} speed - 移动速度
- * @property {number} reward - 击杀奖励
+ * @property {number} moneyReward - 击杀金钱奖励
+ * @property {number} expReward - 击杀经验奖励
  * @property {number} attackdist - 攻击距离
  * @property {number} attackCooldown - 攻击冷却时间（秒）
  * @property {string} movementmode - 移动模式（例如 `walk`、`fly` 等，具体逻辑由怪物系统实现）
@@ -37,13 +38,12 @@
  * @typedef {object} waveConfig - 波次配置对象。每波包含一个或多个 monsterTypes 配置项，定义该波次的怪物类型和属性。
  * @property {string} name - 波次名称
  * @property {number} totalMonsters - 怪物总数（仅作记录/展示）
- * @property {number} reward - 波次奖励（仅作记录/展示）
+ * @property {number} moneyReward - 波次金钱奖励
+ * @property {number} expReward - 波次经验奖励
  * @property {number} spawnInterval - 怪物生成间隔（秒）
  * @property {number} preparationTime - 波次准备时间（秒）
  * @property {number} aliveMonster - 同时存在的怪物数量（仅作记录/展示）
  * @property {string[]} monster_spawn_points_name - 怪物生成点名称数组，对应地图中 PointTemplate 的实体名称
- * @property {{x: number, y: number, z: number}} monster_breakablemins - 怪物破坏物最小边界坐标（相对于生成点位置的偏移）
- * @property {{x: number, y: number, z: number}} monster_breakablemaxs - 怪物破坏物最大边界坐标（相对于生成点位置的偏移）
  * @property {broadcastMessage[]} broadcastmessage - 准备阶段广播消息
  * @property {monsterTypes[]} monsterTypes - 怪物类型配置数组，定义该波次的怪物类型和属性
  */
@@ -88,6 +88,7 @@ export const MovementRequestType = {
  * @property {boolean} [useNPCSeparation] - 是否启用 NPC 分离速度；false 时每 tick 传空分离上下文
  * @property {string}  [Mode] - 切换移动模式（walk / air / fly 等）
  * @property {Vector}  [Velocity] - 设置速度向量（技能位移用，例如飞扑就需要）
+ * @property {boolean} [preserveVelocityInAir] - 在 air 模式下保留初始水平速度，不再被常规空中转向覆盖
  * @property {number}  [maxSpeed] - 速度上限
  * @property {boolean} [clearPath] - 是否清空现有路径
  */
@@ -148,6 +149,7 @@ export const event = {
         In: {
             ShowHudRequest: "Hud_OnShowHudRequest",        // 显示 Hud 请求，payload 包含 {slot: number, pawn: CSPlayerPawn, text: string, channel: number, alwaysVisible?: boolean}
             HideHudRequest: "Hud_OnHideHudRequest",        // 隐藏 Hud 请求，payload 包含 {slot: number, channel?: number}
+            StatusUpdateRequest: "Hud_OnStatusUpdateRequest", // 结构化状态更新请求，payload 可包含 { updates: [...], waveSummary: {...}, flags: {...} }
         },
         Out: {
             OnHudShown: "Hud_OnHudShown",                  // Hud 显示后，payload 包含 {slot: number, channel: number, text: string}
@@ -207,6 +209,7 @@ export const event = {
             OnAllPlayersReady: "Player_OnAllPlayersReady",      // 全员准备后
             OnPlayerDeath: "Player_OnPlayerDeath",              // 玩家死亡后
             OnPlayerRespawn: "Player_OnPlayerRespawn",          // 玩家重生后
+            OnPlayerStatusChanged: "Player_OnPlayerStatusChanged", // 玩家数值/状态更新，payload 包含 { player, slot, summary }
         },
     },
     Shop: {
@@ -243,10 +246,11 @@ export const event = {
     },
     Wave: {
         In: {
-            WaveStartRequest: "Wave_OnWaveStartRequest",    // 请求开始波次，payload 包含 {waveIndex: number}
+            WaveStartRequest: "Wave_OnWaveStartRequest",    // 请求开始波次，payload 包含 {waveIndex: number, playerCount: number}
             WaveEndRequest: "Wave_OnWaveEndRequest",        // 请求结束波次，payload 包含 {waveIndex: number, survived: boolean}
         },
         Out: {
+            OnWavePreparing: "Wave_OnWavePreparing",        // 波次进入准备阶段，payload 包含 {waveIndex: number, preparationTime: number, broadcastMessage: string}
             OnWaveStart: "Wave_OnWaveStart",                // 波次开始后，payload 包含 {waveIndex: number}
             OnWaveEnd: "Wave_OnWaveEnd",                    // 波次结束后，payload 包含 {waveIndex: number, survived: boolean}
         },

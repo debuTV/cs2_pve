@@ -31,6 +31,7 @@ import { vec } from "../util/vector";
  * @property {boolean}  [accelerate]    是否加速（预留，默认 true）
  * @property {number}   [speed]         本次任务速度（覆盖默认）
  * @property {Vector}   [initialVelocity] 本次任务起始速度；可用于飞扑/投掷等锁定 air 段
+ * @property {boolean}  [preserveVelocityInAir] 在 air 模式下保留起始水平速度，不走常规空中转向
  * @property {string}   [mode]          本次任务初始模式（覆盖默认，可传 walk / air / fly / ladder）
  */
 
@@ -95,6 +96,7 @@ export class Movement {
             wishDir: vec.get(0, 0, 0),
             wishSpeed: 0,
             maxSpeed: this._defaultSpeed,
+            preserveVelocityInAir: false,
             getPos: () => this.pos,
             requestModeSwitch: () => {} // 由 controller 绑定
         };
@@ -117,6 +119,7 @@ export class Movement {
         this._isStopped = false;
         this._ctx.maxSpeed = task.speed ?? this._defaultSpeed;
         this._usePathfinding = task.usePathfinding ?? this._defaultUsePathfinding;
+        this._ctx.preserveVelocityInAir = task.preserveVelocityInAir ?? false;
         if (task.initialVelocity) {
             this._motor.velocity = vec.clone(task.initialVelocity);
         }
@@ -229,6 +232,14 @@ export class Movement {
         this._motor.velocity = velocity;
     }
 
+    /**
+     * 设置 air 模式下是否保留当前水平速度
+     * @param {boolean} preserveVelocityInAir
+     */
+    setPreserveVelocityInAir(preserveVelocityInAir) {
+        this._ctx.preserveVelocityInAir = preserveVelocityInAir;
+    }
+
     /** 获取当前速度快照 */
     getVelocity() {
         return this._motor.getVelocity();
@@ -257,6 +268,7 @@ export class Movement {
         this._isStopped = true;
         this._ctx.wishDir = vec.get(0, 0, 0);
         this._ctx.wishSpeed = 0;
+        this._ctx.preserveVelocityInAir = false;
         this._motor.stop();
     }
 

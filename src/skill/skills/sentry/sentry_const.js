@@ -29,6 +29,9 @@ export const SENTRY_DEFAULTS = {
 /** 哨戒炮台 PointTemplate 默认实体名。 */
 export const SENTRY_DEFAULT_TEMPLATE_NAME = "sentry_template";
 
+/** 哨戒炮台攻击时播放的声音事件名。 */
+export const SENTRY_ATTACK_SOUND_EVENT_NAME = "Weapon_M249.Single";
+
 /** 激光发射点围绕底座中心的水平半径。 */
 export const SENTRY_LASER_ORBIT_RADIUS = 25;
 

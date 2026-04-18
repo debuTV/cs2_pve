@@ -5,6 +5,7 @@
 import { GameState } from "./game_const";
 import { eventBus } from "../util/event_bus";
 import { event } from "../util/definition";
+import { Instance } from "cs_script/point_script";
 
 /**
  * 游戏管理器，维护游戏生命周期状态机（WAITING → PREPARE → PLAYING → WON/LOST）。

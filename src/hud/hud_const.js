@@ -59,10 +59,49 @@ export const CHANNEL_PRIORITY = {
  * @property {number} activeChannel - 当前生效的渠道
  * @property {import("cs_script/point_script").CSPlayerPawn | null} pawn - 当前跟随的 Pawn
  * @property {boolean} use - 实体是否处于 Enable 状态
- * @property {string} lastText - 上次渲染的文本（用于去重）
  * @property {Map<number, HudRequest>} requests - 各渠道的显示请求
+ * @property {HudPlayerSummary} [playerInfo] - 玩家信息
+ * @property {string} [renderedText] - 最近一次已渲染的文本
  */
-
+/**
+ * @typedef {object} HudPlayerSummary
+ * @property {number} slot
+ * @property {import("cs_script/point_script").CSPlayerPawn | null} [pawn]
+ * @property {number} [health]
+ * @property {number} [maxHealth]
+ * @property {number} [level]
+ * @property {string} [professionId]
+ * @property {string} [professionDisplayName]
+ * @property {number} [armor]
+ * @property {number} [money]
+ * @property {number} [exp]
+ * @property {number} [expNeeded]
+ * @property {number} [lastMonsterDamage]
+ * @property {HudBuffSummary[]} [buffs]
+ * @property {HudSkillSummary | null} [skill]
+ */
+/**
+ * @typedef {object} HudBuffSummary
+ * @property {number} id - buff 实例 id
+ * @property {string} typeId - buff 类型 id
+ * @property {number} remaining - buff 剩余时间（秒）
+ */
+/**
+ * @typedef {object} HudSkillSummary
+ * @property {number} id - 技能实例 id
+ * @property {string} typeId - 技能类型 id
+ * @property {number} cooldown - 技能冷却时间（秒）
+ * @property {number} remainingCooldown - 技能剩余冷却时间（秒）
+ * @property {boolean} isReady - 技能是否可用（不在冷却中且未被消耗）
+ * @property {boolean} isConsumed - 技能是否已被消耗（一次性技能触发后即为 true）
+ */
+/**
+ * @typedef {object} HudWaveSummary
+ * @property {number} [currentWave] - 当前波数
+ * @property {number} [totalWaves] - 总波数
+ * @property {number} [monstersRemaining] - 本波剩余怪物数量
+ * @property {number} [prepareTime] - 准备开始时间
+ */
 /**
  * @typedef {object} ShowHudRequest
  * @property {number} slot - 玩家槽位

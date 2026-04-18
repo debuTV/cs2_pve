@@ -69,6 +69,15 @@ export const buffconfig={
 			dps:25,
 		}
 	},
+	poison:{
+		configid:"poison",
+		typeid:"poison",
+		params:{
+			duration:5,
+			tickInterval:1,
+			dps:10,
+		}
+	},
 	regeneration:{
 		configid:"regeneration",
 		typeid:"regeneration",

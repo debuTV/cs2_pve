@@ -132,6 +132,7 @@ export class PlayerStats {
         if (this.money < roundedAmount) return false;
 
         this.money -= roundedAmount;
+        this.player.emitStatusChanged({ money: this.money });
         return true;
     }
 
@@ -180,11 +181,11 @@ export class PlayerStats {
             maxHealth: this.maxHealth,
             armor: this.armor,
             attack: this.attackScale,
-            attackScale: this.attackScale,
-            critChance: this.critChance,
-            critMultiplier: this.critMultiplier,
-            kills: this.kills,
-            score: this.score,
+            //attackScale: this.attackScale,
+            //critChance: this.critChance,
+            //critMultiplier: this.critMultiplier,
+            //kills: this.kills,
+            //score: this.score,
             lastMonsterDamage: this.lastMonsterDamage,
             exp: this.exp,
             expNeeded: this._getExpNeeded(),
@@ -219,6 +220,10 @@ export class PlayerStats {
      */
     setHealth(value) {
         this.health = clampRounded(value, 0, this.maxHealth);
+        this.player.emitStatusChanged({
+            health: this.health,
+            maxHealth: this.maxHealth,
+        });
     }
 
     /**
@@ -238,6 +243,7 @@ export class PlayerStats {
      */
     setArmor(value) {
         this.armor = clampRounded(value, 0, 100);
+        this.player.emitStatusChanged({ armor: this.armor });
     }
 
     /**
@@ -263,6 +269,7 @@ export class PlayerStats {
 
         this.lastMonsterDamage = finalAmount;
         this.damageDealt += finalAmount;
+        this.player.emitStatusChanged({ lastMonsterDamage: this.lastMonsterDamage });
         return finalAmount;
     }
 
@@ -314,6 +321,14 @@ export class PlayerStats {
 
         if (didLevelUp) {
             this._syncCombatState();
+            this.player.emitStatusChanged({
+                level: this.level,
+                exp: this.exp,
+                expNeeded: this._getExpNeeded(),
+                health: this.health,
+                maxHealth: this.maxHealth,
+                armor: this.armor,
+            });
         }
     }
 
@@ -470,6 +485,7 @@ export class PlayerStats {
         if (!actual) return 0;
 
         this[field] = nextValue;
+        this.player.emitStatusChanged({ [field]: this[field] });
         return actual;
     }
 

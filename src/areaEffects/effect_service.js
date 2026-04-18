@@ -202,10 +202,10 @@ export class AreaEffect {
     }
 
     /**
-     * 优先刷新目标当前缓存的 Buff；若缓存失效则当场回退到重新创建。
+     * 优先走目标对象自身的 buff 入口，保证运行时映射、派生属性与状态事件都能同步更新。
      *
-     * 这里只在命中路径消费 _buffid，因此采用懒修复即可：
-     * refresh 失败说明本地缓存已过期，立刻删掉并重新 add。
+     * 对玩家来说，必须经过 Player.refreshBuff/addBuff 才会维护 player.buffMap，
+     * 并发出 HUD 依赖的 emitStatusChanged({ buff: true })；直接操作 BuffManager 会绕过这层。
      *
      * @param {string} cooldownKey
      * @param {import("../player/player/player").Player | import("../monster/monster/monster").Monster} target
@@ -213,6 +213,18 @@ export class AreaEffect {
      * @returns {number} 成功时返回有效 buffId，失败返回 -1
      */
     _ensureBuff(cooldownKey, target, targetType) {
+        if (typeof target?.refreshBuff === "function") {
+            const refreshed = target.refreshBuff(this.buffConfigId);
+            const runtimeBuffId = target.buffMap instanceof Map
+                ? target.buffMap.get(this.buffConfigId)
+                : undefined;
+
+            if (refreshed && typeof runtimeBuffId === "number" && runtimeBuffId > 0) {
+                this._buffid.set(cooldownKey, runtimeBuffId);
+                return runtimeBuffId;
+            }
+        }
+
         const cachedBuffId = this._buffid.get(cooldownKey);
         if (cachedBuffId&& cachedBuffId > 0) {
             /** @type {import("../buff/buff_const").BuffRefreshRequest} */

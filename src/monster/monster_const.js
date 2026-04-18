@@ -80,7 +80,8 @@ export const MonsterState = {
  * @typedef {object} OnMonsterDeath
  * @property {import("./monster/monster").Monster} monster
  * @property {import("cs_script/point_script").Entity|null|undefined} killer
- * @property {number} reward
+ * @property {number} moneyReward
+ * @property {number} expReward
  */
 /**
  * @typedef {object} OnMonsterDamaged
@@ -141,14 +142,20 @@ export const MonsterType={
         template_name:"headcrab_classic_template",
         model_name:"headcrab_classic_model",//模型本体，animations播放的是这个模型的动画
         name: "headcrab_classic",
-        baseHealth: 100,
-        baseDamage: 10,
-        speed: 150,
-        reward: 100,
+        baseHealth: 210,
+        baseDamage: 16,
+        speed: 70,
+        moneyReward: 150,
+        expReward: 24,
         attackdist:80,
-        attackCooldown:0.1,
+        attackCooldown:0.85,
         movementmode:"walk",
         skill_pool:[
+            {
+                id:"pounce",
+                chance: 1,
+                params:{ cooldown:5, distance:350, duration:0.5, animation:"pounce" }
+            },
             //{
             //    id:"sound",
             //    chance: 1,
@@ -175,13 +182,13 @@ export const MonsterType={
             //{
             //    id:"pounce",
             //    chance: 1,
-            //    params:{ cooldown:5, distance:250, animation:"pounce" }
-            //},
+            //    params:{ cooldown:5, distance:500, duration:0.5, animation:"pounce" }
+            //},                        触发距离        飞扑时间(小：更快、更平、更像猛扑,大：更慢、更高、更像抛起来再落下)
             //// 示例：无动画的 pounce（在 canTrigger 内直接执行）
             //{
             //    id:"pounce",
             //    chance: 1,
-            //    params:{ cooldown:10, distance:400 }  // 无 animation → 无动画直触发
+            //    params:{ cooldown:5, distance:500, duration:0.5}  // 无 animation → 无动画直触发
             //},
             //// 示例：护盾
             //{
@@ -245,50 +252,69 @@ export const MonsterType={
             ]
         }
     },
-    "headcrab_reviver":{            
-        template_name:"headcrab_reviver_template",
-        model_name:"headcrab_reviver_model",//模型本体，animations播放的是这个模型的动画
-        name: "headcrab_reviver",
-        baseHealth: 100,
-        baseDamage: 10,
-        speed: 150,
-        reward: 100,
-        attackdist:80,
-        attackCooldown:0.1,
-        movementmode:"walk",
-        skill_pool:[],
-        animations:{
-            "idle":[
-                "rhc_aggro_idle",
-                "rhc_aggro_idle_twitch_01",
-                "rhc_sneak_idle_lookaround"
-            ],
-            "walk":[
-                "rhc_scorpion_run_angled"
-            ],
-            "attack":[
-                "rhc_aggro_jumpattack"
-            ],
-            "skill":[
-                "rhc_aggro_jumpattack"
-            ],
-            "dead":[
-                "rhc_die"
-            ]
-        }
-    },
+    //"headcrab_reviver":{            
+    //    template_name:"headcrab_reviver_template",
+    //    model_name:"headcrab_reviver_model",//模型本体，animations播放的是这个模型的动画
+    //    name: "headcrab_reviver",
+    //    baseHealth: 240,
+    //    baseDamage: 18,
+    //    speed: 170,
+    //    moneyReward: 210,
+    //    expReward: 28,
+    //    attackdist:80,
+    //    attackCooldown:0.95,
+    //    movementmode:"walk",
+    //    skill_pool:[
+    //        {
+    //            id:"pounce",
+    //            chance: 1,
+    //            params:{ cooldown:5, distance:250, duration:1, animation:"pounce" }
+    //        }
+    //    ],
+    //    animations:{
+    //        "idle":[
+    //            "rhc_aggro_idle",
+    //            "rhc_aggro_idle_twitch_01",
+    //            "rhc_sneak_idle_lookaround"
+    //        ],
+    //        "walk":[
+    //            "rhc_scorpion_run_angled"
+    //        ],
+    //        "attack":[
+    //            "rhc_aggro_jumpattack"
+    //        ],
+    //        "skill":[
+    //            "rhc_aggro_jumpattack"
+    //        ],
+    //        "dead":[
+    //            "rhc_die"
+    //        ]
+    //    }
+    //},
     "headcrab_black":{            
         template_name:"headcrab_black_template",
         model_name:"headcrab_black_model",//模型本体，animations播放的是这个模型的动画
         name: "headcrab_black",
-        baseHealth: 100,
-        baseDamage: 10,
-        speed: 150,
-        reward: 100,
+        baseHealth: 300,
+        baseDamage: 18,
+        speed: 160,
+        moneyReward: 225,
+        expReward: 32,
         attackdist:80,
-        attackCooldown:0.1,
+        attackCooldown:1.05,
         movementmode:"walk",
-        skill_pool:[],
+        skill_pool:[
+            {
+                id:"pounce",
+                chance: 1,
+                params:{ cooldown:5, distance:400, duration:1, animation:"pounce" }
+            },
+            {
+                id:"powerattack",
+                chance: 1,
+                params:{ cooldown:0, buffConfigId:"poison", bonusDamageMultiplier:0 }
+            }
+        ],
         animations:{
             "idle":[
                 "headcrabblack_idlesniff"
@@ -315,14 +341,26 @@ export const MonsterType={
         template_name:"headcrab_armored_template",
         model_name:"headcrab_armored_model",//模型本体，animations播放的是这个模型的动画
         name: "headcrab_armored",
-        baseHealth: 100,
-        baseDamage: 10,
-        speed: 150,
-        reward: 100,
+        baseHealth: 630,
+        baseDamage: 24,
+        speed: 55,
+        moneyReward: 300,
+        expReward: 44,
         attackdist:80,
-        attackCooldown:0.1,
+        attackCooldown:1.0,
         movementmode:"walk",
-        skill_pool:[],
+        skill_pool:[
+            {
+                id:"pounce",
+                chance: 1,
+                params:{ cooldown:5, distance:180, duration:1, animation:"pounce" }
+            },
+            {
+                id: "shield",
+                chance: 1,
+                params: { cooldown:15, runtime:-1, value:50 }
+            },
+        ],
         animations:{
             "idle":[
                 "headcrab_classic_idle",
@@ -358,14 +396,21 @@ export const MonsterType={
         template_name:"headcrab_template",
         model_name:"headcrab_model",//模型本体，animations播放的是这个模型的动画
         name: "headcrab",
-        baseHealth: 100,
-        baseDamage: 10,
-        speed: 150,
-        reward: 100,
+        baseHealth: 285,
+        baseDamage: 22,
+        speed: 220,
+        moneyReward: 180,
+        expReward: 28,
         attackdist:80,
-        attackCooldown:0.1,
+        attackCooldown:0.95,
         movementmode:"walk",
-        skill_pool:[],
+        skill_pool:[
+            {
+                id:"pounce",
+                chance: 1,
+                params:{ cooldown:15, distance:800, duration:2, animation:"pounce" }
+            }
+        ],
         animations:{
             "idle":[
                 "headcrab_idle",
@@ -393,12 +438,13 @@ export const MonsterType={
         template_name:"zombie_classic_template",
         model_name:"zombie_classic_model",//模型本体，animations播放的是这个模型的动画
         name: "zombie_classic",
-        baseHealth: 100,
-        baseDamage: 10,
-        speed: 150,
-        reward: 100,
+        baseHealth: 405,
+        baseDamage: 24,
+        speed: 40,
+        moneyReward: 180,
+        expReward: 28,
         attackdist:80,
-        attackCooldown:0.1,
+        attackCooldown:2,
         movementmode:"walk",
         skill_pool:[],
         animations:{
@@ -425,14 +471,21 @@ export const MonsterType={
         template_name:"zombie_fast_template",
         model_name:"zombie_fast_model",//模型本体，animations播放的是这个模型的动画
         name: "zombie_fast",
-        baseHealth: 100,
-        baseDamage: 10,
-        speed: 150,
-        reward: 100,
+        baseHealth: 360,
+        baseDamage: 28,
+        speed: 180,
+        moneyReward: 225,
+        expReward: 32,
         attackdist:80,
-        attackCooldown:0.1,
+        attackCooldown:0.92,
         movementmode:"walk",
-        skill_pool:[],
+        skill_pool:[
+            {
+                id:"pounce",
+                chance: 1,
+                params:{ cooldown:25, distance:1000, duration:3, animation:"pounce" }
+            }
+        ],
         animations:{
             "idle":[
                 "idle_angry"
@@ -457,14 +510,21 @@ export const MonsterType={
         template_name:"zombie_poison_template",
         model_name:"zombie_poison_model",//模型本体，animations播放的是这个模型的动画
         name: "zombie_poison",
-        baseHealth: 100,
-        baseDamage: 10,
-        speed: 150,
-        reward: 100,
+        baseHealth: 720,
+        baseDamage: 28,
+        speed: 130,
+        moneyReward: 360,
+        expReward: 48,
         attackdist:80,
-        attackCooldown:0.1,
+        attackCooldown:1.12,
         movementmode:"walk",
-        skill_pool:[],
+        skill_pool:[
+            {
+                id:"spawn",
+                chance: 1,
+                params: { count:1, typeName:"headcrab_black", maxSummons:1, radiusMin:0, radiusMax:48, tries:10 }
+            }
+        ],
         animations:{
             "idle":[
                 "Idle01"
@@ -482,16 +542,53 @@ export const MonsterType={
             ]
         }
     },
-    "antlion_worker":{            
-        template_name:"antlion_worker_template",
-        model_name:"antlion_worker_model",//模型本体，animations播放的是这个模型的动画
-        name: "antlion_worker",
-        baseHealth: 100,
-        baseDamage: 10,
-        speed: 150,
-        reward: 100,
+    //"antlion_worker":{            
+    //    template_name:"antlion_worker_template",
+    //    model_name:"antlion_worker_model",//模型本体，animations播放的是这个模型的动画
+    //    name: "antlion_worker",
+    //    baseHealth: 630,
+    //    baseDamage: 34,
+    //    speed: 190,
+    //    moneyReward: 390,
+    //    expReward: 52,
+    //    attackdist:80,
+    //    attackCooldown:0.95,
+    //    movementmode:"walk",
+    //    skill_pool:[],
+    //    animations:{
+    //        "idle":[
+    //            "distractidle01",
+    //            "distractidle03",
+    //            "idle01"
+    //        ],
+    //        "walk":[
+    //            "runn"
+    //        ],
+    //        "attack":[
+    //            "attack_02",
+    //            "attack_03"
+    //        ],
+    //        "skill":[
+    //            "flyattack05all"
+    //        ],
+    //        "dead":[],
+    //        "pounce":[
+    //            "flyattack01all",
+    //            "flyattack02all"
+    //        ]
+    //    }
+    //},
+    "antlion":{            
+        template_name:"antlion_template",
+        model_name:"antlion_model",//模型本体，animations播放的是这个模型的动画
+        name: "antlion",
+        baseHealth: 450,
+        baseDamage: 30,
+        speed: 205,
+        moneyReward: 270,
+        expReward: 40,
         attackdist:80,
-        attackCooldown:0.1,
+        attackCooldown:0.9,
         movementmode:"walk",
         skill_pool:[],
         animations:{
@@ -517,39 +614,4 @@ export const MonsterType={
             ]
         }
     },
-    "antlion":{            
-        template_name:"antlion_template",
-        model_name:"antlion_model",//模型本体，animations播放的是这个模型的动画
-        name: "antlion",
-        baseHealth: 100,
-        baseDamage: 10,
-        speed: 150,
-        reward: 100,
-        attackdist:80,
-        attackCooldown:0.1,
-        movementmode:"walk",
-        skill_pool:[],
-        animations:{
-            "idle":[
-                "distractidle01",
-                "distractidle03",
-                "idle01"
-            ],
-            "walk":[
-                "runn"
-            ],
-            "attack":[
-                "attack_02",
-                "attack_03"
-            ],
-            "skill":[
-                "flyattack05all"
-            ],
-            "dead":[],
-            "pounce":[
-                "flyattack01all",
-                "flyattack02all"
-            ]
-        }
-    }
 }
