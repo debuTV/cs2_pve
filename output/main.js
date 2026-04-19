@@ -210,7 +210,8 @@ const eventBus=new EventBus();
 /**
  * 通用动画集合类型：任意键对应动画名数组。
  * 例如 `{ idle: string[], walk: string[] }`。`idle`、`walk`、`attack`、`skill`、`dead` 在对应状态切换时播放。
- * @typedef {{ [key: string]: string[] }} animations
+ * 当vel为-1时，用设置自身的速度取代动画速度
+ * @typedef {{ [key: string]: {name:string,vel:number}[] }} animations
  */
 /**
  * @typedef {object} monsterTypes - 怪物类型配置对象。每个怪物实例对应一个 monsterTypes 配置项，包含其属性、技能池和动画列表。
@@ -796,12 +797,6 @@ const MonsterType={
             //    chance: 1,
             //    params: { cooldown:15, runtime:-1, value:50 }
             //},
-            //// 示例：急速（5秒内速度×1.8，冷却10秒，可选发光）
-            //{
-            //    id: "speedboost",
-            //    chance: 1,
-            //    params: { cooldown:10, buffConfigId:"speed_up", glow:{r:255,g:128,b:0} }
-            //},
             //// 示例：投掷石头（通过投掷物管理器创建运行时投掷物）
             //{
             //    id: "throwstone",
@@ -823,32 +818,32 @@ const MonsterType={
         ],
         animations:{
             "idle":[
-                "headcrab_classic_idle",
-                "headcrab_classic_idle_b",
-                "headcrab_classic_idle_c"
+                { name: "headcrab_classic_idle", vel: 0 },
+                { name: "headcrab_classic_idle_b", vel: 0 },
+                { name: "headcrab_classic_idle_c", vel: 0 }
             ],
             "walk":[
-                "headcrab_classic_walk",
-                "headcrab_classic_run"
+                { name: "headcrab_classic_walk", vel: 19 },
+                { name: "headcrab_classic_run", vel: 35 }
             ],
             "attack":[
-                "headcrab_classic_attack_antic_02",
-                "headcrab_classic_attack_antic_03",
-                "headcrab_classic_attack_antic_04"
+                { name: "headcrab_classic_attack_antic_02", vel: 0 },
+                { name: "headcrab_classic_attack_antic_03", vel: 0 },
+                { name: "headcrab_classic_attack_antic_04", vel: 0 }
             ],
             "skill":[
-                "headcrab_classic_attack_antic_02",
-                "headcrab_classic_attack_antic_03",
-                "headcrab_classic_attack_antic_04"
+                { name: "headcrab_classic_attack_antic_02", vel: 0 },
+                { name: "headcrab_classic_attack_antic_03", vel: 0 },
+                { name: "headcrab_classic_attack_antic_04", vel: 0 }
             ],
             "dead":[
-                "headcrab_classic_death_directional_0",
-                "headcrab_classic_death_directional_180",
-                "headcrab_classic_death_directional_90_left",
-                "headcrab_classic_death_directional_90_right"
+                { name: "headcrab_classic_death_directional_0", vel: 0 },
+                { name: "headcrab_classic_death_directional_180", vel: 0 },
+                { name: "headcrab_classic_death_directional_90_left", vel: 0 },
+                { name: "headcrab_classic_death_directional_90_right", vel: 0 }
             ],
             "pounce":[
-                "headcrab_classic_jumpattack"
+                { name: "headcrab_classic_jumpattack", vel: 0 }
             ]
         }
     },
@@ -878,7 +873,7 @@ const MonsterType={
     //            "rhc_sneak_idle_lookaround"
     //        ],
     //        "walk":[
-    //            "rhc_scorpion_run_angled"
+    //            "rhc_scorpion_run_angled",208
     //        ],
     //        "attack":[
     //            "rhc_aggro_jumpattack"
@@ -917,23 +912,23 @@ const MonsterType={
         ],
         animations:{
             "idle":[
-                "headcrabblack_idlesniff"
+                { name: "headcrabblack_idlesniff", vel: 0 }
             ],
             "walk":[
-                "walk_n",
-                "headcrabblack_scurry"
+                { name: "walk_n", vel: 25 },
+                { name: "headcrabblack_scurry", vel: 64 }
             ],
             "attack":[
-                "headcrabblack_spitattack"
+                { name: "headcrabblack_spitattack", vel: 0 }
             ],
             "skill":[
-                "headcrabblack_idle_b"
+                { name: "headcrabblack_idle_b", vel: 0 }
             ],
             "dead":[
-                "headcrabblack_dieplaceholder"
+                { name: "headcrabblack_dieplaceholder", vel: 0 }
             ],
             "pounce":[
-                "headcrabblack_jumpattack"
+                { name: "headcrabblack_jumpattack", vel: 0 }
             ]
         }
     },
@@ -963,32 +958,32 @@ const MonsterType={
         ],
         animations:{
             "idle":[
-                "headcrab_classic_idle",
-                "headcrab_classic_idle_b",
-                "headcrab_classic_idle_c"
+                { name: "headcrab_classic_idle", vel: 0 },
+                { name: "headcrab_classic_idle_b", vel: 0 },
+                { name: "headcrab_classic_idle_c", vel: 0 }
             ],
             "walk":[
-                "headcrab_classic_walk",
-                "headcrab_classic_run"
+                { name: "headcrab_classic_walk", vel: 19 },
+                { name: "headcrab_classic_run", vel: 35 }
             ],
             "attack":[
-                "headcrab_classic_attack_antic_02",
-                "headcrab_classic_attack_antic_03",
-                "headcrab_classic_attack_antic_04"
+                { name: "headcrab_classic_attack_antic_02", vel: 0 },
+                { name: "headcrab_classic_attack_antic_03", vel: 0 },
+                { name: "headcrab_classic_attack_antic_04", vel: 0 }
             ],
             "skill":[
-                "headcrab_classic_attack_antic_02",
-                "headcrab_classic_attack_antic_03",
-                "headcrab_classic_attack_antic_04"
+                { name: "headcrab_classic_attack_antic_02", vel: 0 },
+                { name: "headcrab_classic_attack_antic_03", vel: 0 },
+                { name: "headcrab_classic_attack_antic_04", vel: 0 }
             ],
             "dead":[
-                "headcrab_classic_death_directional_0",
-                "headcrab_classic_death_directional_180",
-                "headcrab_classic_death_directional_90_left",
-                "headcrab_classic_death_directional_90_right"
+                { name: "headcrab_classic_death_directional_0", vel: 0 },
+                { name: "headcrab_classic_death_directional_180", vel: 0 },
+                { name: "headcrab_classic_death_directional_90_left", vel: 0 },
+                { name: "headcrab_classic_death_directional_90_right", vel: 0 }
             ],
             "pounce":[
-                "headcrab_classic_jumpattack"
+                { name: "headcrab_classic_jumpattack", vel: 0 }
             ]
         }
     },
@@ -1013,24 +1008,24 @@ const MonsterType={
         ],
         animations:{
             "idle":[
-                "headcrab_idle",
-                "headcrab_idlesearch"
+                { name: "headcrab_idle", vel: 0 },
+                { name: "headcrab_idlesearch", vel: 0 }
             ],
             "walk":[
-                "headcrab_walk",
-                "headcrab_run"
+                { name: "headcrab_walk", vel: 38 },
+                { name: "headcrab_run", vel: 213 }
             ],
             "attack":[
-                "headcrab_rearup"
+                { name: "headcrab_rearup", vel: 0 }
             ],
             "skill":[
-                "headcrab_jumpflinch"
+                { name: "headcrab_jumpflinch", vel: 0 }
             ],
             "dead":[
-                "headcrab_die"
+                { name: "headcrab_die", vel: 0 }
             ],
             "pounce":[
-                "headcrab_jumpattack"
+                { name: "headcrab_jumpattack", vel: 0 }
             ]
         }
     },
@@ -1049,19 +1044,19 @@ const MonsterType={
         skill_pool:[],
         animations:{
             "idle":[
-                "ragdoll"
+                { name: "ragdoll", vel: 0 }
             ],
             "walk":[
-                "walk4",
-                "a_walk1",
-                "a_walk2",
-                "a_walk3"
+                { name: "walk4", vel: 45 },
+                { name: "a_walk1", vel: 45 },
+                { name: "a_walk2", vel: 46 },
+                { name: "a_walk3", vel: 41 }
             ],
             "attack":[
-                "swatleftmid",
-                "swatrightmid",
-                "swatleftlow",
-                "swatrightlow"
+                { name: "swatleftmid", vel: 0 },
+                { name: "swatrightmid", vel: 0 },
+                { name: "swatleftlow", vel: 0 },
+                { name: "swatrightlow", vel: 0 }
             ],
             "skill":[],
             "dead":[]
@@ -1088,21 +1083,22 @@ const MonsterType={
         ],
         animations:{
             "idle":[
-                "idle_angry"
+                { name: "idle_angry", vel: 0 }
             ],
             "walk":[
-                "Run"
+                { name: "Run", vel: 217 },
+                { name: "a_WalkN", vel: 55 }
             ],
             "attack":[
-                "BR2_Attack",
-                "Melee"
+                { name: "BR2_Attack", vel: 0 },
+                { name: "Melee", vel: 0 }
             ],
             "skill":[
-                "idle_angry"
+                { name: "idle_angry", vel: 0 }
             ],
             "dead":[],
             "pounce":[
-                "JumpNavMove"
+                { name: "JumpNavMove", vel: 0 }
             ]
         }
     },
@@ -1127,18 +1123,18 @@ const MonsterType={
         ],
         animations:{
             "idle":[
-                "Idle01"
+                { name: "Idle01", vel: 0 }
             ],
             "walk":[
-                "Run",
-                "Walk"
+                { name: "Run", vel: 115 },
+                { name: "Walk", vel: 41 }
             ],
             "attack":[
-                "melee_01"
+                { name: "melee_01", vel: 0 }
             ],
             "skill":[],
             "dead":[
-                "releasecrab"
+                { name: "releasecrab", vel: 0 }
             ]
         }
     },
@@ -1162,7 +1158,7 @@ const MonsterType={
     //            "idle01"
     //        ],
     //        "walk":[
-    //            "runn"
+    //            "runn",156
     //        ],
     //        "attack":[
     //            "attack_02",
@@ -1193,24 +1189,24 @@ const MonsterType={
         skill_pool:[],
         animations:{
             "idle":[
-                "distractidle01",
-                "distractidle03",
-                "idle01"
+                { name: "distractidle01", vel: 0 },
+                { name: "distractidle03", vel: 0 },
+                { name: "idle01", vel: 0 }
             ],
             "walk":[
-                "runn"
+                { name: "runn", vel: 156 }
             ],
             "attack":[
-                "attack_02",
-                "attack_03"
+                { name: "attack_02", vel: 0 },
+                { name: "attack_03", vel: 0 }
             ],
             "skill":[
-                "flyattack05all"
+                { name: "flyattack05all", vel: 0 }
             ],
             "dead":[],
             "pounce":[
-                "flyattack01all",
-                "flyattack02all"
+                { name: "flyattack01all", vel: 0 },
+                { name: "flyattack02all", vel: 0 }
             ]
         }
     },
@@ -1398,7 +1394,7 @@ const wavesConfig=[
         moneyReward: 750,
         expReward: 60,
         spawnInterval: 0.16,
-        preparationTime: 5,
+        preparationTime: 30,                  //记住要和广播消息的 delay 匹配
         aliveMonster: 6,
         monster_spawn_points_name:["monster_spawnpoint"],
         broadcastmessage:[{message:"第1波",delay:30}],
@@ -1413,7 +1409,7 @@ const wavesConfig=[
         moneyReward: 1050,
         expReward: 96,
         spawnInterval: 0.14,
-        preparationTime: 7,
+        preparationTime: 30,
         aliveMonster: 10,
         monster_spawn_points_name:["monster_spawnpoint"],
         broadcastmessage:[{message:"第2波",delay:30}],
@@ -1432,7 +1428,7 @@ const wavesConfig=[
         moneyReward: 1500,
         expReward: 144,
         spawnInterval: 0.12,
-        preparationTime: 9,
+        preparationTime: 30,
         aliveMonster: 14,
         monster_spawn_points_name:["monster_spawnpoint"],
         broadcastmessage:[{message:"第3波",delay:30}],
@@ -1451,7 +1447,7 @@ const wavesConfig=[
         moneyReward: 2100,
         expReward: 204,
         spawnInterval: 0.10,
-        preparationTime: 11,
+        preparationTime: 30,
         aliveMonster: 18,
         monster_spawn_points_name:["monster_spawnpoint"],
         broadcastmessage:[{message:"第4波",delay:30}],
@@ -1471,7 +1467,7 @@ const wavesConfig=[
         moneyReward: 2850,
         expReward: 276,
         spawnInterval: 0.09,
-        preparationTime: 14,
+        preparationTime: 30,
         aliveMonster: 22,
         monster_spawn_points_name:["monster_spawnpoint"],
         broadcastmessage:[{message:"第5波",delay:30}],
@@ -3396,6 +3392,7 @@ class Player {
         this.skillId = null;
         /** @type {string | null} */
         this.skillTypeId = null;
+        this.addMoney(500);//初始金钱
     }
 
     // ——— 生命周期入口（委托给 Lifecycle） ———
@@ -5990,7 +5987,7 @@ class HudManager {
         const displayName = this._getEffectDisplayName(skillSummary.typeId);
         if (skillSummary.isConsumed) return `${displayName}(已使用)`;
         if (!skillSummary.isReady) return `${displayName}(${skillSummary.remainingCooldown.toFixed(1)}s)`;
-        return `${displayName}(就绪)`;
+        return `${displayName}("F"触发)`;
     }
 
     /**
@@ -6112,7 +6109,6 @@ class HudManager {
             doubleattack: "双重攻击",
             powerattack: "破甲",
             shield: "护盾",
-            speedboost: "疾跑",
             throwstone: "掷石",
             sound: "音波",
             spawn: "召唤",
@@ -7552,94 +7548,6 @@ class ShieldSkill extends SkillTemplate {
         }
         this.running = true;
         this._markTriggered();
-    }
-}
-
-/**
- * @module 怪物系统/怪物技能/急速
- */
-
-class SpeedBoostSkill extends SkillTemplate {
-    /**
-     * @param {any|null} player
-     * @param {import("../../monster/monster/monster").Monster|null} monster
-     * @param {number} id
-     * @param {{
-     *   cooldown?: number;
-    *   buffConfigId?: string;
-     *   events?: string[];
-     *   animation?: string | null;
-     *   glow?: {r:number, g:number, b:number} | null;
-     * }} [params]
-     */
-    constructor(player, monster, id, params = {}) {
-        super(player, monster, "speedboost", id, params);
-        this.animation = params.animation ?? null;
-        this.events = params.events ?? [MonsterRuntimeEvents.Tick];
-        this.buffConfigId = typeof params.buffConfigId === "string" && params.buffConfigId.trim().length > 0
-            ? params.buffConfigId.trim()
-            : "speed_up";
-        this.glow = params.glow ?? null;
-    }
-
-    onSkillDelete() {
-        this._endBoost();
-    }
-
-    canTrigger(/** @type {any} */ event) {
-        if (!this.events.includes(event.type)) return false;
-        if (!this._cooldownReady()) return false;
-
-        const monster = this.monster;
-        if (monster) {
-            if (this.running) return false;
-            if (monster.isOccupied()) return false;
-        }
-
-        if (this.animation === null) {
-            this.trigger();
-            return false;
-        }
-        return true;
-    }
-
-    tick() {
-        if (this.player) return;
-
-        const monster = this.monster;
-        if (!this.running || !monster) return;
-
-        if (!monster.hasBuff(this.buffConfigId)) {
-            this._endBoost();
-        }
-    }
-
-    trigger() {
-        if (this.player) {
-            this._markTriggered();
-            return;
-        }
-
-        const monster = this.monster;
-        if (!monster) return;
-
-        const buff = monster.addBuff(this.buffConfigId);
-
-        if (!buff) return;
-
-        if (this.glow && monster.model instanceof BaseModelEntity) {
-            monster.model.Glow(this.glow);
-        }
-        this.running = true;
-        this._markTriggered();
-    }
-
-    _endBoost() {
-        const monster = this.monster;
-        this.running = false;
-        if (this.glow && monster && monster.model instanceof BaseModelEntity) {
-            monster.model.Unglow();
-        }
     }
 }
 
@@ -9557,9 +9465,6 @@ fire          持续区域效果（怪物默认 Die 触发；玩家默认 Inspec
 shield      能量护盾（默认 [OnSpawn, OnTick]，Spawn 始终保留以初始化修饰器）
   { runtime: number, value: number, cooldown?, events?, animation? }
 
-speedboost  急速（默认 OnTick，施加预配置加速 Buff，超时后恢复）
-  { buffConfigId?, cooldown?, events?, animation?, glow?: {r,g,b} }
-
 throwstone  投掷石头（默认 OnTick，距离判定后请求投掷物管理器创建投掷物）
   { distanceMin?, distanceMax?, damage?, projectileSpeed?, gravityScale?,
     radius?, maxTargets?, templateName?, cooldown?, events?, animation? }
@@ -9582,7 +9487,7 @@ player_turret     玩家哨戒炮台（InspectWeapon 触发，在当前位置部
  *
  * 当前支持的 typeId：
  * corestats、pounce、initanim、doubleattack、powerattack、
- * fire、spawn、shield、speedboost、throwstone、sound、
+ * fire、spawn、shield、throwstone、sound、
  * player_guard、player_mend、player_mend_field、player_vanguard、player_turret。
  *
  * 所有技能均支持 `params.events`、`params.animation`、`params.cooldown`。
@@ -9616,8 +9521,6 @@ const SkillFactory = {
                 return new SpawnSkill(player, monster, id, params);
             case "shield":
                 return new ShieldSkill(player, monster, id, params);
-            case "speedboost":
-                return new SpeedBoostSkill(player, monster, id, params);
             case "throwstone":
                 return new ThrowStoneSkill(player, monster, id, params);
             case "sound":
@@ -9765,6 +9668,7 @@ class MonsterMovementPathAdapter {
         this._defaultMode = "walk";
         /** 当前是否有活跃的追击任务。 */
         this._active = false;
+        this.speed=monster.speed;
     }
 
     /**
@@ -9855,11 +9759,18 @@ class MonsterMovementPathAdapter {
             targetEntity: target,
             usePathRefresh: !this.monster.isOccupied(),
             useNPCSeparation: true,
-            maxSpeed: this.monster.speed,
+            maxSpeed: this.speed,
             Mode: this._defaultMode,
         });
     }
-
+    /**
+     * @param {number} speed
+     */
+    setSpeed(speed){
+        this.speed=speed;
+        if (!this._active) return;
+        this._submitChase();
+    }
     /** @returns {import("cs_script/point_script").Entity | null} */
     _getMovementEntity() {
         const entity = this.monster.model;
@@ -9912,7 +9823,7 @@ class MonsterAnimator {
         this.onStateFinish = null;
         /** @type {Entity | null} */
         this._boundModel = null;
-
+        this.animspeed=0;//当前动画的移动速度
         this._bindModelOutput();
     }
 
@@ -9923,6 +9834,7 @@ class MonsterAnimator {
         this._boundModel = this.model;
         this.monster.entityBridge.modelconnnectid=Instance.ConnectOutput(this.model,"OnAnimationDone",()=>{
             this.locked = false;
+            this.animspeed=0;
             this.onStateFinish?.(this.currentstats);
         });
     }
@@ -10052,7 +9964,8 @@ class MonsterAnimator {
         if (!this.model||!this.model.IsValid() || !list || list.length === 0) return null;
         const anim = list[Math.floor(Math.random() * list.length)];
         if (!anim) return;
-        Instance.EntFireAtTarget({target:this.model,input:"SetAnimation",value:anim});
+        Instance.EntFireAtTarget({target:this.model,input:"SetAnimation",value:anim.name});
+        this.animspeed=anim.vel;
         this.locked=true;
         return anim;
     }
@@ -10475,6 +10388,7 @@ class Monster {
         const intent = this.evaluateIntent();
         this.resolveIntent(intent);
         this.animation.tick(this.state);
+        this.movementPath.setSpeed(this.animation.animspeed!=-1?this.animation.animspeed:this.speed);
     }
 
     /**
@@ -10537,7 +10451,7 @@ class Monster {
         this.state = nextState;
         this.emitRuntimeEvent(MonsterRuntimeEvents.StateChange, { oldState: prevState, nextState });
         this.animation.enter(nextState);
-
+        this.movementPath.setSpeed(this.animation.animspeed!=-1?this.animation.animspeed:this.speed);
         if (nextState === MonsterState.CHASE || nextState === MonsterState.ATTACK) {
             this.movementPath.activate();
         } else if (prevState === MonsterState.CHASE || prevState === MonsterState.ATTACK) {

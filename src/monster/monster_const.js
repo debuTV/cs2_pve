@@ -196,12 +196,6 @@ export const MonsterType={
             //    chance: 1,
             //    params: { cooldown:15, runtime:-1, value:50 }
             //},
-            //// 示例：急速（5秒内速度×1.8，冷却10秒，可选发光）
-            //{
-            //    id: "speedboost",
-            //    chance: 1,
-            //    params: { cooldown:10, buffConfigId:"speed_up", glow:{r:255,g:128,b:0} }
-            //},
             //// 示例：投掷石头（通过投掷物管理器创建运行时投掷物）
             //{
             //    id: "throwstone",
@@ -223,32 +217,32 @@ export const MonsterType={
         ],
         animations:{
             "idle":[
-                "headcrab_classic_idle",
-                "headcrab_classic_idle_b",
-                "headcrab_classic_idle_c"
+                { name: "headcrab_classic_idle", vel: 0 },
+                { name: "headcrab_classic_idle_b", vel: 0 },
+                { name: "headcrab_classic_idle_c", vel: 0 }
             ],
             "walk":[
-                "headcrab_classic_walk",
-                "headcrab_classic_run"
+                { name: "headcrab_classic_walk", vel: 19 },
+                { name: "headcrab_classic_run", vel: 35 }
             ],
             "attack":[
-                "headcrab_classic_attack_antic_02",
-                "headcrab_classic_attack_antic_03",
-                "headcrab_classic_attack_antic_04"
+                { name: "headcrab_classic_attack_antic_02", vel: 0 },
+                { name: "headcrab_classic_attack_antic_03", vel: 0 },
+                { name: "headcrab_classic_attack_antic_04", vel: 0 }
             ],
             "skill":[
-                "headcrab_classic_attack_antic_02",
-                "headcrab_classic_attack_antic_03",
-                "headcrab_classic_attack_antic_04"
+                { name: "headcrab_classic_attack_antic_02", vel: 0 },
+                { name: "headcrab_classic_attack_antic_03", vel: 0 },
+                { name: "headcrab_classic_attack_antic_04", vel: 0 }
             ],
             "dead":[
-                "headcrab_classic_death_directional_0",
-                "headcrab_classic_death_directional_180",
-                "headcrab_classic_death_directional_90_left",
-                "headcrab_classic_death_directional_90_right"
+                { name: "headcrab_classic_death_directional_0", vel: 0 },
+                { name: "headcrab_classic_death_directional_180", vel: 0 },
+                { name: "headcrab_classic_death_directional_90_left", vel: 0 },
+                { name: "headcrab_classic_death_directional_90_right", vel: 0 }
             ],
             "pounce":[
-                "headcrab_classic_jumpattack"
+                { name: "headcrab_classic_jumpattack", vel: 0 }
             ]
         }
     },
@@ -278,7 +272,7 @@ export const MonsterType={
     //            "rhc_sneak_idle_lookaround"
     //        ],
     //        "walk":[
-    //            "rhc_scorpion_run_angled"
+    //            "rhc_scorpion_run_angled",208
     //        ],
     //        "attack":[
     //            "rhc_aggro_jumpattack"
@@ -317,23 +311,23 @@ export const MonsterType={
         ],
         animations:{
             "idle":[
-                "headcrabblack_idlesniff"
+                { name: "headcrabblack_idlesniff", vel: 0 }
             ],
             "walk":[
-                "walk_n",
-                "headcrabblack_scurry"
+                { name: "walk_n", vel: 25 },
+                { name: "headcrabblack_scurry", vel: 64 }
             ],
             "attack":[
-                "headcrabblack_spitattack"
+                { name: "headcrabblack_spitattack", vel: 0 }
             ],
             "skill":[
-                "headcrabblack_idle_b"
+                { name: "headcrabblack_idle_b", vel: 0 }
             ],
             "dead":[
-                "headcrabblack_dieplaceholder"
+                { name: "headcrabblack_dieplaceholder", vel: 0 }
             ],
             "pounce":[
-                "headcrabblack_jumpattack"
+                { name: "headcrabblack_jumpattack", vel: 0 }
             ]
         }
     },
@@ -363,32 +357,32 @@ export const MonsterType={
         ],
         animations:{
             "idle":[
-                "headcrab_classic_idle",
-                "headcrab_classic_idle_b",
-                "headcrab_classic_idle_c"
+                { name: "headcrab_classic_idle", vel: 0 },
+                { name: "headcrab_classic_idle_b", vel: 0 },
+                { name: "headcrab_classic_idle_c", vel: 0 }
             ],
             "walk":[
-                "headcrab_classic_walk",
-                "headcrab_classic_run"
+                { name: "headcrab_classic_walk", vel: 19 },
+                { name: "headcrab_classic_run", vel: 35 }
             ],
             "attack":[
-                "headcrab_classic_attack_antic_02",
-                "headcrab_classic_attack_antic_03",
-                "headcrab_classic_attack_antic_04"
+                { name: "headcrab_classic_attack_antic_02", vel: 0 },
+                { name: "headcrab_classic_attack_antic_03", vel: 0 },
+                { name: "headcrab_classic_attack_antic_04", vel: 0 }
             ],
             "skill":[
-                "headcrab_classic_attack_antic_02",
-                "headcrab_classic_attack_antic_03",
-                "headcrab_classic_attack_antic_04"
+                { name: "headcrab_classic_attack_antic_02", vel: 0 },
+                { name: "headcrab_classic_attack_antic_03", vel: 0 },
+                { name: "headcrab_classic_attack_antic_04", vel: 0 }
             ],
             "dead":[
-                "headcrab_classic_death_directional_0",
-                "headcrab_classic_death_directional_180",
-                "headcrab_classic_death_directional_90_left",
-                "headcrab_classic_death_directional_90_right"
+                { name: "headcrab_classic_death_directional_0", vel: 0 },
+                { name: "headcrab_classic_death_directional_180", vel: 0 },
+                { name: "headcrab_classic_death_directional_90_left", vel: 0 },
+                { name: "headcrab_classic_death_directional_90_right", vel: 0 }
             ],
             "pounce":[
-                "headcrab_classic_jumpattack"
+                { name: "headcrab_classic_jumpattack", vel: 0 }
             ]
         }
     },
@@ -413,24 +407,24 @@ export const MonsterType={
         ],
         animations:{
             "idle":[
-                "headcrab_idle",
-                "headcrab_idlesearch"
+                { name: "headcrab_idle", vel: 0 },
+                { name: "headcrab_idlesearch", vel: 0 }
             ],
             "walk":[
-                "headcrab_walk",
-                "headcrab_run"
+                { name: "headcrab_walk", vel: 38 },
+                { name: "headcrab_run", vel: 213 }
             ],
             "attack":[
-                "headcrab_rearup"
+                { name: "headcrab_rearup", vel: 0 }
             ],
             "skill":[
-                "headcrab_jumpflinch"
+                { name: "headcrab_jumpflinch", vel: 0 }
             ],
             "dead":[
-                "headcrab_die"
+                { name: "headcrab_die", vel: 0 }
             ],
             "pounce":[
-                "headcrab_jumpattack"
+                { name: "headcrab_jumpattack", vel: 0 }
             ]
         }
     },
@@ -449,19 +443,19 @@ export const MonsterType={
         skill_pool:[],
         animations:{
             "idle":[
-                "ragdoll"
+                { name: "ragdoll", vel: 0 }
             ],
             "walk":[
-                "walk4",
-                "a_walk1",
-                "a_walk2",
-                "a_walk3"
+                { name: "walk4", vel: 45 },
+                { name: "a_walk1", vel: 45 },
+                { name: "a_walk2", vel: 46 },
+                { name: "a_walk3", vel: 41 }
             ],
             "attack":[
-                "swatleftmid",
-                "swatrightmid",
-                "swatleftlow",
-                "swatrightlow"
+                { name: "swatleftmid", vel: 0 },
+                { name: "swatrightmid", vel: 0 },
+                { name: "swatleftlow", vel: 0 },
+                { name: "swatrightlow", vel: 0 }
             ],
             "skill":[],
             "dead":[]
@@ -488,21 +482,22 @@ export const MonsterType={
         ],
         animations:{
             "idle":[
-                "idle_angry"
+                { name: "idle_angry", vel: 0 }
             ],
             "walk":[
-                "Run"
+                { name: "Run", vel: 217 },
+                { name: "a_WalkN", vel: 55 }
             ],
             "attack":[
-                "BR2_Attack",
-                "Melee"
+                { name: "BR2_Attack", vel: 0 },
+                { name: "Melee", vel: 0 }
             ],
             "skill":[
-                "idle_angry"
+                { name: "idle_angry", vel: 0 }
             ],
             "dead":[],
             "pounce":[
-                "JumpNavMove"
+                { name: "JumpNavMove", vel: 0 }
             ]
         }
     },
@@ -527,18 +522,18 @@ export const MonsterType={
         ],
         animations:{
             "idle":[
-                "Idle01"
+                { name: "Idle01", vel: 0 }
             ],
             "walk":[
-                "Run",
-                "Walk"
+                { name: "Run", vel: 115 },
+                { name: "Walk", vel: 41 }
             ],
             "attack":[
-                "melee_01"
+                { name: "melee_01", vel: 0 }
             ],
             "skill":[],
             "dead":[
-                "releasecrab"
+                { name: "releasecrab", vel: 0 }
             ]
         }
     },
@@ -562,7 +557,7 @@ export const MonsterType={
     //            "idle01"
     //        ],
     //        "walk":[
-    //            "runn"
+    //            "runn",156
     //        ],
     //        "attack":[
     //            "attack_02",
@@ -593,24 +588,24 @@ export const MonsterType={
         skill_pool:[],
         animations:{
             "idle":[
-                "distractidle01",
-                "distractidle03",
-                "idle01"
+                { name: "distractidle01", vel: 0 },
+                { name: "distractidle03", vel: 0 },
+                { name: "idle01", vel: 0 }
             ],
             "walk":[
-                "runn"
+                { name: "runn", vel: 156 }
             ],
             "attack":[
-                "attack_02",
-                "attack_03"
+                { name: "attack_02", vel: 0 },
+                { name: "attack_03", vel: 0 }
             ],
             "skill":[
-                "flyattack05all"
+                { name: "flyattack05all", vel: 0 }
             ],
             "dead":[],
             "pounce":[
-                "flyattack01all",
-                "flyattack02all"
+                { name: "flyattack01all", vel: 0 },
+                { name: "flyattack02all", vel: 0 }
             ]
         }
     },

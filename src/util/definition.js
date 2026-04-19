@@ -16,7 +16,8 @@
 /**
  * 通用动画集合类型：任意键对应动画名数组。
  * 例如 `{ idle: string[], walk: string[] }`。`idle`、`walk`、`attack`、`skill`、`dead` 在对应状态切换时播放。
- * @typedef {{ [key: string]: string[] }} animations
+ * 当vel为-1时，用设置自身的速度取代动画速度
+ * @typedef {{ [key: string]: {name:string,vel:number}[] }} animations
  */
 /**
  * @typedef {object} monsterTypes - 怪物类型配置对象。每个怪物实例对应一个 monsterTypes 配置项，包含其属性、技能池和动画列表。

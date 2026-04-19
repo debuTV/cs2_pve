@@ -428,6 +428,7 @@ export class Monster {
         const intent = this.evaluateIntent();
         this.resolveIntent(intent);
         this.animation.tick(this.state);
+        this.movementPath.setSpeed(this.animation.animspeed!=-1?this.animation.animspeed:this.speed);
     }
 
     /**
@@ -490,7 +491,7 @@ export class Monster {
         this.state = nextState;
         this.emitRuntimeEvent(MonsterRuntimeEvents.StateChange, { oldState: prevState, nextState });
         this.animation.enter(nextState);
-
+        this.movementPath.setSpeed(this.animation.animspeed!=-1?this.animation.animspeed:this.speed);
         if (nextState === MonsterState.CHASE || nextState === MonsterState.ATTACK) {
             this.movementPath.activate();
         } else if (prevState === MonsterState.CHASE || prevState === MonsterState.ATTACK) {

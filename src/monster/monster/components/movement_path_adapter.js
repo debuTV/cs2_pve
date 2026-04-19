@@ -29,6 +29,7 @@ export class MonsterMovementPathAdapter {
         this._defaultMode = "walk";
         /** 当前是否有活跃的追击任务。 */
         this._active = false;
+        this.speed=monster.speed;
     }
 
     /**
@@ -119,11 +120,18 @@ export class MonsterMovementPathAdapter {
             targetEntity: target,
             usePathRefresh: !this.monster.isOccupied(),
             useNPCSeparation: true,
-            maxSpeed: this.monster.speed,
+            maxSpeed: this.speed,
             Mode: this._defaultMode,
         });
     }
-
+    /**
+     * @param {number} speed
+     */
+    setSpeed(speed){
+        this.speed=speed;
+        if (!this._active) return;
+        this._submitChase();
+    }
     /** @returns {import("cs_script/point_script").Entity | null} */
     _getMovementEntity() {
         const entity = this.monster.model;

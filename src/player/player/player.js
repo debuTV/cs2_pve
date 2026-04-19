@@ -70,6 +70,7 @@ export class Player {
         this.skillId = null;
         /** @type {string | null} */
         this.skillTypeId = null;
+        this.addMoney(500);//初始金钱
     }
 
     // ——— 生命周期入口（委托给 Lifecycle） ———

@@ -9,7 +9,6 @@ import { PowerAttackSkill } from "./skills/powerattack";
 import { FireSkill } from "./skills/fire";
 import { SpawnSkill } from "./skills/spawn";
 import { ShieldSkill } from "./skills/shield";
-import { SpeedBoostSkill } from "./skills/speedboost";
 import { ThrowStoneSkill } from "./skills/throwstone";
 import { SoundSkill } from "./skills/sound";
 import { PlayerPulseSkill } from "./skills/playerpulse";
@@ -60,9 +59,6 @@ fire          持续区域效果（怪物默认 Die 触发；玩家默认 Inspec
 shield      能量护盾（默认 [OnSpawn, OnTick]，Spawn 始终保留以初始化修饰器）
   { runtime: number, value: number, cooldown?, events?, animation? }
 
-speedboost  急速（默认 OnTick，施加预配置加速 Buff，超时后恢复）
-  { buffConfigId?, cooldown?, events?, animation?, glow?: {r,g,b} }
-
 throwstone  投掷石头（默认 OnTick，距离判定后请求投掷物管理器创建投掷物）
   { distanceMin?, distanceMax?, damage?, projectileSpeed?, gravityScale?,
     radius?, maxTargets?, templateName?, cooldown?, events?, animation? }
@@ -85,7 +81,7 @@ player_turret     玩家哨戒炮台（InspectWeapon 触发，在当前位置部
  *
  * 当前支持的 typeId：
  * corestats、pounce、initanim、doubleattack、powerattack、
- * fire、spawn、shield、speedboost、throwstone、sound、
+ * fire、spawn、shield、throwstone、sound、
  * player_guard、player_mend、player_mend_field、player_vanguard、player_turret。
  *
  * 所有技能均支持 `params.events`、`params.animation`、`params.cooldown`。
@@ -119,8 +115,6 @@ export const SkillFactory = {
                 return new SpawnSkill(player, monster, id, params);
             case "shield":
                 return new ShieldSkill(player, monster, id, params);
-            case "speedboost":
-                return new SpeedBoostSkill(player, monster, id, params);
             case "throwstone":
                 return new ThrowStoneSkill(player, monster, id, params);
             case "sound":

@@ -39,7 +39,7 @@ export class MonsterAnimator {
         this.onStateFinish = null;
         /** @type {Entity | null} */
         this._boundModel = null;
-
+        this.animspeed=0;//当前动画的移动速度
         this._bindModelOutput();
     }
 
@@ -50,6 +50,7 @@ export class MonsterAnimator {
         this._boundModel = this.model;
         this.monster.entityBridge.modelconnnectid=Instance.ConnectOutput(this.model,"OnAnimationDone",()=>{
             this.locked = false;
+            this.animspeed=0;
             this.onStateFinish?.(this.currentstats);
         });
     }
@@ -179,7 +180,8 @@ export class MonsterAnimator {
         if (!this.model||!this.model.IsValid() || !list || list.length === 0) return null;
         const anim = list[Math.floor(Math.random() * list.length)];
         if (!anim) return;
-        Instance.EntFireAtTarget({target:this.model,input:"SetAnimation",value:anim});
+        Instance.EntFireAtTarget({target:this.model,input:"SetAnimation",value:anim.name});
+        this.animspeed=anim.vel;
         this.locked=true;
         return anim;
     }

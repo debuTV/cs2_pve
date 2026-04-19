@@ -506,7 +506,6 @@ export class HudManager {
             doubleattack: "双重攻击",
             powerattack: "破甲",
             shield: "护盾",
-            speedboost: "疾跑",
             throwstone: "掷石",
             sound: "音波",
             spawn: "召唤",
