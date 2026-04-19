@@ -53,7 +53,7 @@ export class MonsterMovementPathAdapter {
     activate() {
         if (!this._getMovementEntity() || !this.monster.target) return;
         this._active = true;
-        this._submitChase();
+        this._submitChase({ resetMode: true });
     }
 
     /**
@@ -107,13 +107,19 @@ export class MonsterMovementPathAdapter {
         this._submitChase();
     }
 
-    /** 内部：提交一次 Chase Move 请求。 */
-    _submitChase() {
+    /**
+     * 内部：提交一次 Chase Move 请求。
+     * @param {{ resetMode?: boolean }} [options]
+     */
+    _submitChase(options = {}) {
         const entity = this._getMovementEntity();
         const target = this.monster.target?.entityBridge.pawn;
         if (!entity || !target) return;
 
-        this.monster.submitMovementEvent({
+        const resetMode = options.resetMode ?? false;
+
+        /** @type {import("../../../util/definition").MovementRequest} */
+        const request = {
             type: MovementRequestType.Move,
             entity,
             priority: MovementPriority.Chase,
@@ -121,14 +127,22 @@ export class MonsterMovementPathAdapter {
             usePathRefresh: !this.monster.isOccupied(),
             useNPCSeparation: true,
             maxSpeed: this.speed,
-            Mode: this._defaultMode,
-        });
+        };
+
+        if (resetMode) {
+            request.Mode = this._defaultMode;
+        }
+
+        this.monster.submitMovementEvent(request);
     }
     /**
      * @param {number} speed
      */
     setSpeed(speed){
-        this.speed=speed;
+        if (!Number.isFinite(speed)) return;
+        if (Math.abs(this.speed - speed) <= 1e-6) return;
+
+        this.speed = speed;
         if (!this._active) return;
         this._submitChase();
     }

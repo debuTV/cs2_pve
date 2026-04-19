@@ -448,6 +448,27 @@ const event = {
 };
 
 /**
+ * @module 工具/日志
+ */
+
+/**
+ * 统一格式化日志与输出消息作用域。
+ * @param {string} scope
+ * @param {string} message
+ * @returns {string}
+ */
+function formatScopedMessage(scope, message) {
+    const normalizedScope = String(scope ?? "").trim();
+    const normalizedMessage = String(message ?? "");
+    if (!normalizedScope) return normalizedMessage;
+
+    const prefix = `[${normalizedScope}]:`;
+    return normalizedMessage.startsWith(prefix)
+        ? normalizedMessage
+        : `${prefix}${normalizedMessage}`;
+}
+
+/**
  * @module 游戏系统/游戏配置
  */
 
@@ -556,7 +577,7 @@ class GameManager {
      */
     enterPreparePhase() {
         this.gameState = GameState.PREPARE;
-        this._adapter.broadcast("=== 准备阶段开始 ===");
+        this._adapter.broadcast(formatScopedMessage("GameManager/enterPreparePhase", "=== 准备阶段开始 ==="));
         eventBus.emit(event.Game.Out.OnEnterPreparePhase);
     }
 
@@ -566,7 +587,7 @@ class GameManager {
     startGame() {
         if (this.gameState !== GameState.PREPARE) return;
         this.gameState = GameState.PLAYING;
-        this._adapter.broadcast("=== 游戏开始 ===");
+        this._adapter.broadcast(formatScopedMessage("GameManager/startGame", "=== 游戏开始 ==="));
         eventBus.emit(event.Game.Out.OnStartGame);
     }
 
@@ -576,7 +597,7 @@ class GameManager {
     gameLost() {
         if (this.gameState === GameState.LOST || this.gameState === GameState.WON) return false;
         this.gameState = GameState.LOST;
-        this._adapter.broadcast("=== 游戏失败 ===");
+        this._adapter.broadcast(formatScopedMessage("GameManager/gameLost", "=== 游戏失败 ==="));
         eventBus.emit(event.Game.Out.OnGameLost);
         return true;
     }
@@ -587,14 +608,14 @@ class GameManager {
     gameWon() {
         if (this.gameState === GameState.LOST || this.gameState === GameState.WON) return false;
         this.gameState = GameState.WON;
-        this._adapter.broadcast("=== 游戏胜利 ===");
+        this._adapter.broadcast(formatScopedMessage("GameManager/gameWon", "=== 游戏胜利 ==="));
         eventBus.emit(event.Game.Out.OnGameWin);
         return true;
     }
     clearAll()
     {
         this.gameState = GameState.WAITING;
-        this._adapter.broadcast("重置游戏...");
+        this._adapter.broadcast(formatScopedMessage("GameManager/clearAll", "重置游戏..."));
     }
     /**
      * 重置游戏状态，触发 onResetGame 回调通知其他模块。
@@ -1394,7 +1415,7 @@ const wavesConfig=[
         moneyReward: 750,
         expReward: 60,
         spawnInterval: 0.16,
-        preparationTime: 30,                  //记住要和广播消息的 delay 匹配
+        preparationTime: 1,                  //记住要和广播消息的 delay 匹配
         aliveMonster: 6,
         monster_spawn_points_name:["monster_spawnpoint"],
         broadcastmessage:[{message:"第1波",delay:30}],
@@ -1591,7 +1612,7 @@ class WaveManager {
     _activateCurrentWave(wave) {
         this.waveState = WaveState.ACTIVE;
         this._resetPrepareState();
-        this._adapter.log(`=== 第 ${this.currentWave} 波开始 ===`);
+        this._adapter.log(formatScopedMessage("WaveManager/_activateCurrentWave", `=== 第 ${this.currentWave} 波开始 ===`));
         /** @type {import("./wave_const").OnWaveStart} */
         const payload = {
             waveIndex: this.currentWave,
@@ -1613,12 +1634,12 @@ class WaveManager {
      */
     startWave(waveStartRequest) {
         if (this.waveState === WaveState.ACTIVE || this.waveState === WaveState.PREPARING) {
-            this._adapter.log(`无法开始波次 ${waveStartRequest.waveIndex}，当前波次进行中 (state=${this.waveState})`);
+            this._adapter.log(formatScopedMessage("WaveManager/startWave", `无法开始波次 ${waveStartRequest.waveIndex}，当前波次进行中 (state=${this.waveState})`));
             return false;
         }
 
         if (waveStartRequest.waveIndex < 1 || waveStartRequest.waveIndex > this.waves.length) {
-            this._adapter.log(`波次 ${waveStartRequest.waveIndex} 超出范围 (1-${this.waves.length})`);
+            this._adapter.log(formatScopedMessage("WaveManager/startWave", `波次 ${waveStartRequest.waveIndex} 超出范围 (1-${this.waves.length})`));
             return false;
         }
 
@@ -1633,7 +1654,7 @@ class WaveManager {
             `同屏上限: ${wave.aliveMonster}\n` +
             `奖励: $${wave.moneyReward} / ${wave.expReward} EXP\n` +
             `准备时间: ${wave.preparationTime} 秒`;
-        this._adapter.broadcast(message);
+        this._adapter.broadcast(formatScopedMessage("WaveManager/startWave", message));
 
         // 进入预热阶段
         this._enterPreparingState(waveStartRequest.waveIndex, wave);
@@ -1658,7 +1679,7 @@ class WaveManager {
         if (!this.hasNextWave()) {
             message += "\n=== 所有波次完成 ===";
         }
-        this._adapter.broadcast(message);
+        this._adapter.broadcast(formatScopedMessage("WaveManager/completeWave", message));
 
         /** @type {import("./wave_const").OnWaveEnd} */
         const payload = { waveIndex: this.currentWave};
@@ -1674,7 +1695,7 @@ class WaveManager {
         this.currentWaveConfig = null;
         this.waveState = WaveState.IDLE;
         this._resetPrepareState();
-        this._adapter.log("波次已重置");
+        this._adapter.log(formatScopedMessage("WaveManager/resetGame", "波次已重置"));
     }
 
     // ═══════════════════════════════════════════════
@@ -1742,7 +1763,7 @@ class WaveManager {
             this._prepareContext.broadcastIndex < messages.length &&
             elapsed >= messages[this._prepareContext.broadcastIndex].delay
         ) {
-            this._adapter.broadcast(messages[this._prepareContext.broadcastIndex].message);
+            this._adapter.broadcast(formatScopedMessage("WaveManager/tick", messages[this._prepareContext.broadcastIndex].message));
             this._prepareContext.broadcastIndex++;
         }
 
@@ -3025,7 +3046,7 @@ class PlayerHealthCombat {
             currentArmor: this.player.stats.armor,
         });
 
-        Instance.Msg(`玩家 ${this.player.entityBridge.getPlayerName()} 受到 ${damage} 伤害 (生命: ${this.player.stats.health}, 护甲: ${this.player.stats.armor})`);
+        Instance.Msg(formatScopedMessage("PlayerHealthCombat/takeDamage", `玩家 ${this.player.entityBridge.getPlayerName()} 受到 ${damage} 伤害 (生命: ${this.player.stats.health}, 护甲: ${this.player.stats.armor})`));
 
         if (this.player.stats.health <= 0) {
             this.die(attacker);
@@ -3059,7 +3080,7 @@ class PlayerHealthCombat {
             currentArmor: this.player.stats.armor,
         });
 
-        Instance.Msg(`玩家 ${this.player.entityBridge.getPlayerName()} 受到 ${damage} 伤害 (生命: ${this.player.stats.health}, 护甲: ${this.player.stats.armor})`);
+        Instance.Msg(formatScopedMessage("PlayerHealthCombat/syncDamageFromEngine", `玩家 ${this.player.entityBridge.getPlayerName()} 受到 ${damage} 伤害 (生命: ${this.player.stats.health}, 护甲: ${this.player.stats.armor})`));
 
         if (this.player.stats.health <= 0) {
             this.die(attacker);
@@ -3121,8 +3142,7 @@ class PlayerHealthCombat {
 
         // 切换到观察者
         this.player.entityBridge.joinTeam(1);
-
-        Instance.Msg(`玩家 ${this.player.entityBridge.getPlayerName()} 死亡`);
+        Instance.Msg(formatScopedMessage("PlayerHealthCombat/die", `玩家 ${this.player.entityBridge.getPlayerName()} 死亡`));
     }
 
     // ——— 内部 ———
@@ -3212,7 +3232,7 @@ class PlayerLifecycle {
         this._giveStartingEquipment();
         this.player.emitStatusSnapshot();
 
-        Instance.Msg(`玩家 ${this.player.entityBridge.getPlayerName()} 已激活`);
+        Instance.Msg(formatScopedMessage("PlayerLifecycle/activate", `玩家 ${this.player.entityBridge.getPlayerName()} 已激活`));
     }
 
     /**
@@ -3240,6 +3260,7 @@ class PlayerLifecycle {
                 this.player.healthCombat.die(null);
                 return;
             }
+            this._giveStartingEquipment();
             this.player.emitStatusSnapshot();
         }
     }
@@ -3269,7 +3290,7 @@ class PlayerLifecycle {
         this.player.emitRuntimeEvent(PlayerRuntimeEvents.Spawn, { state: nextState });
         this.player.emitStatusSnapshot();
 
-        Instance.Msg(`玩家 ${this.player.entityBridge.getPlayerName()} 已重生 (HP: ${stats.health})`);
+        Instance.Msg(formatScopedMessage("PlayerLifecycle/respawn", `玩家 ${this.player.entityBridge.getPlayerName()} 已重生 (HP: ${stats.health})`));
     }
 
     /**
@@ -4019,6 +4040,12 @@ class PlayerManager {
          */
         this.alivePlayerList = [];
         /**
+         * 已完成死亡收尾的玩家槽位。
+         * 致死伤害判定与引擎 OnPlayerKill 都会走同一个入口，但只允许收尾一次。
+         * @type {Set<number>}
+         */
+        this._handledDeathSlots = new Set();
+        /**
          * 外部适配器实例，提供日志、广播和游戏时间接口
          * @type {import("../util/definition").Adapter} 
          */
@@ -4098,6 +4125,7 @@ class PlayerManager {
         for (const player of players) {
             if (player && player instanceof CSPlayerPawn) {
                 const controller = player.GetPlayerController();
+                if (!controller || controller.IsBot()) continue;
                 this.handlePlayerConnect(controller);
                 if (player.IsAlive()) {
                     this.handlePlayerActivate(controller);
@@ -4124,6 +4152,7 @@ class PlayerManager {
         if (!controller) return;
 
         const slot = controller.GetPlayerSlot();
+        this._handledDeathSlots.delete(slot);
         const existingPlayer = this.players.get(slot);
         if (existingPlayer) {
             if (existingPlayer.isReady) this.readyCount--;
@@ -4138,13 +4167,13 @@ class PlayerManager {
         this.players.set(slot, player);
         this.totalPlayers++;
 
-        this._adapter.broadcast(`玩家 ${controller.GetPlayerName()} 加入游戏 (SLOT: ${slot})`);
+        this._adapter.broadcast(formatScopedMessage("PlayerManager/handlePlayerConnect", `玩家 ${controller.GetPlayerName()} 加入游戏 (SLOT: ${slot})`));
         eventBus.emit(event.Player.Out.OnPlayerJoin, {
             player,
             slot,
         });
 
-        this._adapter.sendMessage(slot, "=== 欢迎加入游戏 ===");
+        this._adapter.sendMessage(slot, formatScopedMessage("PlayerManager/handlePlayerConnect", "=== 欢迎加入游戏 ==="));
     }
 
     /**
@@ -4175,13 +4204,14 @@ class PlayerManager {
         const wasReady = player.isReady;
         const wasLobbyState = player.state === PlayerState.PREPARING || player.state === PlayerState.READY;
 
-        this._adapter.broadcast(`玩家 ${player.entityBridge.getPlayerName()} 离开游戏`);
+        this._adapter.broadcast(formatScopedMessage("PlayerManager/handlePlayerDisconnect", `玩家 ${player.entityBridge.getPlayerName()} 离开游戏`));
 
         if (wasReady) {
             this.readyCount--;
         }
 
         this._removeAlivePlayer(playerSlot);
+        this._handledDeathSlots.delete(playerSlot);
         player.disconnect();
         this.players.delete(playerSlot);
         this.totalPlayers--;
@@ -4215,6 +4245,9 @@ class PlayerManager {
 
             player.handleReset(pawn, this.ingame ? PlayerState.ALIVE : PlayerState.PREPARING);
             this._syncAlivePlayer(player);
+            if (player.state !== PlayerState.DEAD) {
+                this._handledDeathSlots.delete(player.slot);
+            }
             eventBus.emit(event.Player.Out.OnPlayerRespawn, {
                 player,
                 slot: controller.GetPlayerSlot(),
@@ -4229,22 +4262,37 @@ class PlayerManager {
     }
 
     /**
-     * 玩家死亡时调用，将玩家设为 DEAD 状态并触发死亡回调。
+     * 统一死亡收尾入口。
+     * 致死伤害判定与引擎 OnPlayerKill 都会走这里，但内部只会真正处理一次。
      * @param {CSPlayerPawn} playerPawn 玩家 Pawn 实体
+     * @returns {boolean} 本次是否首次完成死亡收尾
      */
     handlePlayerDeath(playerPawn) {
+        if (!(playerPawn instanceof CSPlayerPawn)) return false;
         const controller = playerPawn.GetPlayerController();
-        if (!controller) return;
+        if (!controller) return false;
         const slot = controller.GetPlayerSlot();
         const player = this.players.get(slot);
-        if (!player) return;
+        if (!player) return false;
+        if (player.entityBridge.pawn && player.entityBridge.pawn !== playerPawn) return false;
+        if (this._handledDeathSlots.has(slot))
+        {
+            Instance.Msg(formatScopedMessage("PlayerManager/handlePlayerDeath", "玩家死亡事件已处理过，跳过重复处理\n"));
+            return false;
+        }
+
+        if (player.state !== PlayerState.DEAD) {
+            player.healthCombat.die(null);
+        }
 
         this._removeAlivePlayer(slot);
+        this._handledDeathSlots.add(slot);
         eventBus.emit(event.Player.Out.OnPlayerDeath, {
             player,
             slot,
             playerPawn,
         });
+        return true;
     }
 
     /**
@@ -4290,7 +4338,7 @@ class PlayerManager {
     }
 
     /**
-     * 同步引擎侧伤害到脚本层，若第一次检测到死亡则触发死亡回调。
+     * 同步引擎侧伤害到脚本层；若判定致死，则进入统一死亡收尾入口。
      * @param {import("cs_script/point_script").PlayerDamageEvent} event 引擎伤害事件
      */
     handlePlayerDamage(event) {
@@ -4300,7 +4348,10 @@ class PlayerManager {
         const player = this.players.get(slot);
         if (!player) return;
 
-        player.syncDamageFromEngine(event.damage, event.attacker, event.inflictor);
+        const killed = player.syncDamageFromEngine(event.damage, event.attacker, event.inflictor);
+        if (killed) {
+            this.handlePlayerDeath(event.player);
+        }
     }
 
     /**
@@ -4333,11 +4384,12 @@ class PlayerManager {
         else this.readyCount--;
 
         const name = player.entityBridge.getPlayerName();
-        this._adapter.broadcast(
+        this._adapter.broadcast(formatScopedMessage(
+            "PlayerManager/_setPlayerReady",
             ready
                 ? `${name} 已准备 (${this.readyCount}/${this.totalPlayers})`
                 : `${name} 取消准备 (${this.readyCount}/${this.totalPlayers})`
-        );
+        ));
         eventBus.emit(event.Player.Out.OnPlayerReadyChanged, {
             player,
             slot: player.slot,
@@ -4508,6 +4560,7 @@ class PlayerManager {
     enterGameStart() {
         this.ingame = true;
         this.readyCount = 0;
+        this._handledDeathSlots.clear();
         for (const [, player] of this.players) {
             if (!player.entityBridge.pawn) continue;
             player.enterAliveState();
@@ -4518,6 +4571,7 @@ class PlayerManager {
     resetAllGameStatus() {
         this.ingame = false;
         this.readyCount = 0;
+        this._handledDeathSlots.clear();
         for (const [, player] of this.players) {
             player.resetGameStatus();
         }
@@ -4543,6 +4597,7 @@ class PlayerManager {
      * @returns {void}
      */
     _addAlivePlayer(player) {
+        this._handledDeathSlots.delete(player.slot);
         if (this.alivePlayerList.some(alivePlayer => alivePlayer.slot === player.slot)) return;
         this.alivePlayerList.push(player);
     }
@@ -5528,12 +5583,12 @@ class ShopManager {
      */
     openShop(shopOpenRequest) {
         if (!shopOpenRequest.pawn) {
-            Instance.Msg(`[ShopManager] 玩家 Pawn 不存在，无法打开商店 (slot=${shopOpenRequest.slot})`);
+            Instance.Msg(formatScopedMessage("ShopManager/openShop", `玩家 Pawn 不存在，无法打开商店 (slot=${shopOpenRequest.slot})`));
             return false;
         }
 
         if (!this._canOpenShop(shopOpenRequest)) {
-            Instance.Msg(`[ShopManager] 玩家不满足打开商店条件 (slot=${shopOpenRequest.slot})`);
+            Instance.Msg(formatScopedMessage("ShopManager/openShop", `玩家不满足打开商店条件 (slot=${shopOpenRequest.slot})`));
             return false;
         }
 
@@ -5544,7 +5599,7 @@ class ShopManager {
         }
 
         session.open(shopOpenRequest.pawn);
-        Instance.Msg(`[ShopManager] 商店已打开 (slot=${shopOpenRequest.slot})`);
+        Instance.Msg(formatScopedMessage("ShopManager/openShop", `商店已打开 (slot=${shopOpenRequest.slot})`));
         return true;
     }
 
@@ -5561,7 +5616,7 @@ class ShopManager {
         if (!session || !session.isOpen) return false;
 
         session.close();
-        Instance.Msg(`[ShopManager] 商店已关闭 (slot=${shopCloseRequest.slot})`);
+        Instance.Msg(formatScopedMessage("ShopManager/closeShop", `商店已关闭 (slot=${shopCloseRequest.slot})`));
         return true;
     }
 
@@ -6372,7 +6427,7 @@ class MonsterHealthCombat {
             attacker: attacker instanceof CSPlayerPawn ? attacker : null,
         };
         eventBus.emit(event.Monster.Out.OnMonsterDamaged, payload);
-        Instance.Msg(`怪物 #${this.monster.id} 受到 ${finalAmount} 点伤害 (原始:${amount}) (${previousHealth} -> ${this.monster.health})`);
+        Instance.Msg(formatScopedMessage("MonsterHealthCombat/takeDamage", `怪物 #${this.monster.id} 受到 ${finalAmount} 点伤害 (原始:${amount}) (${previousHealth} -> ${this.monster.health})`));
 
         if (this.monster.health <= 0) {
             this.die(attacker);
@@ -6407,7 +6462,7 @@ class MonsterHealthCombat {
         this.monster.killer = killer instanceof CSPlayerPawn ? killer : null;
         this.monster.emitDeathEvent(killer);
         this.monster.animation.enter(MonsterState.DEAD);
-        Instance.Msg(`怪物 #${this.monster.id} 死亡`);
+        Instance.Msg(formatScopedMessage("MonsterHealthCombat/die", `怪物 #${this.monster.id} 死亡`));
     }
 
     enterAttack() {
@@ -7813,26 +7868,26 @@ class ThrowStoneSkill extends SkillTemplate {
      */
     _spawnProjectileEntity(origin) {
         if (!this.templateName) {
-            Instance.Msg("ThrowStone: 未配置 templateName\n");
+            Instance.Msg(formatScopedMessage("ThrowStoneSkill/_spawnProjectileEntity", "未配置 templateName\n"));
             return null;
         }
 
         const template = Instance.FindEntityByName(this.templateName);
         if (!template || !(template instanceof PointTemplate)) {
-            Instance.Msg(`ThrowStone: 找不到 PointTemplate \"${this.templateName}\"\n`);
+            Instance.Msg(formatScopedMessage("ThrowStoneSkill/_spawnProjectileEntity", `找不到 PointTemplate \"${this.templateName}\"\n`));
             return null;
         }
 
         const spawned = template.ForceSpawn(origin);
         if (!spawned || spawned.length !== 1) {
-            Instance.Msg(`ThrowStone: PointTemplate \"${this.templateName}\" 必须且只能生成 1 个实体\n`);
+            Instance.Msg(formatScopedMessage("ThrowStoneSkill/_spawnProjectileEntity", `PointTemplate \"${this.templateName}\" 必须且只能生成 1 个实体\n`));
             this._cleanupSpawnedEntities(spawned ?? []);
             return null;
         }
 
         const projectileEntity = spawned[0];
         if (!projectileEntity?.IsValid?.()) {
-            Instance.Msg(`ThrowStone: PointTemplate \"${this.templateName}\" 生成的实体无效\n`);
+            Instance.Msg(formatScopedMessage("ThrowStoneSkill/_spawnProjectileEntity", `PointTemplate \"${this.templateName}\" 生成的实体无效\n`));
             this._cleanupSpawnedEntities(spawned);
             return null;
         }
@@ -8426,13 +8481,13 @@ class SentryTurret {
         this._syncAnchors();
         const laserStartPos = this._getLaserStartPosition();
         if (!laserStartPos || !this._createLaserEndpoints(laserStartPos)) {
-            Instance.Msg(`Sentry: 创建激光端点失败\n`);
+            Instance.Msg(formatScopedMessage("SentryTurret/_init", "创建激光端点失败\n"));
             this.destroy();
             return;
         }
         const soundOrigin = this._getSoundOrigin();
         if (!soundOrigin || !this._createSoundEntity(soundOrigin)) {
-            Instance.Msg(`Sentry: 创建声音实体失败\n`);
+            Instance.Msg(formatScopedMessage("SentryTurret/_init", "创建声音实体失败\n"));
             this.destroy();
             return;
         }
@@ -8552,7 +8607,11 @@ class SentryTurret {
         }
         const uniqueEntities = new Set(entities.filter((entity) => entity?.IsValid?.()));
         for (const entity of uniqueEntities) {
-            entity.Remove();
+            Instance.EntFireAtTarget({
+                target: entity,
+                input: "Kill",
+                delay: 0.5,//神奇小参数
+            });
         }
 
         this.laserStart = null;
@@ -8680,6 +8739,7 @@ class SentryTurret {
         Instance.EntFireAtTarget({
             target: this.soundEntity,
             input: "StartSound",
+            delay:0.05,//神奇小参数
         });
     }
 
@@ -9144,7 +9204,7 @@ let vec$1 = class vec{
      * @param {import("cs_script/point_script").Vector} pos
      */
     static msg(pos) {
-        Instance.Msg(`{${pos.x} ${pos.y} ${pos.z}}`);
+        Instance.Msg(formatScopedMessage("vec/msg", `{${pos.x} ${pos.y} ${pos.z}}`));
     }
     /**
      * 计算两个三维向量的点积。
@@ -9376,20 +9436,20 @@ class SentrySkill extends SkillTemplate {
     _spawnTurret(position, ownerKey) {
         const template = Instance.FindEntityByName(this._templateName);
         if (!template || !(template instanceof PointTemplate)) {
-            Instance.Msg(`Sentry: 找不到 PointTemplate "${this._templateName}"\n`);
+            Instance.Msg(formatScopedMessage("SentrySkill/_spawnTurret", `找不到 PointTemplate "${this._templateName}"\n`));
             return false;
         }
 
         const spawned = template.ForceSpawn(position);
         if (!spawned || spawned.length < 2) {
-            Instance.Msg(`Sentry: PointTemplate "${this._templateName}" 至少需要生成 2 个实体\n`);
+            Instance.Msg(formatScopedMessage("SentrySkill/_spawnTurret", `PointTemplate "${this._templateName}" 至少需要生成 2 个实体\n`));
             this._cleanupSpawnedEntities(spawned ?? []);
             return false;
         }
 
         const [turretBase, turretYaw] = spawned;
         if (!turretBase?.IsValid?.() || !turretYaw?.IsValid?.()) {
-            Instance.Msg(`Sentry: PointTemplate "${this._templateName}" 缺少底座或旋转实体\n`);
+            Instance.Msg(formatScopedMessage("SentrySkill/_spawnTurret", `PointTemplate "${this._templateName}" 缺少底座或旋转实体\n`));
             this._cleanupSpawnedEntities(spawned);
             return false;
         }
@@ -9692,7 +9752,7 @@ class MonsterMovementPathAdapter {
     activate() {
         if (!this._getMovementEntity() || !this.monster.target) return;
         this._active = true;
-        this._submitChase();
+        this._submitChase({ resetMode: true });
     }
 
     /**
@@ -9746,13 +9806,19 @@ class MonsterMovementPathAdapter {
         this._submitChase();
     }
 
-    /** 内部：提交一次 Chase Move 请求。 */
-    _submitChase() {
+    /**
+     * 内部：提交一次 Chase Move 请求。
+     * @param {{ resetMode?: boolean }} [options]
+     */
+    _submitChase(options = {}) {
         const entity = this._getMovementEntity();
         const target = this.monster.target?.entityBridge.pawn;
         if (!entity || !target) return;
 
-        this.monster.submitMovementEvent({
+        const resetMode = options.resetMode ?? false;
+
+        /** @type {import("../../../util/definition").MovementRequest} */
+        const request = {
             type: MovementRequestType$1.Move,
             entity,
             priority: MovementPriority$1.Chase,
@@ -9760,14 +9826,22 @@ class MonsterMovementPathAdapter {
             usePathRefresh: !this.monster.isOccupied(),
             useNPCSeparation: true,
             maxSpeed: this.speed,
-            Mode: this._defaultMode,
-        });
+        };
+
+        if (resetMode) {
+            request.Mode = this._defaultMode;
+        }
+
+        this.monster.submitMovementEvent(request);
     }
     /**
      * @param {number} speed
      */
     setSpeed(speed){
-        this.speed=speed;
+        if (!Number.isFinite(speed)) return;
+        if (Math.abs(this.speed - speed) <= 1e-6) return;
+
+        this.speed = speed;
         if (!this._active) return;
         this._submitChase();
     }
@@ -10964,23 +11038,23 @@ class MonsterManager {
             this.getspawnPoints(waveConfig);
             if (this.spawnPoints.length === 0)
             {   
-                Instance.Msg("错误: 未找到怪物生成点");
+                Instance.Msg(formatScopedMessage("MonsterManager/spawnMonster", "错误: 未找到怪物生成点"));
                 return null;
             }
             const pos = this.spawnPoints[Math.floor(Math.random() * this.spawnPoints.length)];
             const start = { x: pos.x, y: pos.y, z: pos.z };
             const end = { x: pos.x, y: pos.y, z: pos.z };
             if (Instance.TraceSphere({ radius:30, start, end, ignorePlayers: true }).hitEntity) {
-                Instance.Msg("错误: 生成点有遮挡");
+                Instance.Msg(formatScopedMessage("MonsterManager/spawnMonster", "错误: 生成点有遮挡"));
                 return null;
             }
             const typeConfig = this.getMonsterType(waveConfig, this.nextMonsterId-1);
             const monster = this.createMonster(typeConfig, end);
             if (!monster) return null;
-            Instance.Msg(`生成怪物 #${monster.id} ${monster.type} HP:${monster.health}`);
+            Instance.Msg(formatScopedMessage("MonsterManager/spawnMonster", `生成怪物 #${monster.id} ${monster.type} HP:${monster.health}`));
             return monster;
         } catch (error) {
-            Instance.Msg(`生成怪物失败: ${error}`);
+            Instance.Msg(formatScopedMessage("MonsterManager/spawnMonster", `生成怪物失败: ${error}`));
             return null;
         }
     }
@@ -11001,12 +11075,12 @@ class MonsterManager {
         const typeName = options.typeName ?? caster.type;
         const typeConfig = this.findMonsterTypeByName(typeName);
         if (!typeConfig) {
-            Instance.Msg(`技能产卵失败: 未找到怪物类型 ${typeName}`);
+            Instance.Msg(formatScopedMessage("MonsterManager/spawnByother", `技能产卵失败: 未找到怪物类型 ${typeName}`));
             return false;
         }
         const center = this.getSpawnCenter(caster);
         if (!center) {
-            Instance.Msg(`技能产卵失败: 怪物 #${caster.id} 缺少有效生成中心`);
+            Instance.Msg(formatScopedMessage("MonsterManager/spawnByother", `技能产卵失败: 怪物 #${caster.id} 缺少有效生成中心`));
             return false;
         }
         const radiusMin = Math.max(0, options.radiusMin ?? 24);
@@ -11059,11 +11133,11 @@ class MonsterManager {
 
             const monster = this.createMonster(typeConfig, spawnPos);
             if (!monster) return false;
-            Instance.Msg(`技能产卵成功 #${monster.id} ${monster.type}`);
+            Instance.Msg(formatScopedMessage("MonsterManager/spawnByother", `技能产卵成功 #${monster.id} ${monster.type}`));
             return true;
         }
 
-        Instance.Msg(`技能产卵失败: ${typeName} 在 ${tries} 次尝试内未找到可用位置`);
+        Instance.Msg(formatScopedMessage("MonsterManager/spawnByother", `技能产卵失败: ${typeName} 在 ${tries} 次尝试内未找到可用位置`));
         return false;
     }
 
@@ -11901,13 +11975,13 @@ class Particle {
 
         const template = Instance.FindEntityByName(this.config.spawnTemplateName);
         if (!template || !(template instanceof PointTemplate)) {
-            Instance.Msg(`Particle: 找不到 PointTemplate "${this.config.spawnTemplateName}"\n`);
+            Instance.Msg(formatScopedMessage("Particle/start", `找不到 PointTemplate "${this.config.spawnTemplateName}"\n`));
             return false;
         }
 
         const spawned = template.ForceSpawn(position);
         if (!spawned || spawned.length === 0) {
-            Instance.Msg(`Particle: ForceSpawn 未返回实体 (template="${this.config.spawnTemplateName}")\n`);
+            Instance.Msg(formatScopedMessage("Particle/start", `ForceSpawn 未返回实体 (template="${this.config.spawnTemplateName}")\n`));
             return false;
         }
 
@@ -11915,7 +11989,7 @@ class Particle {
         this._particleEntity = this._findParticleEntity(spawned);
 
         if (!this._particleEntity) {
-            Instance.Msg(`Particle: 生成实体中未找到 info_particle_system (template="${this.config.spawnTemplateName}")\n`);
+            Instance.Msg(formatScopedMessage("Particle/start", `生成实体中未找到 info_particle_system (template="${this.config.spawnTemplateName}")\n`));
             this._cleanup();
             return false;
         }
@@ -12038,7 +12112,7 @@ class ParticleManager {
     create(particleCreateRequest) {
         const config = particleConfigs[particleCreateRequest.particleName];
         if (!config) {
-            Instance.Msg(`Particle: 未找到粒子配置 "${particleCreateRequest.particleName}"\n`);
+            Instance.Msg(formatScopedMessage("ParticleManager/create", `未找到粒子配置 "${particleCreateRequest.particleName}"\n`));
             return -1;
         }
 
@@ -22622,7 +22696,7 @@ class PathFollower {
  * @property {Vector}       wishDir
  * @property {number}       wishSpeed
  * @property {number}       maxSpeed
- * @property {boolean}      preserveVelocityInAir
+ * @property {boolean}      preserveVelocityInAir // 是否在空中保持离地时的速度（跳跃节点专用）
  * @property {() => Vector} getPos        获取当前实体位置
  * @property {(name: string, arg?: any) => void} requestModeSwitch  请求切换模式（由 controller 处理）
  */
@@ -25233,9 +25307,8 @@ class ProjectileManager {
 }
 
 /**
- * 已知漏洞
- * 怪物正常死亡后引擎实体从不移除 — 实体泄漏
- * fireuser1相关
+ * 以后完成
+ * infotarget换成固定值
  */
 /**
  * release 版正式入口。
@@ -25318,6 +25391,31 @@ const buffManager = new BuffManager();
 const particleManager = new ParticleManager();
 const areaEffectManager = new AreaEffectManager();
 const projectileManager = new ProjectileManager();
+
+/** @type {Set<number>} */
+const ignoredBotSlots = new Set();
+
+/**
+ * @param {import("cs_script/point_script").CSPlayerController | undefined | null} controller
+ * @returns {boolean}
+ */
+function shouldIgnoreBotController(controller) {
+    if (!controller?.IsBot?.()) return false;
+    const slot = controller.GetPlayerSlot?.();
+    if (typeof slot === "number") {
+        ignoredBotSlots.add(slot);
+    }
+    return true;
+}
+
+/**
+ * @param {import("cs_script/point_script").CSPlayerPawn | undefined | null} pawn
+ * @returns {boolean}
+ */
+function shouldIgnoreBotPawn(pawn) {
+    const controller = pawn?.GetPlayerController?.();
+    return shouldIgnoreBotController(controller);
+}
 
 
 sentryManager.setMonsterProvider(() => monsterManager.activeMonsterList);
@@ -25736,34 +25834,52 @@ Instance.OnScriptInput("profession", (scriptEvent) => {
     });
 });
 Instance.OnPlayerConnect((event) => {
+    if (shouldIgnoreBotController(event.player)) return;
+    Instance.Msg(formatScopedMessage("Main/OnPlayerConnect", "OnPlayerConnect"));
     playerManager.handlePlayerConnect(event.player);
 });
 
 Instance.OnPlayerActivate((event) => {
+    if (shouldIgnoreBotController(event.player)) return;
+    Instance.Msg(formatScopedMessage("Main/OnPlayerActivate", "OnPlayerActivate"));
     playerManager.handlePlayerActivate(event.player);
 });
 
 Instance.OnPlayerDisconnect((event) => {
+    if (ignoredBotSlots.has(event.playerSlot)) {
+        ignoredBotSlots.delete(event.playerSlot);
+        return;
+    }
+    Instance.Msg(formatScopedMessage("Main/OnPlayerDisconnect", "OnPlayerDisconnect"));
     playerManager.handlePlayerDisconnect(event.playerSlot);
 });
 
 Instance.OnPlayerReset((event) => {
+    if (shouldIgnoreBotPawn(event.player)) return;
+    Instance.Msg(formatScopedMessage("Main/OnPlayerReset", "OnPlayerReset"));
     playerManager.handlePlayerReset(event.player);
 });
 
 Instance.OnPlayerKill((event) => {
+    if (shouldIgnoreBotPawn(event.player)) return;
+    Instance.Msg(formatScopedMessage("Main/OnPlayerKill", "OnPlayerKill"));
     playerManager.handlePlayerDeath(event.player);
 });
 
 Instance.OnModifyPlayerDamage((event) => {
+    if (shouldIgnoreBotPawn(event.player)) return;
+    Instance.Msg(formatScopedMessage("Main/OnModifyPlayerDamage", "OnModifyPlayerDamage"));
     return playerManager.handleBeforePlayerDamage(event);
 });
 
 Instance.OnPlayerDamage((event) => {
+    if (shouldIgnoreBotPawn(event.player)) return;
+    Instance.Msg(formatScopedMessage("Main/OnPlayerDamage", "OnPlayerDamage"));
     playerManager.handlePlayerDamage(event);
 });
 
 Instance.OnPlayerChat((chatEvent) => {
+    if (shouldIgnoreBotController(chatEvent.player)) return;
     playerManager.handlePlayerChat(chatEvent);
     const controller = chatEvent.player;
     const text = chatEvent.text;
@@ -25843,6 +25959,6 @@ Instance.SetThink(() => {
 });
 Instance.SetNextThink(Instance.GetGameTime() + ticks);
 
-Instance.Msg("=== PvE Release 已启动 ===");
+Instance.Msg(formatScopedMessage("Main/bootstrap", "=== PvE Release 已启动 ==="));
 
 playerManager.refresh();

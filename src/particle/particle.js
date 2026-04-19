@@ -4,6 +4,7 @@
 import { Entity, Instance, PointTemplate } from "cs_script/point_script";
 import { eventBus } from "../util/event_bus";
 import { event } from "../util/definition";
+import { formatScopedMessage } from "../util/log";
 
 export class Particle {
     /**
@@ -40,13 +41,13 @@ export class Particle {
 
         const template = Instance.FindEntityByName(this.config.spawnTemplateName);
         if (!template || !(template instanceof PointTemplate)) {
-            Instance.Msg(`Particle: 找不到 PointTemplate "${this.config.spawnTemplateName}"\n`);
+            Instance.Msg(formatScopedMessage("Particle/start", `找不到 PointTemplate "${this.config.spawnTemplateName}"\n`));
             return false;
         }
 
         const spawned = template.ForceSpawn(position);
         if (!spawned || spawned.length === 0) {
-            Instance.Msg(`Particle: ForceSpawn 未返回实体 (template="${this.config.spawnTemplateName}")\n`);
+            Instance.Msg(formatScopedMessage("Particle/start", `ForceSpawn 未返回实体 (template="${this.config.spawnTemplateName}")\n`));
             return false;
         }
 
@@ -54,7 +55,7 @@ export class Particle {
         this._particleEntity = this._findParticleEntity(spawned);
 
         if (!this._particleEntity) {
-            Instance.Msg(`Particle: 生成实体中未找到 info_particle_system (template="${this.config.spawnTemplateName}")\n`);
+            Instance.Msg(formatScopedMessage("Particle/start", `生成实体中未找到 info_particle_system (template="${this.config.spawnTemplateName}")\n`));
             this._cleanup();
             return false;
         }

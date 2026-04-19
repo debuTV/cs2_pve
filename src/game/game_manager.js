@@ -5,6 +5,7 @@
 import { GameState } from "./game_const";
 import { eventBus } from "../util/event_bus";
 import { event } from "../util/definition";
+import { formatScopedMessage } from "../util/log";
 import { Instance } from "cs_script/point_script";
 
 /**
@@ -87,7 +88,7 @@ export class GameManager {
      */
     enterPreparePhase() {
         this.gameState = GameState.PREPARE;
-        this._adapter.broadcast("=== 准备阶段开始 ===");
+        this._adapter.broadcast(formatScopedMessage("GameManager/enterPreparePhase", "=== 准备阶段开始 ==="));
         eventBus.emit(event.Game.Out.OnEnterPreparePhase);
     }
 
@@ -97,7 +98,7 @@ export class GameManager {
     startGame() {
         if (this.gameState !== GameState.PREPARE) return;
         this.gameState = GameState.PLAYING;
-        this._adapter.broadcast("=== 游戏开始 ===");
+        this._adapter.broadcast(formatScopedMessage("GameManager/startGame", "=== 游戏开始 ==="));
         eventBus.emit(event.Game.Out.OnStartGame);
     }
 
@@ -107,7 +108,7 @@ export class GameManager {
     gameLost() {
         if (this.gameState === GameState.LOST || this.gameState === GameState.WON) return false;
         this.gameState = GameState.LOST;
-        this._adapter.broadcast("=== 游戏失败 ===");
+        this._adapter.broadcast(formatScopedMessage("GameManager/gameLost", "=== 游戏失败 ==="));
         eventBus.emit(event.Game.Out.OnGameLost);
         return true;
     }
@@ -118,14 +119,14 @@ export class GameManager {
     gameWon() {
         if (this.gameState === GameState.LOST || this.gameState === GameState.WON) return false;
         this.gameState = GameState.WON;
-        this._adapter.broadcast("=== 游戏胜利 ===");
+        this._adapter.broadcast(formatScopedMessage("GameManager/gameWon", "=== 游戏胜利 ==="));
         eventBus.emit(event.Game.Out.OnGameWin);
         return true;
     }
     clearAll()
     {
         this.gameState = GameState.WAITING;
-        this._adapter.broadcast("重置游戏...");
+        this._adapter.broadcast(formatScopedMessage("GameManager/clearAll", "重置游戏..."));
     }
     /**
      * 重置游戏状态，触发 onResetGame 回调通知其他模块。

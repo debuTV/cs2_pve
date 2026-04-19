@@ -6,6 +6,7 @@ import { PlayerState } from "../../player_const";
 import { PlayerRuntimeEvents } from "../../../util/runtime_events.js";
 import { eventBus } from "../../../util/event_bus";
 import { event } from "../../../util/definition";
+import { formatScopedMessage } from "../../../util/log";
 
 /**
  * 玩家战斗组件 — 受伤、治疗与死亡判定。
@@ -88,7 +89,7 @@ export class PlayerHealthCombat {
             currentArmor: this.player.stats.armor,
         });
 
-        Instance.Msg(`玩家 ${this.player.entityBridge.getPlayerName()} 受到 ${damage} 伤害 (生命: ${this.player.stats.health}, 护甲: ${this.player.stats.armor})`);
+        Instance.Msg(formatScopedMessage("PlayerHealthCombat/takeDamage", `玩家 ${this.player.entityBridge.getPlayerName()} 受到 ${damage} 伤害 (生命: ${this.player.stats.health}, 护甲: ${this.player.stats.armor})`));
 
         if (this.player.stats.health <= 0) {
             this.die(attacker);
@@ -122,7 +123,7 @@ export class PlayerHealthCombat {
             currentArmor: this.player.stats.armor,
         });
 
-        Instance.Msg(`玩家 ${this.player.entityBridge.getPlayerName()} 受到 ${damage} 伤害 (生命: ${this.player.stats.health}, 护甲: ${this.player.stats.armor})`);
+        Instance.Msg(formatScopedMessage("PlayerHealthCombat/syncDamageFromEngine", `玩家 ${this.player.entityBridge.getPlayerName()} 受到 ${damage} 伤害 (生命: ${this.player.stats.health}, 护甲: ${this.player.stats.armor})`));
 
         if (this.player.stats.health <= 0) {
             this.die(attacker);
@@ -184,8 +185,7 @@ export class PlayerHealthCombat {
 
         // 切换到观察者
         this.player.entityBridge.joinTeam(1);
-
-        Instance.Msg(`玩家 ${this.player.entityBridge.getPlayerName()} 死亡`);
+        Instance.Msg(formatScopedMessage("PlayerHealthCombat/die", `玩家 ${this.player.entityBridge.getPlayerName()} 死亡`));
     }
 
     // ——— 内部 ———

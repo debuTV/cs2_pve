@@ -4,6 +4,7 @@
 
 import { eventBus } from "../util/event_bus";
 import { event } from "../util/definition";
+import { formatScopedMessage } from "../util/log";
 import { createRuntimeWaveConfig, WaveState,wavesConfig } from "./wave_const";
 
 /**
@@ -107,7 +108,7 @@ export class WaveManager {
     _activateCurrentWave(wave) {
         this.waveState = WaveState.ACTIVE;
         this._resetPrepareState();
-        this._adapter.log(`=== 第 ${this.currentWave} 波开始 ===`);
+        this._adapter.log(formatScopedMessage("WaveManager/_activateCurrentWave", `=== 第 ${this.currentWave} 波开始 ===`));
         /** @type {import("./wave_const").OnWaveStart} */
         const payload = {
             waveIndex: this.currentWave,
@@ -129,12 +130,12 @@ export class WaveManager {
      */
     startWave(waveStartRequest) {
         if (this.waveState === WaveState.ACTIVE || this.waveState === WaveState.PREPARING) {
-            this._adapter.log(`无法开始波次 ${waveStartRequest.waveIndex}，当前波次进行中 (state=${this.waveState})`);
+            this._adapter.log(formatScopedMessage("WaveManager/startWave", `无法开始波次 ${waveStartRequest.waveIndex}，当前波次进行中 (state=${this.waveState})`));
             return false;
         }
 
         if (waveStartRequest.waveIndex < 1 || waveStartRequest.waveIndex > this.waves.length) {
-            this._adapter.log(`波次 ${waveStartRequest.waveIndex} 超出范围 (1-${this.waves.length})`);
+            this._adapter.log(formatScopedMessage("WaveManager/startWave", `波次 ${waveStartRequest.waveIndex} 超出范围 (1-${this.waves.length})`));
             return false;
         }
 
@@ -149,7 +150,7 @@ export class WaveManager {
             `同屏上限: ${wave.aliveMonster}\n` +
             `奖励: $${wave.moneyReward} / ${wave.expReward} EXP\n` +
             `准备时间: ${wave.preparationTime} 秒`;
-        this._adapter.broadcast(message);
+        this._adapter.broadcast(formatScopedMessage("WaveManager/startWave", message));
 
         // 进入预热阶段
         this._enterPreparingState(waveStartRequest.waveIndex, wave);
@@ -174,7 +175,7 @@ export class WaveManager {
         if (!this.hasNextWave()) {
             message += "\n=== 所有波次完成 ===";
         }
-        this._adapter.broadcast(message);
+        this._adapter.broadcast(formatScopedMessage("WaveManager/completeWave", message));
 
         /** @type {import("./wave_const").OnWaveEnd} */
         const payload = { waveIndex: this.currentWave};
@@ -190,7 +191,7 @@ export class WaveManager {
         this.currentWaveConfig = null;
         this.waveState = WaveState.IDLE;
         this._resetPrepareState();
-        this._adapter.log("波次已重置");
+        this._adapter.log(formatScopedMessage("WaveManager/resetGame", "波次已重置"));
     }
 
     // ═══════════════════════════════════════════════
@@ -258,7 +259,7 @@ export class WaveManager {
             this._prepareContext.broadcastIndex < messages.length &&
             elapsed >= messages[this._prepareContext.broadcastIndex].delay
         ) {
-            this._adapter.broadcast(messages[this._prepareContext.broadcastIndex].message);
+            this._adapter.broadcast(formatScopedMessage("WaveManager/tick", messages[this._prepareContext.broadcastIndex].message));
             this._prepareContext.broadcastIndex++;
         }
 

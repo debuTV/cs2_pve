@@ -1,6 +1,7 @@
 /**
  * @module 实体移动/运动模式
  */
+import { Instance } from "cs_script/point_script";
 import { vec } from "../util/vector";
 import { arriveDistance, jumpSpeed, PathState } from "./movement_const";
 
@@ -18,7 +19,7 @@ import { arriveDistance, jumpSpeed, PathState } from "./movement_const";
  * @property {Vector}       wishDir
  * @property {number}       wishSpeed
  * @property {number}       maxSpeed
- * @property {boolean}      preserveVelocityInAir
+ * @property {boolean}      preserveVelocityInAir // 是否在空中保持离地时的速度（跳跃节点专用）
  * @property {() => Vector} getPos        获取当前实体位置
  * @property {(name: string, arg?: any) => void} requestModeSwitch  请求切换模式（由 controller 处理）
  */

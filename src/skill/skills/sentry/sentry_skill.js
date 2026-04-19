@@ -9,6 +9,7 @@
 import { Instance, PointTemplate } from "cs_script/point_script";
 import { SkillTemplate } from "../../skill_template";
 import { PlayerRuntimeEvents } from "../../../util/runtime_events";
+import { formatScopedMessage } from "../../../util/log";
 import { SentryTurret } from "./sentry_turret";
 import { sentryManager } from "./sentry_manager";
 import {
@@ -171,20 +172,20 @@ export class SentrySkill extends SkillTemplate {
     _spawnTurret(position, ownerKey) {
         const template = Instance.FindEntityByName(this._templateName);
         if (!template || !(template instanceof PointTemplate)) {
-            Instance.Msg(`Sentry: 找不到 PointTemplate "${this._templateName}"\n`);
+            Instance.Msg(formatScopedMessage("SentrySkill/_spawnTurret", `找不到 PointTemplate "${this._templateName}"\n`));
             return false;
         }
 
         const spawned = template.ForceSpawn(position);
         if (!spawned || spawned.length < 2) {
-            Instance.Msg(`Sentry: PointTemplate "${this._templateName}" 至少需要生成 2 个实体\n`);
+            Instance.Msg(formatScopedMessage("SentrySkill/_spawnTurret", `PointTemplate "${this._templateName}" 至少需要生成 2 个实体\n`));
             this._cleanupSpawnedEntities(spawned ?? []);
             return false;
         }
 
         const [turretBase, turretYaw] = spawned;
         if (!turretBase?.IsValid?.() || !turretYaw?.IsValid?.()) {
-            Instance.Msg(`Sentry: PointTemplate "${this._templateName}" 缺少底座或旋转实体\n`);
+            Instance.Msg(formatScopedMessage("SentrySkill/_spawnTurret", `PointTemplate "${this._templateName}" 缺少底座或旋转实体\n`));
             this._cleanupSpawnedEntities(spawned);
             return false;
         }

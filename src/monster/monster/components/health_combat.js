@@ -4,6 +4,7 @@
 import { BaseModelEntity, CSPlayerPawn, Instance } from "cs_script/point_script";
 import { eventBus } from "../../../util/event_bus";
 import { event } from "../../../util/definition";
+import { formatScopedMessage } from "../../../util/log";
 import { MonsterState } from "../../monster_const";
 import { MonsterRuntimeEvents } from "../../../util/runtime_events.js";
 
@@ -103,7 +104,7 @@ export class MonsterHealthCombat {
             attacker: attacker instanceof CSPlayerPawn ? attacker : null,
         };
         eventBus.emit(event.Monster.Out.OnMonsterDamaged, payload);
-        Instance.Msg(`怪物 #${this.monster.id} 受到 ${finalAmount} 点伤害 (原始:${amount}) (${previousHealth} -> ${this.monster.health})`);
+        Instance.Msg(formatScopedMessage("MonsterHealthCombat/takeDamage", `怪物 #${this.monster.id} 受到 ${finalAmount} 点伤害 (原始:${amount}) (${previousHealth} -> ${this.monster.health})`));
 
         if (this.monster.health <= 0) {
             this.die(attacker);
@@ -138,7 +139,7 @@ export class MonsterHealthCombat {
         this.monster.killer = killer instanceof CSPlayerPawn ? killer : null;
         this.monster.emitDeathEvent(killer);
         this.monster.animation.enter(MonsterState.DEAD);
-        Instance.Msg(`怪物 #${this.monster.id} 死亡`);
+        Instance.Msg(formatScopedMessage("MonsterHealthCombat/die", `怪物 #${this.monster.id} 死亡`));
     }
 
     enterAttack() {

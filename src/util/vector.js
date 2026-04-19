@@ -2,6 +2,7 @@
  * @module 工具/向量工具
  */
 import { Instance } from "cs_script/point_script";
+import { formatScopedMessage } from "./log";
 /**
  * 向量工具类，提供 2D/3D 向量的静态运算方法（加减、点积、叉积、归一化、插值等）。
  * @navigationTitle 向量工具
@@ -131,7 +132,7 @@ export class vec{
      * @param {import("cs_script/point_script").Vector} pos
      */
     static msg(pos) {
-        Instance.Msg(`{${pos.x} ${pos.y} ${pos.z}}`);
+        Instance.Msg(formatScopedMessage("vec/msg", `{${pos.x} ${pos.y} ${pos.z}}`));
     }
     /**
      * 计算两个三维向量的点积。

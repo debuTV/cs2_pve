@@ -8,6 +8,7 @@
 import { Instance } from "cs_script/point_script";
 import { MonsterState } from "../../../monster/monster_const";
 import { createLaserEndpoints } from "../../../util/laser";
+import { formatScopedMessage } from "../../../util/log";
 import { createSoundEntity } from "../../../util/sound";
 import {
     SENTRY_ATTACK_SOUND_EVENT_NAME,
@@ -66,13 +67,13 @@ export class SentryTurret {
         this._syncAnchors();
         const laserStartPos = this._getLaserStartPosition();
         if (!laserStartPos || !this._createLaserEndpoints(laserStartPos)) {
-            Instance.Msg(`Sentry: 创建激光端点失败\n`);
+            Instance.Msg(formatScopedMessage("SentryTurret/_init", "创建激光端点失败\n"));
             this.destroy();
             return;
         }
         const soundOrigin = this._getSoundOrigin();
         if (!soundOrigin || !this._createSoundEntity(soundOrigin)) {
-            Instance.Msg(`Sentry: 创建声音实体失败\n`);
+            Instance.Msg(formatScopedMessage("SentryTurret/_init", "创建声音实体失败\n"));
             this.destroy();
             return;
         }
@@ -192,7 +193,11 @@ export class SentryTurret {
         }
         const uniqueEntities = new Set(entities.filter((entity) => entity?.IsValid?.()));
         for (const entity of uniqueEntities) {
-            entity.Remove();
+            Instance.EntFireAtTarget({
+                target: entity,
+                input: "Kill",
+                delay: 0.5,//神奇小参数
+            });
         }
 
         this.laserStart = null;
@@ -320,6 +325,7 @@ export class SentryTurret {
         Instance.EntFireAtTarget({
             target: this.soundEntity,
             input: "StartSound",
+            delay:0.05,//神奇小参数
         });
     }
 

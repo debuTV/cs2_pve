@@ -4,6 +4,7 @@
 import { CSPlayerController, CSPlayerPawn, Instance } from "cs_script/point_script";
 import { eventBus } from "../util/event_bus";
 import { event } from "../util/definition";
+import { formatScopedMessage } from "../util/log";
 import { Player } from "./player/player";
 import { getPlayerProfessionConfig, getPlayerProfessionIds, PlayerState } from "./player_const";
 
@@ -65,6 +66,12 @@ export class PlayerManager {
          * @type {Player[]}
          */
         this.alivePlayerList = [];
+        /**
+         * 已完成死亡收尾的玩家槽位。
+         * 致死伤害判定与引擎 OnPlayerKill 都会走同一个入口，但只允许收尾一次。
+         * @type {Set<number>}
+         */
+        this._handledDeathSlots = new Set();
         /**
          * 外部适配器实例，提供日志、广播和游戏时间接口
          * @type {import("../util/definition").Adapter} 
@@ -145,6 +152,7 @@ export class PlayerManager {
         for (const player of players) {
             if (player && player instanceof CSPlayerPawn) {
                 const controller = player.GetPlayerController();
+                if (!controller || controller.IsBot()) continue;
                 this.handlePlayerConnect(controller);
                 if (player.IsAlive()) {
                     this.handlePlayerActivate(controller);
@@ -171,6 +179,7 @@ export class PlayerManager {
         if (!controller) return;
 
         const slot = controller.GetPlayerSlot();
+        this._handledDeathSlots.delete(slot);
         const existingPlayer = this.players.get(slot);
         if (existingPlayer) {
             if (existingPlayer.isReady) this.readyCount--;
@@ -185,13 +194,13 @@ export class PlayerManager {
         this.players.set(slot, player);
         this.totalPlayers++;
 
-        this._adapter.broadcast(`玩家 ${controller.GetPlayerName()} 加入游戏 (SLOT: ${slot})`);
+        this._adapter.broadcast(formatScopedMessage("PlayerManager/handlePlayerConnect", `玩家 ${controller.GetPlayerName()} 加入游戏 (SLOT: ${slot})`));
         eventBus.emit(event.Player.Out.OnPlayerJoin, {
             player,
             slot,
         });
 
-        this._adapter.sendMessage(slot, "=== 欢迎加入游戏 ===");
+        this._adapter.sendMessage(slot, formatScopedMessage("PlayerManager/handlePlayerConnect", "=== 欢迎加入游戏 ==="));
     }
 
     /**
@@ -222,13 +231,14 @@ export class PlayerManager {
         const wasReady = player.isReady;
         const wasLobbyState = player.state === PlayerState.PREPARING || player.state === PlayerState.READY;
 
-        this._adapter.broadcast(`玩家 ${player.entityBridge.getPlayerName()} 离开游戏`);
+        this._adapter.broadcast(formatScopedMessage("PlayerManager/handlePlayerDisconnect", `玩家 ${player.entityBridge.getPlayerName()} 离开游戏`));
 
         if (wasReady) {
             this.readyCount--;
         }
 
         this._removeAlivePlayer(playerSlot);
+        this._handledDeathSlots.delete(playerSlot);
         player.disconnect();
         this.players.delete(playerSlot);
         this.totalPlayers--;
@@ -262,6 +272,9 @@ export class PlayerManager {
 
             player.handleReset(pawn, this.ingame ? PlayerState.ALIVE : PlayerState.PREPARING);
             this._syncAlivePlayer(player);
+            if (player.state !== PlayerState.DEAD) {
+                this._handledDeathSlots.delete(player.slot);
+            }
             eventBus.emit(event.Player.Out.OnPlayerRespawn, {
                 player,
                 slot: controller.GetPlayerSlot(),
@@ -276,22 +289,37 @@ export class PlayerManager {
     }
 
     /**
-     * 玩家死亡时调用，将玩家设为 DEAD 状态并触发死亡回调。
+     * 统一死亡收尾入口。
+     * 致死伤害判定与引擎 OnPlayerKill 都会走这里，但内部只会真正处理一次。
      * @param {CSPlayerPawn} playerPawn 玩家 Pawn 实体
+     * @returns {boolean} 本次是否首次完成死亡收尾
      */
     handlePlayerDeath(playerPawn) {
+        if (!(playerPawn instanceof CSPlayerPawn)) return false;
         const controller = playerPawn.GetPlayerController();
-        if (!controller) return;
+        if (!controller) return false;
         const slot = controller.GetPlayerSlot();
         const player = this.players.get(slot);
-        if (!player) return;
+        if (!player) return false;
+        if (player.entityBridge.pawn && player.entityBridge.pawn !== playerPawn) return false;
+        if (this._handledDeathSlots.has(slot))
+        {
+            Instance.Msg(formatScopedMessage("PlayerManager/handlePlayerDeath", "玩家死亡事件已处理过，跳过重复处理\n"));
+            return false;
+        }
+
+        if (player.state !== PlayerState.DEAD) {
+            player.healthCombat.die(null);
+        }
 
         this._removeAlivePlayer(slot);
+        this._handledDeathSlots.add(slot);
         eventBus.emit(event.Player.Out.OnPlayerDeath, {
             player,
             slot,
             playerPawn,
         });
+        return true;
     }
 
     /**
@@ -337,7 +365,7 @@ export class PlayerManager {
     }
 
     /**
-     * 同步引擎侧伤害到脚本层，若第一次检测到死亡则触发死亡回调。
+     * 同步引擎侧伤害到脚本层；若判定致死，则进入统一死亡收尾入口。
      * @param {import("cs_script/point_script").PlayerDamageEvent} event 引擎伤害事件
      */
     handlePlayerDamage(event) {
@@ -347,7 +375,10 @@ export class PlayerManager {
         const player = this.players.get(slot);
         if (!player) return;
 
-        player.syncDamageFromEngine(event.damage, event.attacker, event.inflictor);
+        const killed = player.syncDamageFromEngine(event.damage, event.attacker, event.inflictor);
+        if (killed) {
+            this.handlePlayerDeath(event.player);
+        }
     }
 
     /**
@@ -380,11 +411,12 @@ export class PlayerManager {
         else this.readyCount--;
 
         const name = player.entityBridge.getPlayerName();
-        this._adapter.broadcast(
+        this._adapter.broadcast(formatScopedMessage(
+            "PlayerManager/_setPlayerReady",
             ready
                 ? `${name} 已准备 (${this.readyCount}/${this.totalPlayers})`
                 : `${name} 取消准备 (${this.readyCount}/${this.totalPlayers})`
-        );
+        ));
         eventBus.emit(event.Player.Out.OnPlayerReadyChanged, {
             player,
             slot: player.slot,
@@ -555,6 +587,7 @@ export class PlayerManager {
     enterGameStart() {
         this.ingame = true;
         this.readyCount = 0;
+        this._handledDeathSlots.clear();
         for (const [, player] of this.players) {
             if (!player.entityBridge.pawn) continue;
             player.enterAliveState();
@@ -565,6 +598,7 @@ export class PlayerManager {
     resetAllGameStatus() {
         this.ingame = false;
         this.readyCount = 0;
+        this._handledDeathSlots.clear();
         for (const [, player] of this.players) {
             player.resetGameStatus();
         }
@@ -590,6 +624,7 @@ export class PlayerManager {
      * @returns {void}
      */
     _addAlivePlayer(player) {
+        this._handledDeathSlots.delete(player.slot);
         if (this.alivePlayerList.some(alivePlayer => alivePlayer.slot === player.slot)) return;
         this.alivePlayerList.push(player);
     }

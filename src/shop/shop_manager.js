@@ -4,6 +4,7 @@
 import { Instance } from "cs_script/point_script";
 import { eventBus } from "../util/event_bus";
 import { event } from "../util/definition";
+import { formatScopedMessage } from "../util/log";
 import { ShopSession } from "./shop_session";
 import { BASE_SHOP_ITEMS ,RAW_KEY_TO_ACTION} from "./shop_const";
 
@@ -74,12 +75,12 @@ export class ShopManager {
      */
     openShop(shopOpenRequest) {
         if (!shopOpenRequest.pawn) {
-            Instance.Msg(`[ShopManager] 玩家 Pawn 不存在，无法打开商店 (slot=${shopOpenRequest.slot})`);
+            Instance.Msg(formatScopedMessage("ShopManager/openShop", `玩家 Pawn 不存在，无法打开商店 (slot=${shopOpenRequest.slot})`));
             return false;
         }
 
         if (!this._canOpenShop(shopOpenRequest)) {
-            Instance.Msg(`[ShopManager] 玩家不满足打开商店条件 (slot=${shopOpenRequest.slot})`);
+            Instance.Msg(formatScopedMessage("ShopManager/openShop", `玩家不满足打开商店条件 (slot=${shopOpenRequest.slot})`));
             return false;
         }
 
@@ -90,7 +91,7 @@ export class ShopManager {
         }
 
         session.open(shopOpenRequest.pawn);
-        Instance.Msg(`[ShopManager] 商店已打开 (slot=${shopOpenRequest.slot})`);
+        Instance.Msg(formatScopedMessage("ShopManager/openShop", `商店已打开 (slot=${shopOpenRequest.slot})`));
         return true;
     }
 
@@ -107,7 +108,7 @@ export class ShopManager {
         if (!session || !session.isOpen) return false;
 
         session.close();
-        Instance.Msg(`[ShopManager] 商店已关闭 (slot=${shopCloseRequest.slot})`);
+        Instance.Msg(formatScopedMessage("ShopManager/closeShop", `商店已关闭 (slot=${shopCloseRequest.slot})`));
         return true;
     }
 

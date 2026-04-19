@@ -3,6 +3,7 @@
  */
 import { Instance } from "cs_script/point_script";
 import { PlayerState } from "../../player_const";
+import { formatScopedMessage } from "../../../util/log";
 import { PlayerRuntimeEvents } from "../../../util/runtime_events.js";
 
 /**
@@ -64,7 +65,7 @@ export class PlayerLifecycle {
         this._giveStartingEquipment();
         this.player.emitStatusSnapshot();
 
-        Instance.Msg(`玩家 ${this.player.entityBridge.getPlayerName()} 已激活`);
+        Instance.Msg(formatScopedMessage("PlayerLifecycle/activate", `玩家 ${this.player.entityBridge.getPlayerName()} 已激活`));
     }
 
     /**
@@ -92,6 +93,7 @@ export class PlayerLifecycle {
                 this.player.healthCombat.die(null);
                 return;
             }
+            this._giveStartingEquipment();
             this.player.emitStatusSnapshot();
         }
     }
@@ -121,7 +123,7 @@ export class PlayerLifecycle {
         this.player.emitRuntimeEvent(PlayerRuntimeEvents.Spawn, { state: nextState });
         this.player.emitStatusSnapshot();
 
-        Instance.Msg(`玩家 ${this.player.entityBridge.getPlayerName()} 已重生 (HP: ${stats.health})`);
+        Instance.Msg(formatScopedMessage("PlayerLifecycle/respawn", `玩家 ${this.player.entityBridge.getPlayerName()} 已重生 (HP: ${stats.health})`));
     }
 
     /**

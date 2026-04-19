@@ -181,7 +181,7 @@ export const wavesConfig=[
         moneyReward: 750,
         expReward: 60,
         spawnInterval: 0.16,
-        preparationTime: 30,                  //记住要和广播消息的 delay 匹配
+        preparationTime: 1,                  //记住要和广播消息的 delay 匹配
         aliveMonster: 6,
         monster_spawn_points_name:["monster_spawnpoint"],
         broadcastmessage:[{message:"第1波",delay:30}],

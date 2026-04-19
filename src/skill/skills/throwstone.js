@@ -4,6 +4,7 @@
 import { Instance, PointTemplate } from "cs_script/point_script";
 import { eventBus } from "../../util/event_bus";
 import { event } from "../../util/definition";
+import { formatScopedMessage } from "../../util/log";
 import { MonsterRuntimeEvents } from "../../util/runtime_events.js";
 import { ThrowTarget } from "../../throw/throw_const";
 import { SkillTemplate } from "../skill_template";
@@ -130,26 +131,26 @@ export class ThrowStoneSkill extends SkillTemplate {
      */
     _spawnProjectileEntity(origin) {
         if (!this.templateName) {
-            Instance.Msg("ThrowStone: 未配置 templateName\n");
+            Instance.Msg(formatScopedMessage("ThrowStoneSkill/_spawnProjectileEntity", "未配置 templateName\n"));
             return null;
         }
 
         const template = Instance.FindEntityByName(this.templateName);
         if (!template || !(template instanceof PointTemplate)) {
-            Instance.Msg(`ThrowStone: 找不到 PointTemplate \"${this.templateName}\"\n`);
+            Instance.Msg(formatScopedMessage("ThrowStoneSkill/_spawnProjectileEntity", `找不到 PointTemplate \"${this.templateName}\"\n`));
             return null;
         }
 
         const spawned = template.ForceSpawn(origin);
         if (!spawned || spawned.length !== 1) {
-            Instance.Msg(`ThrowStone: PointTemplate \"${this.templateName}\" 必须且只能生成 1 个实体\n`);
+            Instance.Msg(formatScopedMessage("ThrowStoneSkill/_spawnProjectileEntity", `PointTemplate \"${this.templateName}\" 必须且只能生成 1 个实体\n`));
             this._cleanupSpawnedEntities(spawned ?? []);
             return null;
         }
 
         const projectileEntity = spawned[0];
         if (!projectileEntity?.IsValid?.()) {
-            Instance.Msg(`ThrowStone: PointTemplate \"${this.templateName}\" 生成的实体无效\n`);
+            Instance.Msg(formatScopedMessage("ThrowStoneSkill/_spawnProjectileEntity", `PointTemplate \"${this.templateName}\" 生成的实体无效\n`));
             this._cleanupSpawnedEntities(spawned);
             return null;
         }

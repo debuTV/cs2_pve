@@ -4,6 +4,7 @@
 import { Instance } from "cs_script/point_script";
 import { eventBus } from "../util/event_bus";
 import { event } from "../util/definition";
+import { formatScopedMessage } from "../util/log";
 import { particleConfigs } from "./particle_const";
 import { Particle } from "./particle";
 /**
@@ -45,7 +46,7 @@ export class ParticleManager {
     create(particleCreateRequest) {
         const config = particleConfigs[particleCreateRequest.particleName];
         if (!config) {
-            Instance.Msg(`Particle: 未找到粒子配置 "${particleCreateRequest.particleName}"\n`);
+            Instance.Msg(formatScopedMessage("ParticleManager/create", `未找到粒子配置 "${particleCreateRequest.particleName}"\n`));
             return -1;
         }
 

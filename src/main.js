@@ -1,7 +1,6 @@
 /**
- * 已知漏洞
- * 怪物正常死亡后引擎实体从不移除 — 实体泄漏
- * fireuser1相关
+ * 以后完成
+ * infotarget换成固定值
  */
 /**
  * release 版正式入口。
@@ -23,6 +22,7 @@
 import { CSPlayerPawn, Instance } from "cs_script/point_script";
 import { eventBus } from "./util/event_bus";
 import { event, MovementRequestType } from "./util/definition";
+import { formatScopedMessage } from "./util/log";
 
 // ——— 各模块独立导入 ———
 import { GameState } from "./game/game_const";
@@ -109,6 +109,31 @@ const particleManager = new ParticleManager();
 const areaEffectManager = new AreaEffectManager();
 const projectileManager = new ProjectileManager();
 
+/** @type {Set<number>} */
+const ignoredBotSlots = new Set();
+
+/**
+ * @param {import("cs_script/point_script").CSPlayerController | undefined | null} controller
+ * @returns {boolean}
+ */
+function shouldIgnoreBotController(controller) {
+    if (!controller?.IsBot?.()) return false;
+    const slot = controller.GetPlayerSlot?.();
+    if (typeof slot === "number") {
+        ignoredBotSlots.add(slot);
+    }
+    return true;
+}
+
+/**
+ * @param {import("cs_script/point_script").CSPlayerPawn | undefined | null} pawn
+ * @returns {boolean}
+ */
+function shouldIgnoreBotPawn(pawn) {
+    const controller = pawn?.GetPlayerController?.();
+    return shouldIgnoreBotController(controller);
+}
+
 
 sentryManager.setMonsterProvider(() => monsterManager.activeMonsterList);
 function cleanupFinishedMatch() {
@@ -138,7 +163,10 @@ function cleanupFinishedMatch() {
  */
 function teleportPlayersToNamedPosition(targetName, players) {
     const position = Instance.FindEntityByName(targetName)?.GetAbsOrigin();
-    if (!position) return;
+    if (!position) {
+        Instance.ServerCommand(`say "wc!!!,entity not found: ${targetName}"`);
+        return;
+    }
 
     for (const player of players) {
         player.entityBridge.pawn?.Teleport({
@@ -530,34 +558,52 @@ Instance.OnScriptInput("profession", (scriptEvent) => {
     });
 });
 Instance.OnPlayerConnect((event) => {
+    if (shouldIgnoreBotController(event.player)) return;
+    Instance.Msg(formatScopedMessage("Main/OnPlayerConnect", "OnPlayerConnect"));
     playerManager.handlePlayerConnect(event.player);
 });
 
 Instance.OnPlayerActivate((event) => {
+    if (shouldIgnoreBotController(event.player)) return;
+    Instance.Msg(formatScopedMessage("Main/OnPlayerActivate", "OnPlayerActivate"));
     playerManager.handlePlayerActivate(event.player);
 });
 
 Instance.OnPlayerDisconnect((event) => {
+    if (ignoredBotSlots.has(event.playerSlot)) {
+        ignoredBotSlots.delete(event.playerSlot);
+        return;
+    }
+    Instance.Msg(formatScopedMessage("Main/OnPlayerDisconnect", "OnPlayerDisconnect"));
     playerManager.handlePlayerDisconnect(event.playerSlot);
 });
 
 Instance.OnPlayerReset((event) => {
+    if (shouldIgnoreBotPawn(event.player)) return;
+    Instance.Msg(formatScopedMessage("Main/OnPlayerReset", "OnPlayerReset"));
     playerManager.handlePlayerReset(event.player);
 });
 
 Instance.OnPlayerKill((event) => {
+    if (shouldIgnoreBotPawn(event.player)) return;
+    Instance.Msg(formatScopedMessage("Main/OnPlayerKill", "OnPlayerKill"));
     playerManager.handlePlayerDeath(event.player);
 });
 
 Instance.OnModifyPlayerDamage((event) => {
+    if (shouldIgnoreBotPawn(event.player)) return;
+    Instance.Msg(formatScopedMessage("Main/OnModifyPlayerDamage", "OnModifyPlayerDamage"));
     return playerManager.handleBeforePlayerDamage(event);
 });
 
 Instance.OnPlayerDamage((event) => {
+    if (shouldIgnoreBotPawn(event.player)) return;
+    Instance.Msg(formatScopedMessage("Main/OnPlayerDamage", "OnPlayerDamage"));
     playerManager.handlePlayerDamage(event);
 });
 
 Instance.OnPlayerChat((chatEvent) => {
+    if (shouldIgnoreBotController(chatEvent.player)) return;
     playerManager.handlePlayerChat(chatEvent);
     const controller = chatEvent.player;
     const text = chatEvent.text;
@@ -637,6 +683,6 @@ Instance.SetThink(() => {
 });
 Instance.SetNextThink(Instance.GetGameTime() + ticks);
 
-Instance.Msg("=== PvE Release 已启动 ===");
+Instance.Msg(formatScopedMessage("Main/bootstrap", "=== PvE Release 已启动 ==="));
 
 playerManager.refresh();

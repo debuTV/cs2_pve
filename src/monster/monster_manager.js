@@ -4,6 +4,7 @@
 import { BaseModelEntity, CSPlayerPawn, Entity, Instance} from "cs_script/point_script";
 import { eventBus } from "../util/event_bus";
 import { event } from "../util/definition";
+import { formatScopedMessage } from "../util/log";
 import { Monster } from "./monster/monster";
 import { MonsterState,targetTeam,MonsterType } from "./monster_const";
 import { vec } from "../util/vector";
@@ -286,23 +287,23 @@ export class MonsterManager {
             this.getspawnPoints(waveConfig);
             if (this.spawnPoints.length === 0)
             {   
-                Instance.Msg("错误: 未找到怪物生成点");
+                Instance.Msg(formatScopedMessage("MonsterManager/spawnMonster", "错误: 未找到怪物生成点"));
                 return null;
             }
             const pos = this.spawnPoints[Math.floor(Math.random() * this.spawnPoints.length)];
             const start = { x: pos.x, y: pos.y, z: pos.z };
             const end = { x: pos.x, y: pos.y, z: pos.z };
             if (Instance.TraceSphere({ radius:30, start, end, ignorePlayers: true }).hitEntity) {
-                Instance.Msg("错误: 生成点有遮挡");
+                Instance.Msg(formatScopedMessage("MonsterManager/spawnMonster", "错误: 生成点有遮挡"));
                 return null;
             }
             const typeConfig = this.getMonsterType(waveConfig, this.nextMonsterId-1);
             const monster = this.createMonster(typeConfig, end);
             if (!monster) return null;
-            Instance.Msg(`生成怪物 #${monster.id} ${monster.type} HP:${monster.health}`);
+            Instance.Msg(formatScopedMessage("MonsterManager/spawnMonster", `生成怪物 #${monster.id} ${monster.type} HP:${monster.health}`));
             return monster;
         } catch (error) {
-            Instance.Msg(`生成怪物失败: ${error}`);
+            Instance.Msg(formatScopedMessage("MonsterManager/spawnMonster", `生成怪物失败: ${error}`));
             return null;
         }
     }
@@ -323,12 +324,12 @@ export class MonsterManager {
         const typeName = options.typeName ?? caster.type;
         const typeConfig = this.findMonsterTypeByName(typeName);
         if (!typeConfig) {
-            Instance.Msg(`技能产卵失败: 未找到怪物类型 ${typeName}`);
+            Instance.Msg(formatScopedMessage("MonsterManager/spawnByother", `技能产卵失败: 未找到怪物类型 ${typeName}`));
             return false;
         }
         const center = this.getSpawnCenter(caster);
         if (!center) {
-            Instance.Msg(`技能产卵失败: 怪物 #${caster.id} 缺少有效生成中心`);
+            Instance.Msg(formatScopedMessage("MonsterManager/spawnByother", `技能产卵失败: 怪物 #${caster.id} 缺少有效生成中心`));
             return false;
         }
         const radiusMin = Math.max(0, options.radiusMin ?? 24);
@@ -381,11 +382,11 @@ export class MonsterManager {
 
             const monster = this.createMonster(typeConfig, spawnPos);
             if (!monster) return false;
-            Instance.Msg(`技能产卵成功 #${monster.id} ${monster.type}`);
+            Instance.Msg(formatScopedMessage("MonsterManager/spawnByother", `技能产卵成功 #${monster.id} ${monster.type}`));
             return true;
         }
 
-        Instance.Msg(`技能产卵失败: ${typeName} 在 ${tries} 次尝试内未找到可用位置`);
+        Instance.Msg(formatScopedMessage("MonsterManager/spawnByother", `技能产卵失败: ${typeName} 在 ${tries} 次尝试内未找到可用位置`));
         return false;
     }
 
