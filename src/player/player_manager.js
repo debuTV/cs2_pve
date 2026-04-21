@@ -18,7 +18,6 @@ import { getPlayerProfessionConfig, getPlayerProfessionIds, PlayerState } from "
  * @property {boolean} [isReady] - 准备状态（仅 type="ready" 时适用）
  * @property {number} [health] - 生命值（仅 type="respawn" 时适用）
  * @property {number} [armor] - 护甲值（仅 type="respawn" 时适用）
- * @property {number} [targetState] - 重生后的目标状态（仅 type="respawn" 时适用）
  * @property {string} [professionId] - 职业ID（仅 type="profession" 时适用）
  */
 /**
@@ -61,8 +60,8 @@ export class PlayerManager {
          */
         this.readyCount = 0;
         /**
-         * 当前存活玩家实例数组。
-         * 玩家进入 ALIVE 时加入，离开 ALIVE 时移除，避免每次查询都遍历全表。
+         * 当前可参战的 READY 玩家实例数组。
+         * 仅在游戏进行中维护，避免每次查询都遍历全表。
          * @type {Player[]}
          */
         this.alivePlayerList = [];
@@ -112,12 +111,8 @@ export class PlayerManager {
                 return this._setPlayerReady(player, payload.isReady ?? false);
             },
             respawn: (player, payload) => {
-                player.respawn(
-                    payload.health ?? 100,
-                    payload.armor ?? 0,
-                    payload.targetState ?? (this.ingame ? PlayerState.ALIVE : PlayerState.PREPARING)
-                );
-                this._syncAlivePlayer(player);
+                player.respawn();
+                this._syncPreparingRespawn(player);
                 return true;
             },
             resetGameStatus: (player) => {
@@ -217,7 +212,7 @@ export class PlayerManager {
         const pawn = controller.GetPlayerPawn();
         if (!pawn) return;
 
-        player.activate(pawn, this.ingame ? PlayerState.ALIVE : PlayerState.PREPARING);
+        player.updatePawn(pawn);
         this._syncAlivePlayer(player);
     }
 
@@ -234,7 +229,7 @@ export class PlayerManager {
         this._adapter.broadcast(formatScopedMessage("PlayerManager/handlePlayerDisconnect", `玩家 ${player.entityBridge.getPlayerName()} 离开游戏`));
 
         if (wasReady) {
-            this.readyCount--;
+            this.readyCount = Math.max(0, this.readyCount - 1);
         }
 
         this._removeAlivePlayer(playerSlot);
@@ -250,7 +245,7 @@ export class PlayerManager {
             wasLobbyState,
         });
 
-        if (wasLobbyState && this.areAllPlayersReady()) {
+        if (!this.ingame && wasLobbyState && this.areAllPlayersReady()) {
             eventBus.emit(event.Player.Out.OnAllPlayersReady, {
                 readyCount: this.readyCount,
                 totalPlayers: this.totalPlayers,
@@ -270,8 +265,8 @@ export class PlayerManager {
 
         if (player) {
 
-            player.handleReset(pawn, this.ingame ? PlayerState.ALIVE : PlayerState.PREPARING);
-            this._syncAlivePlayer(player);
+            player.updatePawn(pawn);
+            this._syncPreparingRespawn(player);
             if (player.state !== PlayerState.DEAD) {
                 this._handledDeathSlots.delete(player.slot);
             }
@@ -308,8 +303,12 @@ export class PlayerManager {
             return false;
         }
 
+        const wasReady = player.isReady;
         if (player.state !== PlayerState.DEAD) {
             player.healthCombat.die(null);
+        }
+        if (wasReady) {
+            this.readyCount = Math.max(0, this.readyCount - 1);
         }
 
         this._removeAlivePlayer(slot);
@@ -394,6 +393,7 @@ export class PlayerManager {
 
         const player = this.players.get(controller.GetPlayerSlot());
         if (!player) return false;
+        if (player.inGame) return false;
 
         return this._setPlayerReady(player, ready);
     }
@@ -408,7 +408,9 @@ export class PlayerManager {
         if (!player.setReady(ready)) return false;
 
         if (ready) this.readyCount++;
-        else this.readyCount--;
+        else this.readyCount = Math.max(0, this.readyCount - 1);
+
+        this._syncAlivePlayer(player);
 
         const name = player.entityBridge.getPlayerName();
         this._adapter.broadcast(formatScopedMessage(
@@ -425,7 +427,7 @@ export class PlayerManager {
             totalPlayers: this.totalPlayers,
         });
 
-        if (ready && this.areAllPlayersReady()) {
+        if (ready && !this.ingame && this.areAllPlayersReady()) {
             eventBus.emit(event.Player.Out.OnAllPlayersReady, {
                 readyCount: this.readyCount,
                 totalPlayers: this.totalPlayers,
@@ -479,6 +481,7 @@ export class PlayerManager {
     handleInput(playerSlot, key) {
         const player = this.players.get(playerSlot);
         if (!player) return false;
+        if (!this.ingame || !player.isReady) return false;
         return player.handleInputKey(key);
     }
 
@@ -500,10 +503,11 @@ export class PlayerManager {
     }
 
     /**
-     * @returns {Player[]} 返回当前仍在场且未死亡的玩家，不要求当前处于 PLAYING 状态
+     * @returns {Player[]} 返回当前可参战的 READY 玩家
      */
-    getActivePlayers() {
-        return Array.from(this.players.values()).filter((player) => player.state !== PlayerState.DEAD && player.state !== PlayerState.DISCONNECTED);
+    getCombatPlayers() {
+        if (!this.ingame) return [];
+        return this.alivePlayerList;
     }
 
     /**
@@ -586,11 +590,12 @@ export class PlayerManager {
 
     enterGameStart() {
         this.ingame = true;
-        this.readyCount = 0;
+        this.readyCount = this._countReadyPlayers();
         this._handledDeathSlots.clear();
+        this.alivePlayerList = [];
         for (const [, player] of this.players) {
             if (!player.entityBridge.pawn) continue;
-            player.enterAliveState();
+            player.enterGameStart();
             this._syncAlivePlayer(player);
         }
     }
@@ -645,11 +650,34 @@ export class PlayerManager {
      * @returns {void}
      */
     _syncAlivePlayer(player) {
-        if (player.isAlive) {
+        if (this.ingame && player.isReady && player.entityBridge.isPawnValid()) {
             this._addAlivePlayer(player);
             return;
         }
         this._removeAlivePlayer(player.slot);
+    }
+
+    /**
+     * 玩家重生后统一进入 PREPARING，需要同步 readyCount 与可参战缓存。
+     * @param {Player} player
+     * @returns {void}
+     */
+    _syncPreparingRespawn(player) {
+        this.readyCount = this._countReadyPlayers();
+        this._syncAlivePlayer(player);
+    }
+
+    /**
+     * @returns {number}
+     */
+    _countReadyPlayers() {
+        let readyCount = 0;
+        for (const player of this.players.values()) {
+            if (player.isReady) {
+                readyCount++;
+            }
+        }
+        return readyCount;
     }
 
     /**
@@ -678,7 +706,7 @@ export class PlayerManager {
      */
     tick() {
         for (const [slot, player] of this.players) {
-            player.tick();
+            player.tick(this.ingame);
         }
     }
 }

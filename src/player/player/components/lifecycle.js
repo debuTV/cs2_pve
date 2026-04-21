@@ -19,7 +19,8 @@ import { PlayerRuntimeEvents } from "../../../util/runtime_events.js";
  * | `activate`    | Pawn 生成 / 激活       | 绑定 Pawn，发放装备，状态 → PREPARING |
  * | `disconnect`  | 玩家断开               | 清理 Buff，状态 → DISCONNECTED    |
  * | `handleDeath` | HealthCombat 判定死亡  | 切旁观者，状态 → DEAD             |
- * | `respawn`     | 重生触发               | 重置血量/护甲，并进入外部指定状态 |
+ * | `respawn`     | 重生触发               | 重置血量/护甲，并回到 PREPARING |
+ * | `enterGameStart` | 游戏正式开始         | 同步战斗资源，保持 READY/PREPARING |
  *
  * @navigationTitle 玩家生命周期
  */
@@ -42,100 +43,59 @@ export class PlayerLifecycle {
 
     /**
      * 玩家激活（拿到有效 pawn）
-     * @param {import("cs_script/point_script").CSPlayerPawn} pawn
-     * @param {number} targetState
+     * @param {import("cs_script/point_script").CSPlayerPawn|undefined|null} pawn
      */
-    activate(pawn, targetState) {
-        this.player.entityBridge.bindPawn(pawn);
-        const nextState = targetState === PlayerState.ALIVE ? PlayerState.ALIVE : PlayerState.PREPARING;
+    activate(pawn) {
+        if(pawn)this.player.entityBridge.bindPawn(pawn);
 
         // 按当前等级初始化战斗资源
         this.player.stats.refreshLevelStats();
-        this.player.stats.resetCombatResources(this.player.stats.maxHealth, 0);
         this.player.entityBridge.syncMaxHealth(this.player.stats.maxHealth);
-        this.player.entityBridge.syncHealth(this.player.stats.health);
-        this.player.entityBridge.syncArmor(this.player.stats.armor);
+        this.player.entityBridge.syncHealth(this.player.stats.maxHealth);
+        this.player.entityBridge.syncArmor(100);
 
-        this.player.applyStateTransition(nextState);
-        this.player.startInputTracking(pawn);
-        this.player.ensureProfessionSkillBound();
-        this.player.emitRuntimeEvent(PlayerRuntimeEvents.Spawn, { state: nextState });
-
+        this.player.applyStateTransition(PlayerState.PREPARING);
+        this.player.startInputTracking();
+        this.player.setProfession(this.player.professionId);
+        this.player.emitRuntimeEvent(PlayerRuntimeEvents.Spawn, { state: PlayerState.PREPARING });
+        
         // 给予初始装备
         this._giveStartingEquipment();
         this.player.emitStatusSnapshot();
 
         Instance.Msg(formatScopedMessage("PlayerLifecycle/activate", `玩家 ${this.player.entityBridge.getPlayerName()} 已激活`));
     }
-
     /**
-     * 玩家重置（OnPlayerReset：重生/换队）
-     * @param {import("cs_script/point_script").CSPlayerPawn} newPawn
-     * @param {number} respawnState
+     * 重生，脚本指导玩家重生，需要让玩家加入队伍
      */
-    handleReset(newPawn, respawnState = PlayerState.PREPARING) {
-        this.player.entityBridge.rebindPawn(newPawn);
-
-        // 同步脚本数值到新 pawn
+    respawn() {
+        // 按当前等级初始化战斗资源
+        this.player.stats.refreshLevelStats();
         this.player.entityBridge.syncMaxHealth(this.player.stats.maxHealth);
-        this.player.entityBridge.syncHealth(this.player.stats.health);
-        this.player.entityBridge.syncArmor(this.player.stats.armor);
+        this.player.entityBridge.syncHealth(this.player.stats.maxHealth);
+        this.player.entityBridge.syncArmor(100);
 
-        // 如果之前是 DEAD，进入 RESPAWNING
-        if (this.player.state === PlayerState.DEAD) {
-            this.player.applyStateTransition(PlayerState.RESPAWNING);
-            this.respawn(undefined, undefined, respawnState);
-        } else {
-            this.player.startInputTracking(newPawn);
-            this.player.ensureProfessionSkillBound();
-            // 非死亡状态的重置（换队等），保持原脚本生命值
-            if (this.player.stats.health <= 0) {
-                this.player.healthCombat.die(null);
-                return;
-            }
-            this._giveStartingEquipment();
-            this.player.emitStatusSnapshot();
-        }
-    }
+        this.player.applyStateTransition(PlayerState.PREPARING);
+        this.player.startInputTracking();
+        this.player.setProfession(this.player.professionId);
+        this.player.emitRuntimeEvent(PlayerRuntimeEvents.Spawn, { state: PlayerState.PREPARING });
+        
+        this.player.entityBridge.joinTeam(3); // 切回CT
 
-    /**
-     * 重生流程
-     * @param {number} [health]
-     * @param {number} [armor]
-     * @param {number} [targetState]
-     */
-    respawn(health, armor, targetState = PlayerState.PREPARING) {
-        const stats = this.player.stats;
-        const nextState = targetState === PlayerState.ALIVE ? PlayerState.ALIVE : PlayerState.PREPARING;
-        stats.refreshLevelStats();
-        stats.resetCombatResources(health ?? stats.maxHealth, armor);
-
-        this.player.entityBridge.syncMaxHealth(stats.maxHealth);
-        this.player.entityBridge.syncHealth(stats.health);
-        this.player.entityBridge.syncArmor(stats.armor);
-        this.player.entityBridge.joinTeam(3);
-
+        // 给予初始装备
         this._giveStartingEquipment();
-
-        this.player.applyStateTransition(nextState);
-        this.player.startInputTracking(this.player.entityBridge.pawn);
-        this.player.ensureProfessionSkillBound();
-        this.player.emitRuntimeEvent(PlayerRuntimeEvents.Spawn, { state: nextState });
         this.player.emitStatusSnapshot();
-
-        Instance.Msg(formatScopedMessage("PlayerLifecycle/respawn", `玩家 ${this.player.entityBridge.getPlayerName()} 已重生 (HP: ${stats.health})`));
+        Instance.Msg(formatScopedMessage("PlayerLifecycle/respawn", `玩家 ${this.player.entityBridge.getPlayerName()} 已重生`));
     }
-
     /**
-     * 游戏正式开始后切入 ALIVE。
+     * 游戏正式开始后同步战斗资源，不改变 READY/PREPARING 语义。
      */
-    enterAliveState() {
+    enterGameStart() {
         const stats = this.player.stats;
         stats.refreshLevelStats();
         this.player.entityBridge.syncMaxHealth(stats.maxHealth);
         this.player.entityBridge.syncHealth(stats.health);
         this.player.entityBridge.syncArmor(stats.armor);
-        this.player.applyStateTransition(PlayerState.ALIVE);
         this.player.startInputTracking(this.player.entityBridge.pawn);
         this.player.emitStatusSnapshot();
     }
@@ -163,11 +123,11 @@ export class PlayerLifecycle {
         this.player.entityBridge.syncHealth(stats.health);
         this.player.entityBridge.syncArmor(stats.armor);
         this.player.applyStateTransition(PlayerState.PREPARING);
-        const rebound = this.player.rebindProfessionSkill();
+        this.player.setProfession(this.player.professionId);
         this.player.startInputTracking(this.player.entityBridge.pawn);
-        if (rebound) {
-            this.player.emitRuntimeEvent(PlayerRuntimeEvents.Spawn, { state: PlayerState.PREPARING });
-        }
+
+        this.player.emitRuntimeEvent(PlayerRuntimeEvents.Spawn, { state: PlayerState.PREPARING });
+
         this._giveStartingEquipment();
         this.player.emitStatusSnapshot();
     }
@@ -177,8 +137,9 @@ export class PlayerLifecycle {
      */
     _giveStartingEquipment() {
         this.player.entityBridge.giveItem("item_assaultsuit");
+        this.player.giveArmor(100);
         this.player.entityBridge.giveItem("weapon_knife");
         this.player.entityBridge.giveItem("weapon_usp_silencer");
-        this.player.entityBridge.giveItem("weapon_bizon");
+        this.player.entityBridge.giveItem("weapon_mp5sd");
     }
 }

@@ -30,37 +30,41 @@ export const LevelUpHealPolicy = {
  * 同时通知 Buff 系统和事件总线。
  *
  * 状态流转典型路径：
- * `DISCONNECTED → CONNECTED → PREPARING → READY → ALIVE → DEAD → RESPAWNING → ALIVE`
+ * `DISCONNECTED → CONNECTED → PREPARING ↔ READY → DEAD → PREPARING → ...`
  *
  * - `DISCONNECTED` (0)：玩家不在线，Player 实例即将或已被清理。
  * - `CONNECTED` (1)：玩家已连接但尚未进入游戏（Controller 已绑定，Pawn 未就绪）。
- * - `PREPARING` (2)：等待玩家点击准备。
- * - `READY` (3)：玩家已准备，等待所有人就绪后开波。
- * - `ALIVE` (4)：正常游戏中，可接收伤害和操作。
- * - `DEAD` (5)：已死亡，等待重生或回合结束。
- * - `RESPAWNING` (6)：正在执行重生流程。
- * - `SHOPPING` (7)：打开商店界面（预留，当前未完全实现）。
+ * - `PREPARING` (2)：玩家已生成且存活，但还未 ready；玩家停留在准备区，不参与战斗，也不能打开商店。
+ * - `READY` (3)：玩家已 ready 且存活。游戏未开始时表示已准备等待开局；游戏进行中时表示场上参战状态。
+ * - `DEAD` (4)：已死亡，处于观战席，等待重生或下一波；重生后默认回到 `PREPARING`。
  *
  * @navigationTitle 玩家状态枚举
  */
 export const PlayerState = {
-    /** 离线状态 */
     DISCONNECTED: 0,
-    /** 在线并已连接 */
     CONNECTED:    1,
-    /** 等待准备 */
     PREPARING:    2,
-    /** 已准备就绪 */
     READY:        3,
-    /** 游戏中存活 */
-    ALIVE:        4,
-    /** 已死亡 */
-    DEAD:         5,
-    /** 重生中 */
-    RESPAWNING:   6,
-    /** 商店界面（预留） */
-    SHOPPING:     7,
+    DEAD:         4,
 };
+
+/** @type {Record<number, string>} */
+export const PLAYER_STATE_LABELS = {
+    [PlayerState.DISCONNECTED]: "离线",
+    [PlayerState.CONNECTED]: "已连接",
+    [PlayerState.PREPARING]: "未准备",
+    [PlayerState.READY]: "已准备|游戏中",
+    [PlayerState.DEAD]: "已死亡",
+};
+
+/**
+ * @param {number | null | undefined} state
+ * @returns {string}
+ */
+export function getPlayerStateLabel(state) {
+    if (typeof state !== "number") return "未知";
+    return PLAYER_STATE_LABELS[state] ?? "未知";
+}
 /**
  * @typedef {object} OnPlayerStatusChanged
  * @property {Player} player - 状态变化的玩家实例
@@ -74,6 +78,8 @@ export const PlayerState = {
  * @property {number} [level]
  * @property {string} [professionId]
  * @property {string} [professionDisplayName]
+ * @property {number} [state]
+ * @property {string} [stateLabel]
  * @property {number} [health]
  * @property {number} [maxHealth]
  * @property {number} [armor]

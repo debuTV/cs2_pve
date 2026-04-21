@@ -85,27 +85,13 @@ export class PlayerEntityBridge {
      * @param {CSPlayerPawn} pawn
      */
     bindPawn(pawn) {
-        // 清理旧 pawn（如果有）
-        if (this.pawn && this.pawn !== pawn) {
-            this._cleanupPawn();
-        }
         this.pawn = pawn;
-    }
-
-    /**
-     * 重绑 pawn（OnPlayerReset 时调用）
-     * 会先清理旧 pawn，再绑定新 pawn
-     * @param {CSPlayerPawn} newPawn
-     */
-    rebindPawn(newPawn) {
-        this.bindPawn(newPawn);
     }
 
     /**
      * 断开连接时清理
      */
     disconnect() {
-        this._cleanupPawn();
         this.controller = null;
         this.pawn = null;
     }
@@ -213,28 +199,5 @@ export class PlayerEntityBridge {
         if (!this.isControllerValid() || slot < 0 || !command) return false;
         Instance.ClientCommand(slot, command);
         return true;
-    }
-
-    /** 清除所有武器 */
-    destroyWeapons() {
-        if (this.pawn && this.pawn.IsValid()) {
-            this.pawn.DestroyWeapons();
-        }
-    }
-
-    /** @returns {boolean} pawn 是否存活 */
-    isPawnAlive() {
-        return !!(this.pawn && this.pawn.IsValid() && this.pawn.IsAlive());
-    }
-
-    // ——— 内部 ———
-
-    /**
-     * 清理旧 Pawn 引用。
-     */
-    _cleanupPawn() {
-        // 旧 pawn 的 output 监听在 CS2 脚本 API 中无法手动解绑，
-        // 但通过替换 pawn 引用可以防止旧回调继续影响逻辑。
-        this.pawn = null;
     }
 }

@@ -72,6 +72,8 @@ export const CHANNEL_PRIORITY = {
  * @property {number} [level]
  * @property {string} [professionId]
  * @property {string} [professionDisplayName]
+ * @property {number} [state]
+ * @property {string} [stateLabel]
  * @property {number} [armor]
  * @property {number} [money]
  * @property {number} [exp]

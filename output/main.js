@@ -1257,7 +1257,7 @@ const WaveState = {
     COMPLETED: 'COMPLETED'
 };
 
-const MAX_ALIVE_MONSTERS = 100;
+const MAX_ALIVE_MONSTERS = 300;
 
 /**
  * @typedef {object} PlayerCountScalePoint
@@ -1389,22 +1389,21 @@ const wavesConfig=[
     //    totalMonsters: 5,
     //    moneyReward: 750,
     //    expReward: 60,
-    //    spawnInterval: 0.16,
-    //    preparationTime: 5,
-    //    aliveMonster: 5,
+    //    spawnInterval: 0.01,
+    //    preparationTime: 1,
+    //    aliveMonster: 1,
     //    monster_spawn_points_name:["monster_spawnpoint"],
     //    broadcastmessage:[{message:"第1波即将开始，准备迎敌。",delay:15}],
     //    monsterTypes:[
-    //        //MonsterType.headcrab_classic,
+    //        MonsterType.headcrab_classic,
     //        //MonsterType.headcrab_armored,
     //        //MonsterType.headcrab_black,
     //        //MonsterType.headcrab,
     //        //MonsterType.zombie_classic,
     //        //MonsterType.antlion,
     //        //MonsterType.zombie_fast,
-//
     //        //MonsterType.zombie_poison,
-//
+    //        //
     //        //MonsterType.headcrab_reviver,
     //        //MonsterType.antlion_worker,
     //    ]
@@ -1415,10 +1414,10 @@ const wavesConfig=[
         moneyReward: 750,
         expReward: 60,
         spawnInterval: 0.16,
-        preparationTime: 1,                  //记住要和广播消息的 delay 匹配
+        preparationTime: 15,                  //第一波可以快点
         aliveMonster: 6,
         monster_spawn_points_name:["monster_spawnpoint"],
-        broadcastmessage:[{message:"第1波",delay:30}],
+        broadcastmessage:[{message:"第1波",delay:15}],
         monsterTypes:[
             MonsterType.zombie_classic,
             MonsterType.headcrab_classic,
@@ -2032,27 +2031,13 @@ class PlayerEntityBridge {
      * @param {CSPlayerPawn} pawn
      */
     bindPawn(pawn) {
-        // 清理旧 pawn（如果有）
-        if (this.pawn && this.pawn !== pawn) {
-            this._cleanupPawn();
-        }
         this.pawn = pawn;
-    }
-
-    /**
-     * 重绑 pawn（OnPlayerReset 时调用）
-     * 会先清理旧 pawn，再绑定新 pawn
-     * @param {CSPlayerPawn} newPawn
-     */
-    rebindPawn(newPawn) {
-        this.bindPawn(newPawn);
     }
 
     /**
      * 断开连接时清理
      */
     disconnect() {
-        this._cleanupPawn();
         this.controller = null;
         this.pawn = null;
     }
@@ -2161,29 +2146,6 @@ class PlayerEntityBridge {
         Instance.ClientCommand(slot, command);
         return true;
     }
-
-    /** 清除所有武器 */
-    destroyWeapons() {
-        if (this.pawn && this.pawn.IsValid()) {
-            this.pawn.DestroyWeapons();
-        }
-    }
-
-    /** @returns {boolean} pawn 是否存活 */
-    isPawnAlive() {
-        return !!(this.pawn && this.pawn.IsValid() && this.pawn.IsAlive());
-    }
-
-    // ——— 内部 ———
-
-    /**
-     * 清理旧 Pawn 引用。
-     */
-    _cleanupPawn() {
-        // 旧 pawn 的 output 监听在 CS2 脚本 API 中无法手动解绑，
-        // 但通过替换 pawn 引用可以防止旧回调继续影响逻辑。
-        this.pawn = null;
-    }
 }
 
 /**
@@ -2216,34 +2178,41 @@ const LevelUpHealPolicy = {
  * 同时通知 Buff 系统和事件总线。
  *
  * 状态流转典型路径：
- * `DISCONNECTED → CONNECTED → PREPARING → READY → ALIVE → DEAD → RESPAWNING → ALIVE`
+ * `DISCONNECTED → CONNECTED → PREPARING ↔ READY → DEAD → PREPARING → ...`
  *
  * - `DISCONNECTED` (0)：玩家不在线，Player 实例即将或已被清理。
  * - `CONNECTED` (1)：玩家已连接但尚未进入游戏（Controller 已绑定，Pawn 未就绪）。
- * - `PREPARING` (2)：等待玩家点击准备。
- * - `READY` (3)：玩家已准备，等待所有人就绪后开波。
- * - `ALIVE` (4)：正常游戏中，可接收伤害和操作。
- * - `DEAD` (5)：已死亡，等待重生或回合结束。
- * - `RESPAWNING` (6)：正在执行重生流程。
- * - `SHOPPING` (7)：打开商店界面（预留，当前未完全实现）。
+ * - `PREPARING` (2)：玩家已生成且存活，但还未 ready；玩家停留在准备区，不参与战斗，也不能打开商店。
+ * - `READY` (3)：玩家已 ready 且存活。游戏未开始时表示已准备等待开局；游戏进行中时表示场上参战状态。
+ * - `DEAD` (4)：已死亡，处于观战席，等待重生或下一波；重生后默认回到 `PREPARING`。
  *
  * @navigationTitle 玩家状态枚举
  */
 const PlayerState = {
-    /** 离线状态 */
     DISCONNECTED: 0,
-    /** 在线并已连接 */
     CONNECTED:    1,
-    /** 等待准备 */
     PREPARING:    2,
-    /** 已准备就绪 */
     READY:        3,
-    /** 游戏中存活 */
-    ALIVE:        4,
-    /** 已死亡 */
-    DEAD:         5,
-    /** 重生中 */
-    RESPAWNING:   6};
+    DEAD:         4,
+};
+
+/** @type {Record<number, string>} */
+const PLAYER_STATE_LABELS = {
+    [PlayerState.DISCONNECTED]: "离线",
+    [PlayerState.CONNECTED]: "已连接",
+    [PlayerState.PREPARING]: "未准备",
+    [PlayerState.READY]: "已准备|游戏中",
+    [PlayerState.DEAD]: "已死亡",
+};
+
+/**
+ * @param {number | null | undefined} state
+ * @returns {string}
+ */
+function getPlayerStateLabel(state) {
+    if (typeof state !== "number") return "未知";
+    return PLAYER_STATE_LABELS[state] ?? "未知";
+}
 /**
  * @typedef {object} OnPlayerStatusChanged
  * @property {Player} player - 状态变化的玩家实例
@@ -2257,6 +2226,8 @@ const PlayerState = {
  * @property {number} [level]
  * @property {string} [professionId]
  * @property {string} [professionDisplayName]
+ * @property {number} [state]
+ * @property {string} [stateLabel]
  * @property {number} [health]
  * @property {number} [maxHealth]
  * @property {number} [armor]
@@ -2649,16 +2620,6 @@ class PlayerStats {
     refreshLevelStats() {
         this._refreshDerivedStats();
         this._setCombatResources(this.health, this.armor);
-    }
-
-    /**
-     * 重置当前战斗资源。
-     * @param {number} [health] 要设置的生命值，默认回满到当前生命上限。
-     * @param {number} [armor] 要设置的护甲值，默认清零。
-     * @returns {void}
-     */
-    resetCombatResources(health, armor) {
-        this._setCombatResources(health ?? this.maxHealth, armor ?? 0);
     }
 
     /**
@@ -3186,7 +3147,8 @@ class PlayerHealthCombat {
  * | `activate`    | Pawn 生成 / 激活       | 绑定 Pawn，发放装备，状态 → PREPARING |
  * | `disconnect`  | 玩家断开               | 清理 Buff，状态 → DISCONNECTED    |
  * | `handleDeath` | HealthCombat 判定死亡  | 切旁观者，状态 → DEAD             |
- * | `respawn`     | 重生触发               | 重置血量/护甲，并进入外部指定状态 |
+ * | `respawn`     | 重生触发               | 重置血量/护甲，并回到 PREPARING |
+ * | `enterGameStart` | 游戏正式开始         | 同步战斗资源，保持 READY/PREPARING |
  *
  * @navigationTitle 玩家生命周期
  */
@@ -3209,100 +3171,59 @@ class PlayerLifecycle {
 
     /**
      * 玩家激活（拿到有效 pawn）
-     * @param {import("cs_script/point_script").CSPlayerPawn} pawn
-     * @param {number} targetState
+     * @param {import("cs_script/point_script").CSPlayerPawn|undefined|null} pawn
      */
-    activate(pawn, targetState) {
-        this.player.entityBridge.bindPawn(pawn);
-        const nextState = targetState === PlayerState.ALIVE ? PlayerState.ALIVE : PlayerState.PREPARING;
+    activate(pawn) {
+        if(pawn)this.player.entityBridge.bindPawn(pawn);
 
         // 按当前等级初始化战斗资源
         this.player.stats.refreshLevelStats();
-        this.player.stats.resetCombatResources(this.player.stats.maxHealth, 0);
         this.player.entityBridge.syncMaxHealth(this.player.stats.maxHealth);
-        this.player.entityBridge.syncHealth(this.player.stats.health);
-        this.player.entityBridge.syncArmor(this.player.stats.armor);
+        this.player.entityBridge.syncHealth(this.player.stats.maxHealth);
+        this.player.entityBridge.syncArmor(100);
 
-        this.player.applyStateTransition(nextState);
-        this.player.startInputTracking(pawn);
-        this.player.ensureProfessionSkillBound();
-        this.player.emitRuntimeEvent(PlayerRuntimeEvents.Spawn, { state: nextState });
-
+        this.player.applyStateTransition(PlayerState.PREPARING);
+        this.player.startInputTracking();
+        this.player.setProfession(this.player.professionId);
+        this.player.emitRuntimeEvent(PlayerRuntimeEvents.Spawn, { state: PlayerState.PREPARING });
+        
         // 给予初始装备
         this._giveStartingEquipment();
         this.player.emitStatusSnapshot();
 
         Instance.Msg(formatScopedMessage("PlayerLifecycle/activate", `玩家 ${this.player.entityBridge.getPlayerName()} 已激活`));
     }
-
     /**
-     * 玩家重置（OnPlayerReset：重生/换队）
-     * @param {import("cs_script/point_script").CSPlayerPawn} newPawn
-     * @param {number} respawnState
+     * 重生，脚本指导玩家重生，需要让玩家加入队伍
      */
-    handleReset(newPawn, respawnState = PlayerState.PREPARING) {
-        this.player.entityBridge.rebindPawn(newPawn);
-
-        // 同步脚本数值到新 pawn
+    respawn() {
+        // 按当前等级初始化战斗资源
+        this.player.stats.refreshLevelStats();
         this.player.entityBridge.syncMaxHealth(this.player.stats.maxHealth);
-        this.player.entityBridge.syncHealth(this.player.stats.health);
-        this.player.entityBridge.syncArmor(this.player.stats.armor);
+        this.player.entityBridge.syncHealth(this.player.stats.maxHealth);
+        this.player.entityBridge.syncArmor(100);
 
-        // 如果之前是 DEAD，进入 RESPAWNING
-        if (this.player.state === PlayerState.DEAD) {
-            this.player.applyStateTransition(PlayerState.RESPAWNING);
-            this.respawn(undefined, undefined, respawnState);
-        } else {
-            this.player.startInputTracking(newPawn);
-            this.player.ensureProfessionSkillBound();
-            // 非死亡状态的重置（换队等），保持原脚本生命值
-            if (this.player.stats.health <= 0) {
-                this.player.healthCombat.die(null);
-                return;
-            }
-            this._giveStartingEquipment();
-            this.player.emitStatusSnapshot();
-        }
-    }
+        this.player.applyStateTransition(PlayerState.PREPARING);
+        this.player.startInputTracking();
+        this.player.setProfession(this.player.professionId);
+        this.player.emitRuntimeEvent(PlayerRuntimeEvents.Spawn, { state: PlayerState.PREPARING });
+        
+        this.player.entityBridge.joinTeam(3); // 切回CT
 
-    /**
-     * 重生流程
-     * @param {number} [health]
-     * @param {number} [armor]
-     * @param {number} [targetState]
-     */
-    respawn(health, armor, targetState = PlayerState.PREPARING) {
-        const stats = this.player.stats;
-        const nextState = targetState === PlayerState.ALIVE ? PlayerState.ALIVE : PlayerState.PREPARING;
-        stats.refreshLevelStats();
-        stats.resetCombatResources(health ?? stats.maxHealth, armor);
-
-        this.player.entityBridge.syncMaxHealth(stats.maxHealth);
-        this.player.entityBridge.syncHealth(stats.health);
-        this.player.entityBridge.syncArmor(stats.armor);
-        this.player.entityBridge.joinTeam(3);
-
+        // 给予初始装备
         this._giveStartingEquipment();
-
-        this.player.applyStateTransition(nextState);
-        this.player.startInputTracking(this.player.entityBridge.pawn);
-        this.player.ensureProfessionSkillBound();
-        this.player.emitRuntimeEvent(PlayerRuntimeEvents.Spawn, { state: nextState });
         this.player.emitStatusSnapshot();
-
-        Instance.Msg(formatScopedMessage("PlayerLifecycle/respawn", `玩家 ${this.player.entityBridge.getPlayerName()} 已重生 (HP: ${stats.health})`));
+        Instance.Msg(formatScopedMessage("PlayerLifecycle/respawn", `玩家 ${this.player.entityBridge.getPlayerName()} 已重生`));
     }
-
     /**
-     * 游戏正式开始后切入 ALIVE。
+     * 游戏正式开始后同步战斗资源，不改变 READY/PREPARING 语义。
      */
-    enterAliveState() {
+    enterGameStart() {
         const stats = this.player.stats;
         stats.refreshLevelStats();
         this.player.entityBridge.syncMaxHealth(stats.maxHealth);
         this.player.entityBridge.syncHealth(stats.health);
         this.player.entityBridge.syncArmor(stats.armor);
-        this.player.applyStateTransition(PlayerState.ALIVE);
         this.player.startInputTracking(this.player.entityBridge.pawn);
         this.player.emitStatusSnapshot();
     }
@@ -3330,11 +3251,11 @@ class PlayerLifecycle {
         this.player.entityBridge.syncHealth(stats.health);
         this.player.entityBridge.syncArmor(stats.armor);
         this.player.applyStateTransition(PlayerState.PREPARING);
-        const rebound = this.player.rebindProfessionSkill();
+        this.player.setProfession(this.player.professionId);
         this.player.startInputTracking(this.player.entityBridge.pawn);
-        if (rebound) {
-            this.player.emitRuntimeEvent(PlayerRuntimeEvents.Spawn, { state: PlayerState.PREPARING });
-        }
+
+        this.player.emitRuntimeEvent(PlayerRuntimeEvents.Spawn, { state: PlayerState.PREPARING });
+
         this._giveStartingEquipment();
         this.player.emitStatusSnapshot();
     }
@@ -3344,9 +3265,10 @@ class PlayerLifecycle {
      */
     _giveStartingEquipment() {
         this.player.entityBridge.giveItem("item_assaultsuit");
+        this.player.giveArmor(100);
         this.player.entityBridge.giveItem("weapon_knife");
         this.player.entityBridge.giveItem("weapon_usp_silencer");
-        this.player.entityBridge.giveItem("weapon_bizon");
+        this.player.entityBridge.giveItem("weapon_mp5sd");
     }
 }
 
@@ -3383,6 +3305,8 @@ class Player {
         this.slot = slot;
         /**@type {import("cs_script/point_script").Vector} */
         this.pos={x:0,y:0,z:0};
+        /** @type {boolean} 玩家在当前对局中是否进入过 game_start 游戏区域 */
+        this.inGame = false;
         /** @type {number} 玩家当前状态，取值见 {@link PlayerState} */
         this.state = PlayerState.DISCONNECTED;
 
@@ -3427,27 +3351,20 @@ class Player {
     }
 
     /**
-     * 绑定 Pawn，进入可游戏状态。
-     * @param {import("cs_script/point_script").CSPlayerPawn} pawn 玩家 Pawn 实体
-     * @param {number} targetState 激活后要进入的目标状态
+     * 绑定 Pawn，进入可游戏状态,可以复活。
+     * @param {import("cs_script/point_script").CSPlayerPawn|undefined|null} [pawn] 玩家 Pawn 实体
      */
-    activate(pawn, targetState) {
-        this.lifecycle.activate(pawn, targetState);
+    updatePawn(pawn) {
+        this.lifecycle.activate(pawn);
     }
-
-    /**
-     * 重置处理（重生/换队），更新 Pawn 引用并恢复状态。
-     * @param {import("cs_script/point_script").CSPlayerPawn} newPawn 新的 Pawn 实体
-     * @param {number} respawnState 重生后要进入的目标状态
-     */
-    handleReset(newPawn, respawnState) {
-        this.lifecycle.handleReset(newPawn, respawnState);
+    respawn() {
+        this.lifecycle.respawn();
     }
-
     /**
      * 断开连接，清理资源。
      */
     disconnect() {
+        this.inGame = false;
         this.lifecycle.disconnect();
         for (const unsubscribe of this._buffUnsubscribers) {
             unsubscribe();
@@ -3459,8 +3376,18 @@ class Player {
      * 重置局内状态（每局开始时调用）。
      */
     resetGameStatus() {
+        this.inGame = false;
         this.clearBuffs();
         this.lifecycle.resetGameStatus();
+    }
+
+    /**
+     * @param {boolean} inGame
+     * @returns {boolean}
+     */
+    setInGame(inGame) {
+        this.inGame = !!inGame;
+        return this.inGame;
     }
 
     // ——— 战斗入口（委托给 HealthCombat） ———
@@ -3504,18 +3431,8 @@ class Player {
         return this.healthCombat.giveArmor(amount);
     }
 
-    /**
-     * 复活玩家，可指定初始生命和护甲。
-     * @param {number} [health] 复活后生命值
-     * @param {number} [armor] 复活后护甲值
-     * @param {number} [targetState] 复活后要进入的目标状态
-     */
-    respawn(health, armor, targetState = PlayerState.PREPARING) {
-        this.lifecycle.respawn(health, armor, targetState);
-    }
-
-    enterAliveState() {
-        this.lifecycle.enterAliveState();
+    enterGameStart() {
+        this.lifecycle.enterGameStart();
     }
 
     // ——— 成长入口（委托给 Stats） ———
@@ -3684,7 +3601,7 @@ class Player {
      * @returns {boolean}
      */
     handleInputKey(key) {
-        if (this.state !== PlayerState.ALIVE) return false;
+        if (!this.isReady) return false;
         return this.emitRuntimeEvent(PlayerRuntimeEvents.Input, { key });
     }
 
@@ -3752,18 +3669,12 @@ class Player {
 
     /**
      * @param {string} professionId
-     * @param {{ forceRecreate?: boolean; allowMissingPrevious?: boolean }} [options]
      * @returns {boolean}
      */
-    setProfession(professionId, options = {}) {
+    setProfession(professionId) {
         const config = getPlayerProfessionConfig(professionId);
         if (!config) return false;
-
-        const forceRecreate = options.forceRecreate ?? false;
-        const allowMissingPrevious = options.allowMissingPrevious ?? false;
-        if (!forceRecreate && this.professionId === professionId && this.skillId != null) {
-            return true;
-        }
+        if (this.professionId === professionId && this.skillId != null) return true;
 
         let nextSkillId = null;
         if (config.skillTypeId) {
@@ -3774,7 +3685,7 @@ class Player {
         const previousSkillId = this.skillId;
         if (previousSkillId != null) {
             const removed = this._removeSkillById(previousSkillId);
-            if (!removed && !allowMissingPrevious) {
+            if (!removed) {
                 if (nextSkillId != null) {
                     this._removeSkillById(nextSkillId);
                 }
@@ -3793,26 +3704,6 @@ class Player {
         });
 
         return true;
-    }
-
-    /**
-     * @returns {boolean}
-     */
-    ensureProfessionSkillBound() {
-        return this.setProfession(this.professionId ?? DEFAULT_PLAYER_PROFESSION, {
-            forceRecreate: this.skillId == null,
-            allowMissingPrevious: true,
-        });
-    }
-
-    /**
-     * @returns {boolean}
-     */
-    rebindProfessionSkill() {
-        return this.setProfession(this.professionId ?? DEFAULT_PLAYER_PROFESSION, {
-            forceRecreate: true,
-            allowMissingPrevious: true,
-        });
     }
 
     /**
@@ -3877,16 +3768,6 @@ class Player {
         return this.state === PlayerState.READY;
     }
 
-    /** @returns {boolean} */
-    get isAlive() {
-        return this.state === PlayerState.ALIVE;
-    }
-
-    /** @returns {boolean} */
-    get isInGame() {
-        return this.state >= PlayerState.PREPARING;
-    }
-
     /**
      * 设置玩家准备状态。
      * @param {boolean} ready 是否准备
@@ -3911,9 +3792,14 @@ class Player {
      * @returns {boolean}
      */
     applyStateTransition(nextState) {
+        if (!Object.values(PlayerState).includes(nextState)) return false;
         if (this.state === nextState) return true;
         const oldState = this.state;
         this.state = nextState;
+        this.emitStatusChanged({
+            state: this.state,
+            stateLabel: getPlayerStateLabel(this.state),
+        });
         this.emitRuntimeEvent(PlayerRuntimeEvents.StateChange, { oldState, nextState });
         return true;
     }
@@ -3949,14 +3835,15 @@ class Player {
     // ——— Tick ———
     /**
      * 每帧调度入口。
+     * @param {boolean} [gameActive=false]
      */
-    tick() {
+    tick(gameActive = false) {
         const pawn = this.entityBridge.pawn;
         if (pawn?.IsValid()) {
             this.pos = pawn.GetAbsOrigin?.();
         }
 
-        if (this.state !== PlayerState.ALIVE) return;
+        if (!gameActive || !this.isReady) return;
         this.emitRuntimeEvent(PlayerRuntimeEvents.Tick, {});
     }
 
@@ -3973,6 +3860,8 @@ class Player {
             pawn: this.entityBridge.pawn,
             professionId: this.professionId,
             professionDisplayName: professionConfig?.displayName ?? this.professionId,
+            state: this.state,
+            stateLabel: getPlayerStateLabel(this.state),
         };
     }
 }
@@ -3991,7 +3880,6 @@ class Player {
  * @property {boolean} [isReady] - 准备状态（仅 type="ready" 时适用）
  * @property {number} [health] - 生命值（仅 type="respawn" 时适用）
  * @property {number} [armor] - 护甲值（仅 type="respawn" 时适用）
- * @property {number} [targetState] - 重生后的目标状态（仅 type="respawn" 时适用）
  * @property {string} [professionId] - 职业ID（仅 type="profession" 时适用）
  */
 /**
@@ -4034,8 +3922,8 @@ class PlayerManager {
          */
         this.readyCount = 0;
         /**
-         * 当前存活玩家实例数组。
-         * 玩家进入 ALIVE 时加入，离开 ALIVE 时移除，避免每次查询都遍历全表。
+         * 当前可参战的 READY 玩家实例数组。
+         * 仅在游戏进行中维护，避免每次查询都遍历全表。
          * @type {Player[]}
          */
         this.alivePlayerList = [];
@@ -4085,12 +3973,8 @@ class PlayerManager {
                 return this._setPlayerReady(player, payload.isReady ?? false);
             },
             respawn: (player, payload) => {
-                player.respawn(
-                    payload.health ?? 100,
-                    payload.armor ?? 0,
-                    payload.targetState ?? (this.ingame ? PlayerState.ALIVE : PlayerState.PREPARING)
-                );
-                this._syncAlivePlayer(player);
+                player.respawn();
+                this._syncPreparingRespawn(player);
                 return true;
             },
             resetGameStatus: (player) => {
@@ -4190,7 +4074,7 @@ class PlayerManager {
         const pawn = controller.GetPlayerPawn();
         if (!pawn) return;
 
-        player.activate(pawn, this.ingame ? PlayerState.ALIVE : PlayerState.PREPARING);
+        player.updatePawn(pawn);
         this._syncAlivePlayer(player);
     }
 
@@ -4207,7 +4091,7 @@ class PlayerManager {
         this._adapter.broadcast(formatScopedMessage("PlayerManager/handlePlayerDisconnect", `玩家 ${player.entityBridge.getPlayerName()} 离开游戏`));
 
         if (wasReady) {
-            this.readyCount--;
+            this.readyCount = Math.max(0, this.readyCount - 1);
         }
 
         this._removeAlivePlayer(playerSlot);
@@ -4223,7 +4107,7 @@ class PlayerManager {
             wasLobbyState,
         });
 
-        if (wasLobbyState && this.areAllPlayersReady()) {
+        if (!this.ingame && wasLobbyState && this.areAllPlayersReady()) {
             eventBus.emit(event.Player.Out.OnAllPlayersReady, {
                 readyCount: this.readyCount,
                 totalPlayers: this.totalPlayers,
@@ -4243,8 +4127,8 @@ class PlayerManager {
 
         if (player) {
 
-            player.handleReset(pawn, this.ingame ? PlayerState.ALIVE : PlayerState.PREPARING);
-            this._syncAlivePlayer(player);
+            player.updatePawn(pawn);
+            this._syncPreparingRespawn(player);
             if (player.state !== PlayerState.DEAD) {
                 this._handledDeathSlots.delete(player.slot);
             }
@@ -4281,8 +4165,12 @@ class PlayerManager {
             return false;
         }
 
+        const wasReady = player.isReady;
         if (player.state !== PlayerState.DEAD) {
             player.healthCombat.die(null);
+        }
+        if (wasReady) {
+            this.readyCount = Math.max(0, this.readyCount - 1);
         }
 
         this._removeAlivePlayer(slot);
@@ -4367,6 +4255,7 @@ class PlayerManager {
 
         const player = this.players.get(controller.GetPlayerSlot());
         if (!player) return false;
+        if (player.inGame) return false;
 
         return this._setPlayerReady(player, ready);
     }
@@ -4381,7 +4270,9 @@ class PlayerManager {
         if (!player.setReady(ready)) return false;
 
         if (ready) this.readyCount++;
-        else this.readyCount--;
+        else this.readyCount = Math.max(0, this.readyCount - 1);
+
+        this._syncAlivePlayer(player);
 
         const name = player.entityBridge.getPlayerName();
         this._adapter.broadcast(formatScopedMessage(
@@ -4398,7 +4289,7 @@ class PlayerManager {
             totalPlayers: this.totalPlayers,
         });
 
-        if (ready && this.areAllPlayersReady()) {
+        if (ready && !this.ingame && this.areAllPlayersReady()) {
             eventBus.emit(event.Player.Out.OnAllPlayersReady, {
                 readyCount: this.readyCount,
                 totalPlayers: this.totalPlayers,
@@ -4452,6 +4343,7 @@ class PlayerManager {
     handleInput(playerSlot, key) {
         const player = this.players.get(playerSlot);
         if (!player) return false;
+        if (!this.ingame || !player.isReady) return false;
         return player.handleInputKey(key);
     }
 
@@ -4473,10 +4365,11 @@ class PlayerManager {
     }
 
     /**
-     * @returns {Player[]} 返回当前仍在场且未死亡的玩家，不要求当前处于 PLAYING 状态
+     * @returns {Player[]} 返回当前可参战的 READY 玩家
      */
-    getActivePlayers() {
-        return Array.from(this.players.values()).filter((player) => player.state !== PlayerState.DEAD && player.state !== PlayerState.DISCONNECTED);
+    getCombatPlayers() {
+        if (!this.ingame) return [];
+        return this.alivePlayerList;
     }
 
     /**
@@ -4559,11 +4452,12 @@ class PlayerManager {
 
     enterGameStart() {
         this.ingame = true;
-        this.readyCount = 0;
+        this.readyCount = this._countReadyPlayers();
         this._handledDeathSlots.clear();
+        this.alivePlayerList = [];
         for (const [, player] of this.players) {
             if (!player.entityBridge.pawn) continue;
-            player.enterAliveState();
+            player.enterGameStart();
             this._syncAlivePlayer(player);
         }
     }
@@ -4618,11 +4512,34 @@ class PlayerManager {
      * @returns {void}
      */
     _syncAlivePlayer(player) {
-        if (player.isAlive) {
+        if (this.ingame && player.isReady && player.entityBridge.isPawnValid()) {
             this._addAlivePlayer(player);
             return;
         }
         this._removeAlivePlayer(player.slot);
+    }
+
+    /**
+     * 玩家重生后统一进入 PREPARING，需要同步 readyCount 与可参战缓存。
+     * @param {Player} player
+     * @returns {void}
+     */
+    _syncPreparingRespawn(player) {
+        this.readyCount = this._countReadyPlayers();
+        this._syncAlivePlayer(player);
+    }
+
+    /**
+     * @returns {number}
+     */
+    _countReadyPlayers() {
+        let readyCount = 0;
+        for (const player of this.players.values()) {
+            if (player.isReady) {
+                readyCount++;
+            }
+        }
+        return readyCount;
     }
 
     /**
@@ -4651,7 +4568,7 @@ class PlayerManager {
      */
     tick() {
         for (const [slot, player] of this.players) {
-            player.tick();
+            player.tick(this.ingame);
         }
     }
 }
@@ -4943,6 +4860,8 @@ const CHANNEL_PRIORITY = {
  * @property {number} [level]
  * @property {string} [professionId]
  * @property {string} [professionDisplayName]
+ * @property {number} [state]
+ * @property {string} [stateLabel]
  * @property {number} [armor]
  * @property {number} [money]
  * @property {number} [exp]
@@ -5726,6 +5645,11 @@ class HudManager {
                 this._sessions.delete(slot);
             }
         }
+        this.setwaveSummary({
+            currentWave: 0,
+            totalWaves: 0,
+            monstersRemaining: 0
+        });
     }
 
     /**
@@ -6113,6 +6037,10 @@ class HudManager {
         if (this._hasNumber(status.level)) {
             const prof = status.professionDisplayName? status.professionDisplayName : (status.professionId ?? "未知");
             parts.push(`Lv.${status.level} ${prof}`);
+        }
+
+        if (typeof status.stateLabel === "string" && status.stateLabel.length > 0) {
+            parts.push(`状态:${status.stateLabel}`);
         }
 
         if (this._hasNumber(status.health) && this._hasNumber(status.maxHealth)) parts.push(`HP:${status.health}/${status.maxHealth}`);
@@ -8246,7 +8174,7 @@ class PlayerHealingFieldSkill extends SkillTemplate {
     _getParentEntity() {
         const player = this.player;
         const pawn = player?.entityBridge?.pawn;
-        if (!player || this.monster || !player.isAlive || !pawn?.IsValid?.()) {
+        if (!player || this.monster || !player.isReady || !pawn?.IsValid?.()) {
             return null;
         }
         return pawn;
@@ -25307,8 +25235,8 @@ class ProjectileManager {
 }
 
 /**
- * 以后完成
- * infotarget换成固定值
+ * 已知漏洞
+ * 玩家手动复活还是算在游玩人数里面，会导致真正游玩的死完，出生点还剩下玩家，判断为游戏未结束。--待观察
  */
 /**
  * release 版正式入口。
@@ -25370,15 +25298,9 @@ const shopManager = new ShopManager(
         const player = playerManager.getPlayer(slot);
         if (!player || player.entityBridge.pawn !== pawn) return false;
 
-        if (gameManager.gameState === GameState.PREPARE) {
-            return player.state === PlayerState.PREPARING || player.state === PlayerState.READY;
-        }
-
-        if (gameManager.gameState === GameState.PLAYING) {
-            return player.state === PlayerState.ALIVE;
-        }
-
-        return false;
+        const canOpenByGameState = gameManager.gameState === GameState.PREPARE
+            || gameManager.gameState === GameState.PLAYING;
+        return canOpenByGameState && player.isReady;
     });
 const hudManager = new HudManager();
 const skillManager = new SkillManager();
@@ -25394,6 +25316,8 @@ const projectileManager = new ProjectileManager();
 
 /** @type {Set<number>} */
 const ignoredBotSlots = new Set();
+/** @type {{ immediatePending: boolean, delayedPending: boolean, delayedAt: number } | null} */
+let pendingWaveGameStartTeleport = null;
 
 /**
  * @param {import("cs_script/point_script").CSPlayerController | undefined | null} controller
@@ -25419,7 +25343,13 @@ function shouldIgnoreBotPawn(pawn) {
 
 
 sentryManager.setMonsterProvider(() => monsterManager.activeMonsterList);
+
+function clearPendingWaveGameStartTeleport() {
+    pendingWaveGameStartTeleport = null;
+}
+
 function cleanupFinishedMatch() {
+    clearPendingWaveGameStartTeleport();
     shopManager.closeAll();
     hudManager.clearAll();
     waveManager.resetGame();
@@ -25446,24 +25376,93 @@ function cleanupFinishedMatch() {
  */
 function teleportPlayersToNamedPosition(targetName, players) {
     const position = Instance.FindEntityByName(targetName)?.GetAbsOrigin();
-    if (!position) return;
+    if (!position) {
+        Instance.ServerCommand(`say "wc!!!,entity not found: ${targetName}"`);
+        return;
+    }
+
+    const isGameStart = targetName === "game_start";
 
     for (const player of players) {
         player.entityBridge.pawn?.Teleport({
             position,
         });
+        if (isGameStart) {
+            player.setInGame(true);
+        }
     }
 }
 
-function respawnDeadPlayersAndReturnAllToGameStart() {
+/**
+ * @param {number} preparationTime
+ */
+function scheduleWaveGameStartTeleport(preparationTime) {
+    pendingWaveGameStartTeleport = {
+        immediatePending: true,
+        delayedPending: true,
+        delayedAt: Instance.GetGameTime() + Math.max(0, preparationTime),
+    };
+}
+
+/**
+ * @returns {Player[]}
+ */
+function getTrackedGameAreaPlayers() {
+    return [...playerManager.players.values()].filter((player) => player.inGame && player.entityBridge.isPawnValid());
+}
+
+/**
+ * @returns {Player[]}
+ */
+function getReadyLobbyPlayersForGameArea() {
+    return [...playerManager.players.values()].filter((player) => !player.inGame && player.isReady && player.entityBridge.isPawnValid());
+}
+
+/**
+ * @param {Player[]} players
+ */
+function promotePreparingPlayersToReady(players) {
+    for (const player of players) {
+        if (player.state !== PlayerState.PREPARING) continue;
+        if (!player.entityBridge.isPawnValid()) continue;
+
+        playerManager.dispatchReward(player.slot, {
+            type: "ready",
+            isReady: true,
+        });
+    }
+}
+
+function respawnTrackedPlayersForNextWave() {
     for (const player of playerManager.players.values()) {
-        if (player.state !== PlayerState.DEAD) continue;
+        if (!player.inGame||player.state!==PlayerState.DEAD) continue;
+
         playerManager.dispatchReward(player.slot, {
             type: "respawn"
         });
     }
+}
 
-    teleportPlayersToNamedPosition("game_start", playerManager.getActivePlayers());
+/**
+ * @param {number} now
+ */
+function processPendingWaveGameStartTeleport(now) {
+    const pendingTeleport = pendingWaveGameStartTeleport;
+    if (!pendingTeleport) return;
+
+    if (pendingTeleport.immediatePending) {
+        teleportPlayersToNamedPosition("game_start", getTrackedGameAreaPlayers());//传送之前Ingame的玩家
+        pendingTeleport.immediatePending = false;
+    }
+
+    if (pendingTeleport.delayedPending && now <= pendingTeleport.delayedAt) {//传送这一波新进来准备好了的玩家
+        teleportPlayersToNamedPosition("game_start", getReadyLobbyPlayersForGameArea());
+        pendingTeleport.delayedPending = false;
+    }
+    if(pendingTeleport.delayedPending && now > pendingTeleport.delayedAt)pendingTeleport.delayedPending = false;
+    if (!pendingTeleport.immediatePending && !pendingTeleport.delayedPending) {
+        clearPendingWaveGameStartTeleport();
+    }
 }
 
 // ═══════════════════════════════════════════════
@@ -25499,7 +25498,7 @@ eventBus.on(event.Wave.Out.OnWaveEnd, (/** @type {import("./wave/wave_const").On
 
     // 推进下一波或胜利
     if (waveManager.hasNextWave()) {
-        respawnDeadPlayersAndReturnAllToGameStart();
+        respawnTrackedPlayersForNextWave();
         /** @type {import("./wave/wave_const").WaveStartRequest} */
         const payload = { waveIndex: waveNumber + 1, playerCount: playerManager.totalPlayers, result: false };
         eventBus.emit(event.Wave.In.WaveStartRequest, payload);
@@ -25509,6 +25508,7 @@ eventBus.on(event.Wave.Out.OnWaveEnd, (/** @type {import("./wave/wave_const").On
 });
 
 eventBus.on(event.Wave.Out.OnWaveStart, (/** @type {import("./wave/wave_const").OnWaveStart} */ payload) => {
+    clearPendingWaveGameStartTeleport();
     const { waveConfig } = payload;
     if (waveConfig) {
         monsterManager.spawnWave(waveConfig);
@@ -25524,7 +25524,6 @@ eventBus.on(event.Game.Out.OnEnterPreparePhase, (payload) => {
 
 eventBus.on(event.Game.Out.OnStartGame, (payload) => {
     playerManager.enterGameStart();
-    teleportPlayersToNamedPosition("game_start", playerManager.getActivePlayers());
     /** @type {import("./wave/wave_const").WaveStartRequest} */
     const waveStartPayload = { waveIndex: 1, playerCount: playerManager.totalPlayers, result: false };
     eventBus.emit(event.Wave.In.WaveStartRequest, waveStartPayload);
@@ -25535,11 +25534,15 @@ eventBus.on(event.Game.Out.OnGameLost, (payload) => {
 });
 
 eventBus.on(event.Game.Out.OnGameWin, (payload) => {
-    //传送到终点房
-    playerManager.dispatchReward(null,{
-        type:"respawn"
-    });
-    teleportPlayersToNamedPosition("game_complete", playerManager.getActivePlayers());
+    for (const player of playerManager.players.values()) {
+        if (player.state !== PlayerState.DEAD) continue;
+
+        playerManager.dispatchReward(player.slot, {
+            type: "respawn"
+        });
+    }
+
+    teleportPlayersToNamedPosition("game_complete", [...playerManager.players.values()]);
     cleanupFinishedMatch();
 });
 
@@ -25631,6 +25634,7 @@ eventBus.on(event.Wave.Out.OnWavePreparing, (/** @type {import("./wave/wave_cons
         currentWave: payload.waveIndex,
         prepareTime: payload.preparationTime
     });
+    scheduleWaveGameStartTeleport(payload.preparationTime ?? 0);
 });
 // --- HUD: 转发回合/怪物变化为 HUD 状态更新请求（轻量、可合并）
 eventBus.on(event.Wave.Out.OnWaveStart, (/** @type {import("./wave/wave_const").OnWaveStart} */ payload) => {
@@ -25696,6 +25700,10 @@ eventBus.on(event.Player.Out.OnPlayerDeath, (payload) => {
 });
 
 eventBus.on(event.Player.Out.OnPlayerRespawn, (payload) => {
+    if (payload.player.inGame) {
+        teleportPlayersToNamedPosition("game_start", [payload.player]);
+        promotePreparingPlayersToReady([payload.player]);
+    }
     gameManager.onPlayerRespawn();
 });
 
@@ -25717,6 +25725,8 @@ eventBus.on(event.Player.Out.OnPlayerStatusChanged, (/** @type {import("./player
     if (hasSummaryField("level")) update.level = summary.level;
     if (hasSummaryField("professionId")) update.professionId = summary.professionId;
     if (hasSummaryField("professionDisplayName")) update.professionDisplayName = summary.professionDisplayName;
+    if (hasSummaryField("state")) update.state = summary.state;
+    if (hasSummaryField("stateLabel")) update.stateLabel = summary.stateLabel;
     if (hasSummaryField("health")) update.health = summary.health;
     if (hasSummaryField("maxHealth")) update.maxHealth = summary.maxHealth;
     if (hasSummaryField("armor")) update.armor = summary.armor;
@@ -25918,7 +25928,9 @@ Instance.SetThink(() => {
     const dt = Math.max(0, now - _lastTime);
     _lastTime = now;
     const isGamePlaying = gameManager.checkGameState();
-    const alivePlayers = playerManager.alivePlayerList;//游戏中的存活玩家
+    const combatPlayers = playerManager.alivePlayerList;//游戏中的 READY 玩家
+
+    processPendingWaveGameStartTeleport(now);
     
     // ── 5.1 输入 / 玩家 / 波次 / Buff ──
     inputManager.tick();
@@ -25927,7 +25939,7 @@ Instance.SetThink(() => {
         waveManager.tick();
     }
     if (isGamePlaying) {
-        monsterManager.tick(alivePlayers);
+        monsterManager.tick(combatPlayers);
     }
     if (isGamePlaying) {
         skillManager.tick();
@@ -25937,11 +25949,11 @@ Instance.SetThink(() => {
         monsterManager.syncMovementStates(movementManager.getAllStates());
 
         projectileManager.tick(now, dt, {
-            players: alivePlayers,
+            players: combatPlayers,
             monsters: monsterManager.activeMonsterList,
         });
         areaEffectManager.tick(now, {
-            players: alivePlayers,
+            players: combatPlayers,
             monsters: monsterManager.activeMonsterList,
         });
         particleManager.tick(now);

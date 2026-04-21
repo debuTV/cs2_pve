@@ -204,16 +204,6 @@ export class PlayerStats {
     }
 
     /**
-     * 重置当前战斗资源。
-     * @param {number} [health] 要设置的生命值，默认回满到当前生命上限。
-     * @param {number} [armor] 要设置的护甲值，默认清零。
-     * @returns {void}
-     */
-    resetCombatResources(health, armor) {
-        this._setCombatResources(health ?? this.maxHealth, armor ?? 0);
-    }
-
-    /**
      * 设置当前生命值，并约束到合法区间。
      * @param {number} value 目标生命值。
      * @returns {void}

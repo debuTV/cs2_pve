@@ -23,7 +23,7 @@ export const WaveState = {
     COMPLETED: 'COMPLETED'
 };
 
-export const MAX_ALIVE_MONSTERS = 100;
+export const MAX_ALIVE_MONSTERS = 300;
 
 /**
  * @typedef {object} PlayerCountScalePoint
@@ -155,22 +155,21 @@ export const wavesConfig=[
     //    totalMonsters: 5,
     //    moneyReward: 750,
     //    expReward: 60,
-    //    spawnInterval: 0.16,
-    //    preparationTime: 5,
-    //    aliveMonster: 5,
+    //    spawnInterval: 0.01,
+    //    preparationTime: 1,
+    //    aliveMonster: 1,
     //    monster_spawn_points_name:["monster_spawnpoint"],
     //    broadcastmessage:[{message:"第1波即将开始，准备迎敌。",delay:15}],
     //    monsterTypes:[
-    //        //MonsterType.headcrab_classic,
+    //        MonsterType.headcrab_classic,
     //        //MonsterType.headcrab_armored,
     //        //MonsterType.headcrab_black,
     //        //MonsterType.headcrab,
     //        //MonsterType.zombie_classic,
     //        //MonsterType.antlion,
     //        //MonsterType.zombie_fast,
-//
     //        //MonsterType.zombie_poison,
-//
+    //        //
     //        //MonsterType.headcrab_reviver,
     //        //MonsterType.antlion_worker,
     //    ]
@@ -181,10 +180,10 @@ export const wavesConfig=[
         moneyReward: 750,
         expReward: 60,
         spawnInterval: 0.16,
-        preparationTime: 1,                  //记住要和广播消息的 delay 匹配
+        preparationTime: 15,                  //第一波可以快点
         aliveMonster: 6,
         monster_spawn_points_name:["monster_spawnpoint"],
-        broadcastmessage:[{message:"第1波",delay:30}],
+        broadcastmessage:[{message:"第1波",delay:15}],
         monsterTypes:[
             MonsterType.zombie_classic,
             MonsterType.headcrab_classic,

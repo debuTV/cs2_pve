@@ -83,7 +83,7 @@ export class PlayerHealingFieldSkill extends SkillTemplate {
     _getParentEntity() {
         const player = this.player;
         const pawn = player?.entityBridge?.pawn;
-        if (!player || this.monster || !player.isAlive || !pawn?.IsValid?.()) {
+        if (!player || this.monster || !player.isReady || !pawn?.IsValid?.()) {
             return null;
         }
         return pawn;

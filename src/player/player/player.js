@@ -9,7 +9,7 @@ import { PlayerStats } from "./components/player_stats";
 import { PlayerHealthCombat } from "./components/health_combat";
 import { PlayerLifecycle } from "./components/lifecycle";
 import { CSPlayerPawn, Instance } from "cs_script/point_script";
-import { DEFAULT_PLAYER_PROFESSION, getPlayerProfessionConfig, PlayerState } from "../player_const";
+import { DEFAULT_PLAYER_PROFESSION, getPlayerProfessionConfig, getPlayerStateLabel, PlayerState } from "../player_const";
 
 /**
  * 单玩家聚合根。
@@ -40,6 +40,8 @@ export class Player {
         this.slot = slot;
         /**@type {import("cs_script/point_script").Vector} */
         this.pos={x:0,y:0,z:0};
+        /** @type {boolean} 玩家在当前对局中是否进入过 game_start 游戏区域 */
+        this.inGame = false;
         /** @type {number} 玩家当前状态，取值见 {@link PlayerState} */
         this.state = PlayerState.DISCONNECTED;
 
@@ -84,27 +86,20 @@ export class Player {
     }
 
     /**
-     * 绑定 Pawn，进入可游戏状态。
-     * @param {import("cs_script/point_script").CSPlayerPawn} pawn 玩家 Pawn 实体
-     * @param {number} targetState 激活后要进入的目标状态
+     * 绑定 Pawn，进入可游戏状态,可以复活。
+     * @param {import("cs_script/point_script").CSPlayerPawn|undefined|null} [pawn] 玩家 Pawn 实体
      */
-    activate(pawn, targetState) {
-        this.lifecycle.activate(pawn, targetState);
+    updatePawn(pawn) {
+        this.lifecycle.activate(pawn);
     }
-
-    /**
-     * 重置处理（重生/换队），更新 Pawn 引用并恢复状态。
-     * @param {import("cs_script/point_script").CSPlayerPawn} newPawn 新的 Pawn 实体
-     * @param {number} respawnState 重生后要进入的目标状态
-     */
-    handleReset(newPawn, respawnState) {
-        this.lifecycle.handleReset(newPawn, respawnState);
+    respawn() {
+        this.lifecycle.respawn();
     }
-
     /**
      * 断开连接，清理资源。
      */
     disconnect() {
+        this.inGame = false;
         this.lifecycle.disconnect();
         for (const unsubscribe of this._buffUnsubscribers) {
             unsubscribe();
@@ -116,8 +111,18 @@ export class Player {
      * 重置局内状态（每局开始时调用）。
      */
     resetGameStatus() {
+        this.inGame = false;
         this.clearBuffs();
         this.lifecycle.resetGameStatus();
+    }
+
+    /**
+     * @param {boolean} inGame
+     * @returns {boolean}
+     */
+    setInGame(inGame) {
+        this.inGame = !!inGame;
+        return this.inGame;
     }
 
     // ——— 战斗入口（委托给 HealthCombat） ———
@@ -161,18 +166,8 @@ export class Player {
         return this.healthCombat.giveArmor(amount);
     }
 
-    /**
-     * 复活玩家，可指定初始生命和护甲。
-     * @param {number} [health] 复活后生命值
-     * @param {number} [armor] 复活后护甲值
-     * @param {number} [targetState] 复活后要进入的目标状态
-     */
-    respawn(health, armor, targetState = PlayerState.PREPARING) {
-        this.lifecycle.respawn(health, armor, targetState);
-    }
-
-    enterAliveState() {
-        this.lifecycle.enterAliveState();
+    enterGameStart() {
+        this.lifecycle.enterGameStart();
     }
 
     // ——— 成长入口（委托给 Stats） ———
@@ -341,7 +336,7 @@ export class Player {
      * @returns {boolean}
      */
     handleInputKey(key) {
-        if (this.state !== PlayerState.ALIVE) return false;
+        if (!this.isReady) return false;
         return this.emitRuntimeEvent(PlayerRuntimeEvents.Input, { key });
     }
 
@@ -409,18 +404,12 @@ export class Player {
 
     /**
      * @param {string} professionId
-     * @param {{ forceRecreate?: boolean; allowMissingPrevious?: boolean }} [options]
      * @returns {boolean}
      */
-    setProfession(professionId, options = {}) {
+    setProfession(professionId) {
         const config = getPlayerProfessionConfig(professionId);
         if (!config) return false;
-
-        const forceRecreate = options.forceRecreate ?? false;
-        const allowMissingPrevious = options.allowMissingPrevious ?? false;
-        if (!forceRecreate && this.professionId === professionId && this.skillId != null) {
-            return true;
-        }
+        if (this.professionId === professionId && this.skillId != null) return true;
 
         let nextSkillId = null;
         if (config.skillTypeId) {
@@ -431,7 +420,7 @@ export class Player {
         const previousSkillId = this.skillId;
         if (previousSkillId != null) {
             const removed = this._removeSkillById(previousSkillId);
-            if (!removed && !allowMissingPrevious) {
+            if (!removed) {
                 if (nextSkillId != null) {
                     this._removeSkillById(nextSkillId);
                 }
@@ -450,26 +439,6 @@ export class Player {
         });
 
         return true;
-    }
-
-    /**
-     * @returns {boolean}
-     */
-    ensureProfessionSkillBound() {
-        return this.setProfession(this.professionId ?? DEFAULT_PLAYER_PROFESSION, {
-            forceRecreate: this.skillId == null,
-            allowMissingPrevious: true,
-        });
-    }
-
-    /**
-     * @returns {boolean}
-     */
-    rebindProfessionSkill() {
-        return this.setProfession(this.professionId ?? DEFAULT_PLAYER_PROFESSION, {
-            forceRecreate: true,
-            allowMissingPrevious: true,
-        });
     }
 
     /**
@@ -534,16 +503,6 @@ export class Player {
         return this.state === PlayerState.READY;
     }
 
-    /** @returns {boolean} */
-    get isAlive() {
-        return this.state === PlayerState.ALIVE;
-    }
-
-    /** @returns {boolean} */
-    get isInGame() {
-        return this.state >= PlayerState.PREPARING;
-    }
-
     /**
      * 设置玩家准备状态。
      * @param {boolean} ready 是否准备
@@ -568,9 +527,14 @@ export class Player {
      * @returns {boolean}
      */
     applyStateTransition(nextState) {
+        if (!Object.values(PlayerState).includes(nextState)) return false;
         if (this.state === nextState) return true;
         const oldState = this.state;
         this.state = nextState;
+        this.emitStatusChanged({
+            state: this.state,
+            stateLabel: getPlayerStateLabel(this.state),
+        });
         this.emitRuntimeEvent(PlayerRuntimeEvents.StateChange, { oldState, nextState });
         return true;
     }
@@ -606,14 +570,15 @@ export class Player {
     // ——— Tick ———
     /**
      * 每帧调度入口。
+     * @param {boolean} [gameActive=false]
      */
-    tick() {
+    tick(gameActive = false) {
         const pawn = this.entityBridge.pawn;
         if (pawn?.IsValid()) {
             this.pos = pawn.GetAbsOrigin?.();
         }
 
-        if (this.state !== PlayerState.ALIVE) return;
+        if (!gameActive || !this.isReady) return;
         this.emitRuntimeEvent(PlayerRuntimeEvents.Tick, {});
     }
 
@@ -630,6 +595,8 @@ export class Player {
             pawn: this.entityBridge.pawn,
             professionId: this.professionId,
             professionDisplayName: professionConfig?.displayName ?? this.professionId,
+            state: this.state,
+            stateLabel: getPlayerStateLabel(this.state),
         };
     }
 }

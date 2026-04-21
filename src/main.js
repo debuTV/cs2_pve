@@ -1,6 +1,6 @@
 /**
- * 以后完成
- * infotarget换成固定值
+ * 已知漏洞
+ * 玩家手动复活还是算在游玩人数里面，会导致真正游玩的死完，出生点还剩下玩家，判断为游戏未结束。--待观察
  */
 /**
  * release 版正式入口。
@@ -87,15 +87,9 @@ const shopManager = new ShopManager(
         const player = playerManager.getPlayer(slot);
         if (!player || player.entityBridge.pawn !== pawn) return false;
 
-        if (gameManager.gameState === GameState.PREPARE) {
-            return player.state === PlayerState.PREPARING || player.state === PlayerState.READY;
-        }
-
-        if (gameManager.gameState === GameState.PLAYING) {
-            return player.state === PlayerState.ALIVE;
-        }
-
-        return false;
+        const canOpenByGameState = gameManager.gameState === GameState.PREPARE
+            || gameManager.gameState === GameState.PLAYING;
+        return canOpenByGameState && player.isReady;
     });
 const hudManager = new HudManager();
 const skillManager = new SkillManager();
@@ -111,6 +105,8 @@ const projectileManager = new ProjectileManager();
 
 /** @type {Set<number>} */
 const ignoredBotSlots = new Set();
+/** @type {{ immediatePending: boolean, delayedPending: boolean, delayedAt: number } | null} */
+let pendingWaveGameStartTeleport = null;
 
 /**
  * @param {import("cs_script/point_script").CSPlayerController | undefined | null} controller
@@ -136,7 +132,13 @@ function shouldIgnoreBotPawn(pawn) {
 
 
 sentryManager.setMonsterProvider(() => monsterManager.activeMonsterList);
+
+function clearPendingWaveGameStartTeleport() {
+    pendingWaveGameStartTeleport = null;
+}
+
 function cleanupFinishedMatch() {
+    clearPendingWaveGameStartTeleport();
     shopManager.closeAll();
     hudManager.clearAll();
     waveManager.resetGame();
@@ -168,22 +170,88 @@ function teleportPlayersToNamedPosition(targetName, players) {
         return;
     }
 
+    const isGameStart = targetName === "game_start";
+
     for (const player of players) {
         player.entityBridge.pawn?.Teleport({
             position,
         });
+        if (isGameStart) {
+            player.setInGame(true);
+        }
     }
 }
 
-function respawnDeadPlayersAndReturnAllToGameStart() {
+/**
+ * @param {number} preparationTime
+ */
+function scheduleWaveGameStartTeleport(preparationTime) {
+    pendingWaveGameStartTeleport = {
+        immediatePending: true,
+        delayedPending: true,
+        delayedAt: Instance.GetGameTime() + Math.max(0, preparationTime),
+    };
+}
+
+/**
+ * @returns {Player[]}
+ */
+function getTrackedGameAreaPlayers() {
+    return [...playerManager.players.values()].filter((player) => player.inGame && player.entityBridge.isPawnValid());
+}
+
+/**
+ * @returns {Player[]}
+ */
+function getReadyLobbyPlayersForGameArea() {
+    return [...playerManager.players.values()].filter((player) => !player.inGame && player.isReady && player.entityBridge.isPawnValid());
+}
+
+/**
+ * @param {Player[]} players
+ */
+function promotePreparingPlayersToReady(players) {
+    for (const player of players) {
+        if (player.state !== PlayerState.PREPARING) continue;
+        if (!player.entityBridge.isPawnValid()) continue;
+
+        playerManager.dispatchReward(player.slot, {
+            type: "ready",
+            isReady: true,
+        });
+    }
+}
+
+function respawnTrackedPlayersForNextWave() {
     for (const player of playerManager.players.values()) {
-        if (player.state !== PlayerState.DEAD) continue;
+        if (!player.inGame||player.state!==PlayerState.DEAD) continue;
+
         playerManager.dispatchReward(player.slot, {
             type: "respawn"
         });
     }
+}
 
-    teleportPlayersToNamedPosition("game_start", playerManager.getActivePlayers());
+/**
+ * @param {number} now
+ */
+function processPendingWaveGameStartTeleport(now) {
+    const pendingTeleport = pendingWaveGameStartTeleport;
+    if (!pendingTeleport) return;
+
+    if (pendingTeleport.immediatePending) {
+        teleportPlayersToNamedPosition("game_start", getTrackedGameAreaPlayers());//传送之前Ingame的玩家
+        pendingTeleport.immediatePending = false;
+    }
+
+    if (pendingTeleport.delayedPending && now <= pendingTeleport.delayedAt) {//传送这一波新进来准备好了的玩家
+        teleportPlayersToNamedPosition("game_start", getReadyLobbyPlayersForGameArea());
+        pendingTeleport.delayedPending = false;
+    }
+    if(pendingTeleport.delayedPending && now > pendingTeleport.delayedAt)pendingTeleport.delayedPending = false;
+    if (!pendingTeleport.immediatePending && !pendingTeleport.delayedPending) {
+        clearPendingWaveGameStartTeleport();
+    }
 }
 
 // ═══════════════════════════════════════════════
@@ -219,7 +287,7 @@ eventBus.on(event.Wave.Out.OnWaveEnd, (/** @type {import("./wave/wave_const").On
 
     // 推进下一波或胜利
     if (waveManager.hasNextWave()) {
-        respawnDeadPlayersAndReturnAllToGameStart();
+        respawnTrackedPlayersForNextWave();
         /** @type {import("./wave/wave_const").WaveStartRequest} */
         const payload = { waveIndex: waveNumber + 1, playerCount: playerManager.totalPlayers, result: false };
         eventBus.emit(event.Wave.In.WaveStartRequest, payload);
@@ -229,6 +297,7 @@ eventBus.on(event.Wave.Out.OnWaveEnd, (/** @type {import("./wave/wave_const").On
 });
 
 eventBus.on(event.Wave.Out.OnWaveStart, (/** @type {import("./wave/wave_const").OnWaveStart} */ payload) => {
+    clearPendingWaveGameStartTeleport();
     const { waveConfig } = payload;
     if (waveConfig) {
         monsterManager.spawnWave(waveConfig);
@@ -246,7 +315,6 @@ eventBus.on(event.Game.Out.OnEnterPreparePhase, (payload) => {
 eventBus.on(event.Game.Out.OnStartGame, (payload) => {
     void payload;
     playerManager.enterGameStart();
-    teleportPlayersToNamedPosition("game_start", playerManager.getActivePlayers());
     /** @type {import("./wave/wave_const").WaveStartRequest} */
     const waveStartPayload = { waveIndex: 1, playerCount: playerManager.totalPlayers, result: false };
     eventBus.emit(event.Wave.In.WaveStartRequest, waveStartPayload);
@@ -257,11 +325,15 @@ eventBus.on(event.Game.Out.OnGameLost, (payload) => {
 });
 
 eventBus.on(event.Game.Out.OnGameWin, (payload) => {
-    //传送到终点房
-    playerManager.dispatchReward(null,{
-        type:"respawn"
-    });
-    teleportPlayersToNamedPosition("game_complete", playerManager.getActivePlayers());
+    for (const player of playerManager.players.values()) {
+        if (player.state !== PlayerState.DEAD) continue;
+
+        playerManager.dispatchReward(player.slot, {
+            type: "respawn"
+        });
+    }
+
+    teleportPlayersToNamedPosition("game_complete", [...playerManager.players.values()]);
     cleanupFinishedMatch();
 });
 
@@ -353,6 +425,7 @@ eventBus.on(event.Wave.Out.OnWavePreparing, (/** @type {import("./wave/wave_cons
         currentWave: payload.waveIndex,
         prepareTime: payload.preparationTime
     })
+    scheduleWaveGameStartTeleport(payload.preparationTime ?? 0);
 });
 // --- HUD: 转发回合/怪物变化为 HUD 状态更新请求（轻量、可合并）
 eventBus.on(event.Wave.Out.OnWaveStart, (/** @type {import("./wave/wave_const").OnWaveStart} */ payload) => {
@@ -419,6 +492,11 @@ eventBus.on(event.Player.Out.OnPlayerDeath, (payload) => {
 });
 
 eventBus.on(event.Player.Out.OnPlayerRespawn, (payload) => {
+    if (payload.player.inGame) {
+        teleportPlayersToNamedPosition("game_start", [payload.player]);
+        promotePreparingPlayersToReady([payload.player]);
+    }
+
     void payload;
     gameManager.onPlayerRespawn();
 });
@@ -441,6 +519,8 @@ eventBus.on(event.Player.Out.OnPlayerStatusChanged, (/** @type {import("./player
     if (hasSummaryField("level")) update.level = summary.level;
     if (hasSummaryField("professionId")) update.professionId = summary.professionId;
     if (hasSummaryField("professionDisplayName")) update.professionDisplayName = summary.professionDisplayName;
+    if (hasSummaryField("state")) update.state = summary.state;
+    if (hasSummaryField("stateLabel")) update.stateLabel = summary.stateLabel;
     if (hasSummaryField("health")) update.health = summary.health;
     if (hasSummaryField("maxHealth")) update.maxHealth = summary.maxHealth;
     if (hasSummaryField("armor")) update.armor = summary.armor;
@@ -642,7 +722,9 @@ Instance.SetThink(() => {
     const dt = Math.max(0, now - _lastTime);
     _lastTime = now;
     const isGamePlaying = gameManager.checkGameState();
-    const alivePlayers = playerManager.alivePlayerList;//游戏中的存活玩家
+    const combatPlayers = playerManager.alivePlayerList;//游戏中的 READY 玩家
+
+    processPendingWaveGameStartTeleport(now);
     
     // ── 5.1 输入 / 玩家 / 波次 / Buff ──
     inputManager.tick();
@@ -651,7 +733,7 @@ Instance.SetThink(() => {
         waveManager.tick();
     }
     if (isGamePlaying) {
-        monsterManager.tick(alivePlayers);
+        monsterManager.tick(combatPlayers);
     }
     if (isGamePlaying) {
         skillManager.tick();
@@ -661,11 +743,11 @@ Instance.SetThink(() => {
         monsterManager.syncMovementStates(movementManager.getAllStates());
 
         projectileManager.tick(now, dt, {
-            players: alivePlayers,
+            players: combatPlayers,
             monsters: monsterManager.activeMonsterList,
         });
         areaEffectManager.tick(now, {
-            players: alivePlayers,
+            players: combatPlayers,
             monsters: monsterManager.activeMonsterList,
         });
         particleManager.tick(now);

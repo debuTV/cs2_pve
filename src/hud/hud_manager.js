@@ -68,6 +68,11 @@ export class HudManager {
                 this._sessions.delete(slot);
             }
         }
+        this.setwaveSummary({
+            currentWave: 0,
+            totalWaves: 0,
+            monstersRemaining: 0
+        });
     }
 
     /**
@@ -455,6 +460,10 @@ export class HudManager {
         if (this._hasNumber(status.level)) {
             const prof = status.professionDisplayName? status.professionDisplayName : (status.professionId ?? "未知");
             parts.push(`Lv.${status.level} ${prof}`);
+        }
+
+        if (typeof status.stateLabel === "string" && status.stateLabel.length > 0) {
+            parts.push(`状态:${status.stateLabel}`);
         }
 
         if (this._hasNumber(status.health) && this._hasNumber(status.maxHealth)) parts.push(`HP:${status.health}/${status.maxHealth}`);
